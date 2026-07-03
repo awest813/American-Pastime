@@ -1,10 +1,10 @@
 export const templateConfig = {
   features: {
-    physics: true,
-    demoModel: true,
-    axesViewer: import.meta.env.DEV,
+    physics: true, // Havok, used for cosmetic juice (home-run ball launch)
+    demoModel: false,
+    axesViewer: false,
     pipeline: true,
-    gui: true,
+    gui: false, // playground demo GUI; Cardball builds its own fullscreen UI
   },
   demoModel: {
     animation: {

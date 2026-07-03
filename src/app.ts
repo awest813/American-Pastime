@@ -7,7 +7,7 @@ import "@babylonjs/core/Physics/physicsEngineComponent";
 import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
 
 import { templateConfig } from "./config/template-config";
-import MainScene from "./playground/main-scene";
+import { GameScene } from "./scenes/GameScene";
 import { getSceneRuntimeState } from "./playground/scene-runtime";
 
 class App {
@@ -35,7 +35,7 @@ class App {
       await this._setPhysics();
     }
 
-    new MainScene(this.scene, this.canvas);
+    await GameScene.create(this.scene, this.canvas);
 
     this._config();
     this._renderer();
