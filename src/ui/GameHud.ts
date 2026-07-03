@@ -3,6 +3,7 @@ import type { Button } from "@babylonjs/gui/2D";
 import type { RunSystem } from "../systems/RunSystem";
 import type { ScoreResult } from "../systems/types";
 import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeText, topLeft, topRight } from "./kit";
+import { Tweens } from "../utils/Tweens";
 
 export interface HudCallbacks {
   onPlay: () => void;
@@ -261,19 +262,20 @@ export class GameHud {
     this.popupText.alpha = 1;
     return new Promise((resolve) => {
       const start = performance.now();
+      const hold = holdMs / Tweens.timeScale;
       const tick = () => {
         if (generation !== this.popupGeneration) {
           resolve();
           return;
         }
         const elapsed = performance.now() - start;
-        const grow = Math.min(1, elapsed / 160);
+        const grow = Math.min(1, (elapsed / 160) * Tweens.timeScale);
         this.popupText.scaleX = 0.6 + grow * 0.4;
         this.popupText.scaleY = 0.6 + grow * 0.4;
-        if (elapsed > holdMs) {
-          this.popupText.alpha = Math.max(0, 1 - (elapsed - holdMs) / 250);
+        if (elapsed > hold) {
+          this.popupText.alpha = Math.max(0, 1 - ((elapsed - hold) / 250) * Tweens.timeScale);
         }
-        if (elapsed > holdMs + 260) {
+        if (elapsed > hold + 260 / Tweens.timeScale) {
           this.popupText.isVisible = false;
           resolve();
         } else {

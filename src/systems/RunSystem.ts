@@ -19,7 +19,7 @@ export const RULES = {
   startingCash: 4,
   rewardBase: 3,
   firstTarget: 15,
-  targetGrowth: 1.35,
+  targetGrowth: 1.37, // soak-tuned: optimal play wins ~40%, weak builds die around inning 8
   finalInning: 9,
   maxEquipment: 5,
   bossEvery: 3, // innings 3, 6, 9 are boss innings

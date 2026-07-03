@@ -148,8 +148,12 @@ export class GameScene {
     this.bindHotkeys();
 
     if (import.meta.env.DEV) {
-      // Dev sugar: poke the game from the console (window.__cardball).
+      // Dev sugar: poke the game from the console (window.__cardball);
+      // __cardballSetSpeed(8) fast-forwards all animations for soak tests.
       (window as unknown as Record<string, unknown>).__cardball = this;
+      (window as unknown as Record<string, unknown>).__cardballSetSpeed = (s: number) => {
+        Tweens.timeScale = s;
+      };
     }
   }
 

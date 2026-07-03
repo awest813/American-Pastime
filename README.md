@@ -32,7 +32,7 @@ npm run dev        # opens on http://localhost:8088
 | Hand size | 8 |
 | Cards per play | up to 5 |
 | Plays / discards per inning | 4 / 3 |
-| First target, growth | 15 runs, ×1.35 per inning |
+| First target, growth | 15 runs, ×1.37 per inning |
 | Deck | 30 player cards, 6 fictional teams |
 | Starting cash | $4 |
 

@@ -33,6 +33,10 @@ export class Effects {
     ps.particleTexture = this.dot;
     ps.emitter = emitter as Vector3;
     ps.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    // disposeOnStop calls dispose() with disposeTexture defaulting to TRUE, which
+    // would destroy the shared dot texture after the first burst. Pin it to false.
+    const baseDispose = ps.dispose.bind(ps);
+    ps.dispose = (() => baseDispose(false)) as typeof ps.dispose;
     ps.disposeOnStop = true;
     configure(ps);
     ps.start();

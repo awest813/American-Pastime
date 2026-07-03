@@ -15,13 +15,17 @@ export const easeOutBack: Ease = (t) => {
  * Enough juice for card dealing/playing without pulling in an animation library.
  */
 export class Tweens {
+  /** Global animation speed multiplier — dev sugar for fast soak-testing (1 = normal). */
+  static timeScale = 1;
+
   constructor(private scene: Scene) {}
 
   animate(durationMs: number, onUpdate: (t: number) => void, ease: Ease = easeOutCubic): Promise<void> {
     return new Promise((resolve) => {
       const start = performance.now();
+      const duration = durationMs / Tweens.timeScale;
       const observer = this.scene.onBeforeRenderObservable.add(() => {
-        const raw = Math.min(1, (performance.now() - start) / durationMs);
+        const raw = Math.min(1, (performance.now() - start) / duration);
         onUpdate(ease(raw));
         if (raw >= 1) {
           this.scene.onBeforeRenderObservable.remove(observer);
@@ -46,6 +50,6 @@ export class Tweens {
   }
 
   delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms / Tweens.timeScale));
   }
 }
