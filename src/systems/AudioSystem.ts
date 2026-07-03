@@ -8,7 +8,8 @@ export type Stinger =
   | "homer"
   | "win"
   | "lose"
-  | "buy";
+  | "buy"
+  | "boss";
 
 /**
  * All-synthesized WebAudio stingers — no audio assets to load.
@@ -91,6 +92,13 @@ export class AudioSystem {
       case "buy":
         this.tone(659.25, t, 0.08, { type: "square", gain: 0.14 });
         this.tone(987.77, t + 0.09, 0.16, { type: "square", gain: 0.14 });
+        break;
+      case "boss":
+        // Ominous walk-out music: low tritone stabs
+        this.tone(110, t, 0.35, { type: "sawtooth", gain: 0.18 });
+        this.tone(155.56, t + 0.18, 0.35, { type: "sawtooth", gain: 0.18 });
+        this.tone(110, t + 0.38, 0.6, { type: "sawtooth", gain: 0.2, slideTo: 82 });
+        this.noise(t + 0.38, 0.5, { filter: 500, gain: 0.1, attack: 0.15 });
         break;
     }
   }

@@ -1,0 +1,8 @@
+[
+  { "id": "closer", "name": "The Closer", "description": "Your final play scores half unless it lands a Power Swing." },
+  { "id": "junkballer", "name": "The Junkballer", "description": "The first combo of every play is ignored." },
+  { "id": "ace", "name": "The Ace", "description": "Plays that use a Power 7+ card cost 2 plays." },
+  { "id": "lefty_specialist", "name": "The Lefty Specialist", "description": "Left-handed batters lose 3 Contact." },
+  { "id": "groundball_goblin", "name": "The Groundball Goblin", "description": "Speed is halved, but half of total Defense is added to base." },
+  { "id": "umpire", "name": "The Umpire", "description": "One position is getting rung up all inning — those cards score nothing." }
+]

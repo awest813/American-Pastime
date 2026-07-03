@@ -46,6 +46,12 @@ export interface PitchCard {
   special?: string;
 }
 
+export interface BossCard {
+  id: string;
+  name: string;
+  description: string;
+}
+
 export interface ComboMeta {
   id: string;
   name: string;
@@ -73,6 +79,8 @@ export interface ScoreResult {
   multiplier: number;
   difficulty: number;
   runs: number;
+  /** Plays consumed by committing this hand (2 vs The Ace with a big bat). */
+  playCost: number;
   combos: DetectedCombo[];
   lines: ScoreLine[];
 }

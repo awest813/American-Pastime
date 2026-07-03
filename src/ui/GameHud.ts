@@ -20,6 +20,9 @@ const truncate = (text: string, max: number): string => (text.length > max ? `${
 export class GameHud {
   private root: Rectangle;
   private pitchText: TextBlock;
+  private bossPanel: Rectangle;
+  private bossText: TextBlock;
+  private gearPanel: Rectangle;
   private equipmentText: TextBlock;
   private statusLine: TextBlock;
   private previewPanel: Rectangle;
@@ -55,12 +58,30 @@ export class GameHud {
     this.pitchText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     pitchPanel.addControl(this.pitchText);
 
-    // Stadium + equipment, under the pitch card
+    // Boss pitcher rule, styled like a warning card (only on boss innings)
+    this.bossPanel = makePanel("300px", "110px");
+    topLeft(this.bossPanel);
+    this.bossPanel.left = "14px";
+    this.bossPanel.top = "158px";
+    this.bossPanel.background = "rgba(52, 14, 14, 0.92)";
+    this.bossPanel.color = "#8c2f39";
+    this.bossPanel.isVisible = false;
+    this.root.addControl(this.bossPanel);
+    this.bossText = makeText("", 16, UI.red);
+    this.bossText.textWrapping = true;
+    this.bossText.resizeToFit = false;
+    this.bossText.width = "280px";
+    this.bossText.height = "98px";
+    this.bossText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    this.bossPanel.addControl(this.bossText);
+
+    // Stadium + equipment, under the pitch card (drops below the boss card when one is up)
     const gearPanel = makePanel("300px", "170px");
     topLeft(gearPanel);
     gearPanel.left = "14px";
     gearPanel.top = "158px";
     this.root.addControl(gearPanel);
+    this.gearPanel = gearPanel;
     this.equipmentText = makeText("", 16);
     this.equipmentText.textWrapping = true;
     this.equipmentText.resizeToFit = false;
@@ -158,6 +179,17 @@ export class GameHud {
   update(run: RunSystem, deckCount: number, selectionCount: number): void {
     const hand = run.pitch.hand === "L" ? "LHP" : "RHP";
     this.pitchText.text = `NOW PITCHING: ${run.pitch.name.toUpperCase()} (${hand})\nDifficulty ${run.pitch.difficulty}\n\n${run.pitch.description}`;
+
+    if (run.boss) {
+      const detail = run.boss.id === "umpire" && run.umpireTarget ? ` Today: ${run.umpireTarget}.` : "";
+      this.bossText.text = `☠ BOSS: ${run.boss.name.toUpperCase()}\n${run.boss.description}${detail}`;
+      this.bossPanel.isVisible = true;
+      this.gearPanel.top = "280px";
+    } else {
+      this.bossPanel.isVisible = false;
+      this.gearPanel.top = "158px";
+    }
+
     const gearLines = [`STADIUM: ${run.stadium?.name ?? "—"}`, run.stadium?.description ?? "", "", "EQUIPMENT:"];
     if (run.equipment.length === 0) {
       gearLines.push("  (none yet — win an inning, hit the shop)");

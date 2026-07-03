@@ -18,7 +18,7 @@ export class DebugPanel {
     this.root.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     this.root.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.root.left = "14px";
-    this.root.top = "342px"; // below the stadium/equipment panel
+    this.root.top = "462px"; // below the gear panel, even when a boss card pushes it down
     this.root.background = "rgba(30, 12, 12, 0.92)";
     this.root.isVisible = false;
     adt.addControl(this.root);
@@ -68,6 +68,7 @@ export class DebugPanel {
       `plays ${run.playsLeft}  discards ${run.discardsLeft}  cash $${run.cash}`,
       `deck: ${deckCount}`,
       `pitch: ${run.pitch.id}  stadium: ${run.stadium?.id ?? "-"}`,
+      `boss: ${run.boss?.id ?? "-"}${run.umpireTarget ? ` (${run.umpireTarget})` : ""}`,
       `equipment: ${run.equipment.map((e) => e.id).join(", ") || "-"}`,
       `hand: ${handIds.join(", ")}`,
     ].join("\n");

@@ -153,6 +153,16 @@ export class TableWorld {
     return tex;
   }
 
+  /** Shrink the font until the text fits the board face. */
+  private fitLine(ctx: CanvasRenderingContext2D, text: string, baseSize: number, y: number): void {
+    let size = baseSize;
+    do {
+      ctx.font = `bold ${size}px 'Courier New', monospace`;
+      size -= 4;
+    } while (size > 26 && ctx.measureText(text).width > 960);
+    ctx.fillText(text, 512, y);
+  }
+
   /** The 3D board is the primary score display; line1 is the big number row. */
   updateScoreboard(line1: string, line2: string, line3: string, line1Color = "#ffd257"): void {
     const ctx = this.scoreboardTexture.getContext() as CanvasRenderingContext2D;
@@ -163,14 +173,11 @@ export class TableWorld {
     ctx.strokeRect(6, 6, 1012, 372);
     ctx.textAlign = "center";
     ctx.fillStyle = line1Color;
-    ctx.font = "bold 110px 'Courier New', monospace";
-    ctx.fillText(line1, 512, 150);
+    this.fitLine(ctx, line1, 110, 150);
     ctx.fillStyle = "#f4efe2";
-    ctx.font = "bold 56px 'Courier New', monospace";
-    ctx.fillText(line2, 512, 250);
+    this.fitLine(ctx, line2, 56, 250);
     ctx.fillStyle = "#7fd4a0";
-    ctx.font = "bold 54px 'Courier New', monospace";
-    ctx.fillText(line3, 512, 335);
+    this.fitLine(ctx, line3, 54, 335);
     this.scoreboardTexture.update();
   }
 

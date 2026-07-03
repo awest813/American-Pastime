@@ -1,5 +1,5 @@
 import { ComboSystem, type EffectiveCard } from "./ComboSystem";
-import type { EquipmentCard, PitchCard, PlayerCard, ScoreLine, ScoreResult, Stat, StadiumCard } from "./types";
+import type { BossCard, EquipmentCard, PitchCard, PlayerCard, Position, ScoreLine, ScoreResult, Stat, StadiumCard } from "./types";
 
 export interface ScoreContext {
   pitch: PitchCard;
@@ -8,6 +8,11 @@ export interface ScoreContext {
   /** Runs already scored this inning, for behind-the-target effects like Rally Cap. */
   runsSoFar: number;
   target: number;
+  /** Boss pitcher rules (innings 3/6/9); null on regular innings. */
+  boss: BossCard | null;
+  umpireTarget: Position | null;
+  /** Plays remaining BEFORE this play commits — The Closer punishes the last one. */
+  playsLeft: number;
 }
 
 const STATS: Stat[] = ["power", "contact", "speed", "discipline", "defense"];
@@ -62,6 +67,10 @@ export class ScoreSystem {
       }
       if (pineTar && index === 0) stats.contact *= 1.5;
 
+      // Boss pitcher stat pressure (not a pitch penalty, so shields don't help)
+      if (ctx.boss?.id === "lefty_specialist" && card.side === "L") stats.contact -= 3;
+      if (ctx.boss?.id === "groundball_goblin") stats.speed *= 0.5;
+
       // Pitch stat modifiers; a shield (Battery, Shin Guards, Dome) cancels penalties but keeps boosts.
       for (const s of STATS) {
         const mod = ctx.pitch.statMods[s];
@@ -73,6 +82,11 @@ export class ScoreSystem {
         for (const s of STATS) stats[s] *= 0.5;
       }
 
+      // The Umpire rings up one position: those cards contribute nothing.
+      if (ctx.boss?.id === "umpire" && card.position === ctx.umpireTarget) {
+        for (const s of STATS) stats[s] = 0;
+      }
+
       for (const s of STATS) stats[s] = Math.max(0, stats[s]);
       return { card, stats };
     });
@@ -81,7 +95,7 @@ export class ScoreSystem {
   evaluate(cards: PlayerCard[], ctx: ScoreContext): ScoreResult {
     const lines: ScoreLine[] = [];
     if (cards.length === 0) {
-      return { base: 0, flatBonus: 0, multiplier: 1, difficulty: ctx.pitch.difficulty, runs: 0, combos: [], lines };
+      return { base: 0, flatBonus: 0, multiplier: 1, difficulty: ctx.pitch.difficulty, runs: 0, playCost: 1, combos: [], lines };
     }
 
     const shielded =
@@ -103,6 +117,15 @@ export class ScoreSystem {
     let flat = 0;
     let multiplier = 1;
 
+    // Umpire ejections, called out loud so the zeros aren't mysterious
+    if (ctx.boss?.id === "umpire") {
+      for (const eff of effCards) {
+        if (eff.card.position === ctx.umpireTarget) {
+          lines.push({ label: `Umpire rings up ${eff.card.name}`, value: "OUT" });
+        }
+      }
+    }
+
     // Pitch specials that reward a stat outside the base three.
     if (ctx.pitch.special === "knuckleball") {
       const bonus = sum("discipline");
@@ -115,7 +138,14 @@ export class ScoreSystem {
       lines.push({ label: "Sinker: grounders gobbled", value: `+${Math.round(bonus)}` });
     }
 
-    for (const combo of detected) {
+    // The Junkballer eats the first combo of every play
+    const ignoredCombo = ctx.boss?.id === "junkballer" && detected.length > 0 ? detected[0] : null;
+    const activeCombos = ignoredCombo ? detected.slice(1) : detected;
+
+    if (ignoredCombo) {
+      lines.push({ label: `Junkballer eats ${ignoredCombo.name}`, value: "✗" });
+    }
+    for (const combo of activeCombos) {
       if (combo.kind === "flat") {
         flat += combo.value;
         lines.push({ label: `${combo.name} (${combo.detail})`, value: `+${combo.value}` });
@@ -126,7 +156,7 @@ export class ScoreSystem {
     }
 
     // Card traits
-    const powerSwing = detected.some((c) => c.id === "power_swing");
+    const powerSwing = activeCombos.some((c) => c.id === "power_swing");
     for (const eff of effCards) {
       switch (eff.card.traitId) {
         case "moonshot":
@@ -170,16 +200,36 @@ export class ScoreSystem {
       lines.push({ label: "Pitch penalties cancelled", value: "shield" });
     }
 
+    // Remaining boss rules
+    if (ctx.boss?.id === "groundball_goblin") {
+      const bonus = sum("defense") / 2;
+      flat += bonus;
+      lines.push({ label: "Goblin: grounders gobbled", value: `+${Math.round(bonus)}` });
+    }
+    if (ctx.boss?.id === "closer" && ctx.playsLeft === 1) {
+      if (powerSwing) {
+        lines.push({ label: "The Closer: beaten deep", value: "safe" });
+      } else {
+        multiplier *= 0.5;
+        lines.push({ label: "The Closer slams the door", value: "x0.5" });
+      }
+    }
+    let playCost = 1;
+    if (ctx.boss?.id === "ace" && cards.some((c) => c.power >= 7)) {
+      playCost = 2;
+      lines.push({ label: "The Ace: Power 7+ swing", value: "2 plays" });
+    }
+
     const difficulty = ctx.pitch.difficulty;
     let runs = Math.max(1, Math.round(((base + flat) * multiplier) / difficulty));
 
-    if (this.hasEquipment(ctx, "scorekeepers_pencil") && detected.length > 0) {
-      runs += detected.length;
-      lines.push({ label: "Scorekeeper's Pencil", value: `+${detected.length} runs` });
+    if (this.hasEquipment(ctx, "scorekeepers_pencil") && activeCombos.length > 0) {
+      runs += activeCombos.length;
+      lines.push({ label: "Scorekeeper's Pencil", value: `+${activeCombos.length} runs` });
     }
 
     lines.push({ label: `vs ${ctx.pitch.name} (difficulty ${difficulty})`, value: `÷${difficulty}` });
 
-    return { base, flatBonus: flat, multiplier, difficulty, runs, combos: detected, lines };
+    return { base, flatBonus: flat, multiplier, difficulty, runs, playCost, combos: activeCombos, lines };
   }
 }

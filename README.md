@@ -18,6 +18,7 @@ npm run dev        # opens on http://localhost:8088
 - **PLAY HAND** commits the at-bat; the score preview on the right always shows the exact combos and projected runs before you commit.
 - **DISCARD** dumps the selection and redraws (3 per inning).
 - Beat the target within 4 plays → collect cash ($3 + $1 per unused play) → shop → next inning. Nine innings wins the run.
+- **Innings 3, 6, and 9 are boss innings**: a rival pitcher's rule (The Closer, The Junkballer, The Ace, The Lefty Specialist, The Groundball Goblin, The Umpire) stacks on top of the normal pitch. Boss rules are shown on a red card in the HUD and factored into the score preview; winning pays a +$2 bounty. Each boss appears at most once per run.
 - Runs are seeded: the same seed always deals the same season.
 - **CARD BINDER** on the title screen browses every card in 3D with team / position / era / rarity / trait filters (right-click a filter to cycle backward), page flipping (arrow keys), and click-to-inspect. It doubles as the dev card-preview tool.
 - The 3D scoreboard behind the diamond is the score display — it counts up as runs land and goes green when the target is met.
@@ -41,7 +42,7 @@ base            = total Contact + Power + Speed
 runs            = (base + combo/trait/equipment bonuses) × multipliers ÷ pitch difficulty
 ```
 
-The ten MVP combos live in `src/systems/ComboSystem.ts`; their names/descriptions in `src/content/combos.json`.
+The ten MVP combos live in `src/systems/ComboSystem.ts`; their names/descriptions in `src/content/combos.json`. Boss pitcher rules live in `src/content/bosses.json` with their effects in `ScoreSystem` — all deterministic, so the preview stays honest even on boss innings.
 
 ## Dev sugar
 

@@ -161,10 +161,13 @@ export class GameScene {
   /** The 3D scoreboard is the primary score display. */
   private updateBoard(runs: number): void {
     const met = runs >= this.run.target;
+    const line3 = this.run.boss
+      ? `${this.run.pitch.name.toUpperCase()} + ${this.run.boss.name.toUpperCase()}`
+      : this.run.pitch.name.toUpperCase();
     this.world.updateScoreboard(
       `${runs} / ${this.run.target}`,
       `INNING ${this.run.inning} of ${RULES.finalInning}`,
-      this.run.pitch.name.toUpperCase(),
+      line3,
       met ? "#7fd4a0" : "#ffd257",
     );
   }
@@ -179,9 +182,19 @@ export class GameScene {
     this.clearHand();
     this.refreshHud();
     this.updateBoard(0);
-    void this.hud.showPopup(`INNING ${this.run.inning} · TARGET ${this.run.target}`, UI.cream, 900);
+    void this.announceInning();
     await this.refillHand();
     this.refreshPreview();
+  }
+
+  private async announceInning(): Promise<void> {
+    await this.hud.showPopup(`INNING ${this.run.inning} · TARGET ${this.run.target}`, UI.cream, 900);
+    if (this.run.boss) {
+      this.audio.play("boss");
+      this.world.pulseLights();
+      this.world.shakeCamera(0.09, 300);
+      await this.hud.showPopup(`☠ ${this.run.boss.name.toUpperCase()} ☠`, UI.red, 1200);
+    }
   }
 
   private nextInning(): void {
@@ -285,6 +298,9 @@ export class GameScene {
       equipment: this.run.equipment,
       runsSoFar: this.run.runs,
       target: this.run.target,
+      boss: this.run.boss,
+      umpireTarget: this.run.umpireTarget,
+      playsLeft: this.run.playsLeft,
     };
   }
 
@@ -337,7 +353,7 @@ export class GameScene {
     this.audio.play("runs");
     await this.countUpBoard(runsBefore, runsBefore + result.runs);
 
-    this.run.recordPlay(result.runs);
+    this.run.recordPlay(result.runs, result.playCost);
 
     await this.tweens.delay(350);
     for (const card3d of played) card3d.dispose();

@@ -3,7 +3,8 @@ import equipmentJson from "../content/cards.equipment.json";
 import stadiumsJson from "../content/cards.stadiums.json";
 import pitchesJson from "../content/pitches.json";
 import combosJson from "../content/combos.json";
-import type { ComboMeta, EquipmentCard, PitchCard, PlayerCard, StadiumCard } from "./types";
+import bossesJson from "../content/bosses.json";
+import type { BossCard, ComboMeta, EquipmentCard, PitchCard, PlayerCard, Position, StadiumCard } from "./types";
 import { Random } from "../utils/Random";
 
 export const RULES = {
@@ -17,6 +18,8 @@ export const RULES = {
   targetGrowth: 1.35,
   finalInning: 9,
   maxEquipment: 5,
+  bossEvery: 3, // innings 3, 6, 9 are boss innings
+  bossReward: 2,
 } as const;
 
 export type RunPhase = "menu" | "inning" | "shop" | "gameOver" | "victory";
@@ -32,6 +35,7 @@ export class RunSystem {
   readonly stadiums: StadiumCard[] = stadiumsJson as StadiumCard[];
   readonly pitches: PitchCard[] = pitchesJson as PitchCard[];
   readonly comboMeta: ComboMeta[] = combosJson as ComboMeta[];
+  readonly bosses: BossCard[] = bossesJson as BossCard[];
 
   rng: Random = new Random();
   phase: RunPhase = "menu";
@@ -45,6 +49,10 @@ export class RunSystem {
   equipment: EquipmentCard[] = [];
   stadium: StadiumCard | null = null;
   pitch: PitchCard = this.pitches[0];
+  boss: BossCard | null = null;
+  /** The position The Umpire is ringing up this inning. */
+  umpireTarget: Position | null = null;
+  private usedBosses = new Set<string>();
 
   /** Shop offers for the current visit. */
   shopOffers: EquipmentCard[] = [];
@@ -54,6 +62,7 @@ export class RunSystem {
     this.inning = 1;
     this.cash = RULES.startingCash;
     this.equipment = [];
+    this.usedBosses.clear();
     this.stadium = this.rng.pick(this.stadiums);
     this.phase = "inning";
     this.startInning();
@@ -65,12 +74,30 @@ export class RunSystem {
     this.playsLeft = RULES.playsPerInning;
     this.discardsLeft = RULES.discardsPerInning;
     this.pitch = this.rng.pick(this.pitches);
+    this.boss = this.inning % RULES.bossEvery === 0 ? this.pickBoss() : null;
+    this.umpireTarget = null;
+    if (this.boss?.id === "umpire") {
+      const positions = [...new Set(this.players.map((p) => p.position))];
+      this.umpireTarget = this.rng.pick(positions);
+    }
     this.phase = "inning";
   }
 
-  recordPlay(runsScored: number): void {
+  /** Each boss appears once per run until the roster is exhausted. */
+  private pickBoss(): BossCard {
+    let available = this.bosses.filter((b) => !this.usedBosses.has(b.id));
+    if (available.length === 0) {
+      this.usedBosses.clear();
+      available = this.bosses;
+    }
+    const boss = this.rng.pick(available);
+    this.usedBosses.add(boss.id);
+    return boss;
+  }
+
+  recordPlay(runsScored: number, playCost = 1): void {
     this.runs += runsScored;
-    this.playsLeft -= 1;
+    this.playsLeft = Math.max(0, this.playsLeft - playCost);
   }
 
   recordDiscard(): void {
@@ -85,9 +112,9 @@ export class RunSystem {
     return this.playsLeft <= 0 && this.runs < this.target;
   }
 
-  /** Called after winning an inning; pays out and rolls the shop. */
+  /** Called after winning an inning; pays out (boss innings pay a bounty) and rolls the shop. */
   finishInning(): void {
-    this.cash += RULES.rewardBase + this.playsLeft;
+    this.cash += RULES.rewardBase + this.playsLeft + (this.boss ? RULES.bossReward : 0);
     if (this.inning >= RULES.finalInning) {
       this.phase = "victory";
     } else {
