@@ -5,7 +5,7 @@ import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
-import type { PlayerCard } from "../systems/types";
+import { RARITY_DISPLAY, type PlayerCard } from "../systems/types";
 
 const TEAM_COLORS: Record<string, string> = {
   "Louisville Bats": "#8c2f39",
@@ -57,9 +57,11 @@ export class Card3D {
     const c = this.card;
     const ctx = tex.getContext() as CanvasRenderingContext2D;
     const teamColor = TEAM_COLORS[c.team] ?? "#333333";
+    // Upgraded tiers earn a fancier frame: silver for All-Stars, gold for Legends
+    const borderColor = c.rarity === "Legend" ? "#d4a017" : c.rarity === "AllStar" ? "#aeb6c4" : teamColor;
 
-    // Card stock + team border
-    ctx.fillStyle = teamColor;
+    // Card stock + border
+    ctx.fillStyle = borderColor;
     ctx.fillRect(0, 0, 512, 716);
     ctx.fillStyle = "#f4ecd8";
     ctx.fillRect(18, 18, 476, 680);
@@ -123,17 +125,19 @@ export class Card3D {
     ctx.strokeRect(34, 546, 444, 118);
     ctx.fillStyle = "#4a4234";
     ctx.textAlign = "center";
+    const rarityName = RARITY_DISPLAY[c.rarity];
     if (c.trait) {
       ctx.font = "italic 24px Georgia";
       this.wrapText(ctx, c.trait, 256, 590, 420, 30);
     } else {
       ctx.font = "italic 26px Georgia";
-      ctx.fillText(`${c.rarity} · No trait`, 256, 612);
+      ctx.fillText(`${rarityName} · No trait`, 256, 612);
     }
 
-    ctx.fillStyle = "#8a8171";
-    ctx.font = "20px Georgia";
-    ctx.fillText(`— ${c.rarity} —`, 256, 692);
+    const stars = c.rarity === "Legend" ? " ★★" : c.rarity === "AllStar" ? " ★" : "";
+    ctx.fillStyle = stars ? "#a8842c" : "#8a8171";
+    ctx.font = stars ? "bold 22px Georgia" : "20px Georgia";
+    ctx.fillText(`— ${rarityName}${stars} —`, 256, 692);
 
     tex.update();
   }

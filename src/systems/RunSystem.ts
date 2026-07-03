@@ -4,8 +4,12 @@ import stadiumsJson from "../content/cards.stadiums.json";
 import pitchesJson from "../content/pitches.json";
 import combosJson from "../content/combos.json";
 import bossesJson from "../content/bosses.json";
-import type { BossCard, ComboMeta, EquipmentCard, PitchCard, PlayerCard, Position, StadiumCard } from "./types";
+import { RARITY_LADDER, type BossCard, type ComboMeta, type EquipmentCard, type PitchCard, type PlayerCard, type Position, type Rarity, type StadiumCard, type Stat } from "./types";
 import { Random } from "../utils/Random";
+
+/** Price of promoting a card, keyed by the tier it is promoted TO. */
+const UPGRADE_COST: Partial<Record<Rarity, number>> = { Starter: 3, AllStar: 5, Legend: 8 };
+const STAT_ORDER: Stat[] = ["power", "contact", "speed", "discipline", "defense"];
 
 export const RULES = {
   handSize: 8,
@@ -56,6 +60,10 @@ export class RunSystem {
 
   /** Shop offers for the current visit. */
   shopOffers: EquipmentCard[] = [];
+  /** Deck cards offered for promotion this shop visit. */
+  upgradeCandidates: PlayerCard[] = [];
+  /** Per-run copies of the player cards, so upgrades never touch the base collection. */
+  deckCards: PlayerCard[] = [];
 
   startRun(seed?: string): void {
     this.rng = new Random(seed);
@@ -63,6 +71,7 @@ export class RunSystem {
     this.cash = RULES.startingCash;
     this.equipment = [];
     this.usedBosses.clear();
+    this.deckCards = this.players.map((p) => ({ ...p }));
     this.stadium = this.rng.pick(this.stadiums);
     this.phase = "inning";
     this.startInning();
@@ -127,6 +136,39 @@ export class RunSystem {
     const owned = new Set(this.equipment.map((e) => e.id));
     const available = this.equipmentPool.filter((e) => !owned.has(e.id));
     this.shopOffers = this.rng.shuffle(available).slice(0, 3);
+    const upgradable = this.deckCards.filter((c) => c.rarity !== "Legend");
+    this.upgradeCandidates = this.rng.shuffle(upgradable).slice(0, 3);
+  }
+
+  nextRarity(card: PlayerCard): Rarity | null {
+    const index = RARITY_LADDER.indexOf(card.rarity);
+    return index >= 0 && index < RARITY_LADDER.length - 1 ? RARITY_LADDER[index + 1] : null;
+  }
+
+  upgradeCost(card: PlayerCard): number | null {
+    const next = this.nextRarity(card);
+    return next ? (UPGRADE_COST[next] ?? null) : null;
+  }
+
+  /** The two best stats that can still grow (capped at 9), highest first. */
+  upgradeStatTargets(card: PlayerCard): Stat[] {
+    return STAT_ORDER.filter((s) => card[s] < 9)
+      .sort((a, b) => card[b] - card[a])
+      .slice(0, 2);
+  }
+
+  /** Promote a deck card one tier: +1 to its two best upgradeable stats. */
+  upgradeCard(card: PlayerCard): boolean {
+    const next = this.nextRarity(card);
+    const cost = this.upgradeCost(card);
+    if (!next || cost === null || this.cash < cost) return false;
+    this.cash -= cost;
+    for (const stat of this.upgradeStatTargets(card)) {
+      card[stat] += 1;
+    }
+    card.rarity = next;
+    this.upgradeCandidates = this.upgradeCandidates.filter((c) => c !== card);
+    return true;
   }
 
   buyEquipment(offer: EquipmentCard): boolean {

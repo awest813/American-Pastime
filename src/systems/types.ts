@@ -2,6 +2,14 @@ export type Position = "P" | "C" | "1B" | "2B" | "3B" | "SS" | "LF" | "CF" | "RF
 export type Side = "L" | "R" | "S";
 export type Era = "Vintage" | "Modern";
 export type Rarity = "Rookie" | "Starter" | "AllStar" | "Legend";
+
+export const RARITY_LADDER: Rarity[] = ["Rookie", "Starter", "AllStar", "Legend"];
+export const RARITY_DISPLAY: Record<Rarity, string> = {
+  Rookie: "Rookie",
+  Starter: "Starter",
+  AllStar: "All-Star",
+  Legend: "Legend",
+};
 export type Stat = "power" | "contact" | "speed" | "discipline" | "defense";
 
 export interface PlayerCard {

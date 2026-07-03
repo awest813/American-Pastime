@@ -18,6 +18,7 @@ npm run dev        # opens on http://localhost:8088
 - **PLAY HAND** commits the at-bat; the score preview on the right always shows the exact combos and projected runs before you commit.
 - **DISCARD** dumps the selection and redraws (3 per inning).
 - Beat the target within 4 plays → collect cash ($3 + $1 per unused play) → shop → next inning. Nine innings wins the run.
+- **Card upgrades**: each shop visit offers 3 deck cards for promotion up the `Rookie → Starter → All-Star → Legend` ladder ($3/$5/$8). Each tier adds +1 to the card's two best upgradeable stats; All-Stars add +2 base when played and Legends +5 ("Star power" in the preview). Upgraded cards get silver/gold frames and ★s. Upgrades are per-run copies — the base collection in the binder never changes.
 - **Innings 3, 6, and 9 are boss innings**: a rival pitcher's rule (The Closer, The Junkballer, The Ace, The Lefty Specialist, The Groundball Goblin, The Umpire) stacks on top of the normal pitch. Boss rules are shown on a red card in the HUD and factored into the score preview; winning pays a +$2 bounty. Each boss appears at most once per run.
 - Runs are seeded: the same seed always deals the same season.
 - **CARD BINDER** on the title screen browses every card in 3D with team / position / era / rarity / trait filters (right-click a filter to cycle backward), page flipping (arrow keys), and click-to-inspect. It doubles as the dev card-preview tool.

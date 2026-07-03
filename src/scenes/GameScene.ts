@@ -78,6 +78,12 @@ export class GameScene {
           this.shop.refresh(this.run);
         }
       },
+      onUpgrade: (card) => {
+        if (this.run.upgradeCard(card)) {
+          this.audio.play("win");
+          this.shop.refresh(this.run);
+        }
+      },
       onReroll: () => {
         if (this.run.rerollShop()) {
           this.audio.play("click");
@@ -150,10 +156,11 @@ export class GameScene {
     this.menu.setVisible(false);
     this.end.setVisible(false);
     this.shop.setVisible(false);
+    this.clearHand(false); // the old run's cards must not bleed into the fresh deck
     this.run.startRun(seed);
     this.lastSeed = this.run.rng.seed;
     this.deck = new DeckSystem(this.run.rng);
-    this.deck.reset(this.run.players);
+    this.deck.reset(this.run.deckCards);
     this.hud.setVisible(true);
     void this.beginInning();
   }
@@ -227,7 +234,12 @@ export class GameScene {
 
   // ── Hand management ─────────────────────────────────────────────────────
 
-  private clearHand(): void {
+  /** Clear the hand meshes; by default the cards go back to the discard pile
+   *  so the deck never shrinks across innings. */
+  private clearHand(returnToDeck = true): void {
+    if (returnToDeck && this.hand.length > 0) {
+      this.deck.discard(this.hand.map((c) => c.card));
+    }
     for (const card of this.hand) card.dispose();
     this.hand = [];
     this.selection = [];

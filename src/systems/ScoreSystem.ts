@@ -182,6 +182,16 @@ export class ScoreSystem {
       }
     }
 
+    // Star power: upgraded cards carry themselves (umpired-out cards don't count)
+    const starBonus = effCards.reduce((total, eff) => {
+      if (ctx.boss?.id === "umpire" && eff.card.position === ctx.umpireTarget) return total;
+      return total + (eff.card.rarity === "AllStar" ? 2 : eff.card.rarity === "Legend" ? 5 : 0);
+    }, 0);
+    if (starBonus > 0) {
+      flat += starBonus;
+      lines.push({ label: "Star power", value: `+${starBonus}` });
+    }
+
     // Equipment flat bonuses
     if (this.hasEquipment(ctx, "old_glove")) {
       const bonus = sum("defense") / 2;

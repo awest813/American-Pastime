@@ -1,13 +1,22 @@
 import { Control, Rectangle, StackPanel, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
 import type { RunSystem } from "../systems/RunSystem";
-import type { EquipmentCard } from "../systems/types";
+import { RARITY_DISPLAY, type EquipmentCard, type PlayerCard } from "../systems/types";
 import { UI, makeButton, makePanel, makeStack, makeText } from "./kit";
 
 export interface ShopCallbacks {
   onBuy: (offer: EquipmentCard) => void;
+  onUpgrade: (card: PlayerCard) => void;
   onReroll: () => void;
   onContinue: () => void;
 }
+
+const STAT_SHORT: Record<string, string> = {
+  power: "PWR",
+  contact: "CON",
+  speed: "SPD",
+  discipline: "DIS",
+  defense: "DEF",
+};
 
 /** Between-innings clubhouse shop: three equipment offers, reroll, continue. */
 export class ShopPanel {
@@ -15,6 +24,7 @@ export class ShopPanel {
   private cashText: TextBlock;
   private ownedText: TextBlock;
   private offersRow: StackPanel;
+  private upgradeRow: StackPanel;
 
   constructor(adt: AdvancedDynamicTexture, private callbacks: ShopCallbacks) {
     this.root = new Rectangle("shopRoot");
@@ -24,7 +34,7 @@ export class ShopPanel {
     this.root.thickness = 0;
     adt.addControl(this.root);
 
-    const panel = makePanel("880px", "560px");
+    const panel = makePanel("880px", "740px");
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -53,9 +63,19 @@ export class ShopPanel {
     this.offersRow.height = "300px";
     stack.addControl(this.offersRow);
 
+    const upgradeTitle = makeText("UPGRADE A PLAYER", 22, UI.gold);
+    upgradeTitle.fontFamily = UI.mono;
+    upgradeTitle.paddingTop = "14px";
+    stack.addControl(upgradeTitle);
+
+    this.upgradeRow = makeStack(false);
+    this.upgradeRow.height = "170px";
+    this.upgradeRow.paddingTop = "8px";
+    stack.addControl(this.upgradeRow);
+
     const buttonRow = makeStack(false);
-    buttonRow.paddingTop = "22px";
-    buttonRow.height = "84px";
+    buttonRow.paddingTop = "16px";
+    buttonRow.height = "78px";
     stack.addControl(buttonRow);
     const reroll = makeButton("rerollButton", "REROLL  $1", UI.cream, "200px");
     reroll.onPointerUpObservable.add(() => this.callbacks.onReroll());
@@ -79,11 +99,65 @@ export class ShopPanel {
     if (run.shopOffers.length === 0) {
       const soldOut = makeText("Sold out. The clubhouse kid shrugs.", 22);
       this.offersRow.addControl(soldOut);
-      return;
+    } else {
+      for (const offer of run.shopOffers) {
+        this.offersRow.addControl(this.makeOfferCard(offer, run));
+      }
     }
-    for (const offer of run.shopOffers) {
-      this.offersRow.addControl(this.makeOfferCard(offer, run));
+
+    this.upgradeRow.clearControls();
+    if (run.upgradeCandidates.length === 0) {
+      const done = makeText("The whole roster is legendary. Nothing left to teach.", 18);
+      this.upgradeRow.addControl(done);
+    } else {
+      for (const card of run.upgradeCandidates) {
+        this.upgradeRow.addControl(this.makeUpgradeCard(card, run));
+      }
     }
+  }
+
+  private makeUpgradeCard(card: PlayerCard, run: RunSystem): Rectangle {
+    const next = run.nextRarity(card);
+    const cost = run.upgradeCost(card) ?? 0;
+    const gains = run.upgradeStatTargets(card).map((s) => `+1 ${STAT_SHORT[s]}`).join(" · ");
+
+    const panel = makePanel("266px", "160px");
+    panel.background = "#1d2418";
+    panel.paddingLeft = "8px";
+    panel.paddingRight = "8px";
+
+    const stack = makeStack();
+    stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    stack.paddingTop = "10px";
+    panel.addControl(stack);
+
+    const name = makeText(card.name, 18, UI.cream);
+    name.fontWeight = "bold";
+    name.textWrapping = false;
+    name.resizeToFit = false;
+    name.width = "240px";
+    name.height = "24px";
+    stack.addControl(name);
+
+    const path = makeText(
+      `${card.position} · ${RARITY_DISPLAY[card.rarity]} → ${next ? RARITY_DISPLAY[next] : "—"}`,
+      15,
+      UI.green,
+    );
+    stack.addControl(path);
+
+    const gainText = makeText(gains || "at the stat cap", 15, "#9a917f");
+    gainText.paddingBottom = "8px";
+    stack.addControl(gainText);
+
+    const affordable = run.cash >= cost;
+    const button = makeButton(`upgrade-${card.id}`, `UPGRADE  $${cost}`, affordable ? UI.gold : "#777264", "180px", "42px");
+    button.fontSize = 18;
+    button.isEnabled = affordable;
+    button.onPointerUpObservable.add(() => this.callbacks.onUpgrade(card));
+    stack.addControl(button);
+
+    return panel;
   }
 
   private makeOfferCard(offer: EquipmentCard, run: RunSystem): Rectangle {
