@@ -16,10 +16,12 @@ import { DeckSystem } from "../systems/DeckSystem";
 import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
 import type { PlayerCard, ScoreResult } from "../systems/types";
+import { ComboBook } from "../ui/ComboBook";
 import { DebugPanel } from "../ui/DebugPanel";
 import { EndPanel } from "../ui/EndPanel";
 import { GameHud } from "../ui/GameHud";
 import { MenuPanel } from "../ui/MenuPanel";
+import { PausePanel } from "../ui/PausePanel";
 import { ShopPanel } from "../ui/ShopPanel";
 import { UI } from "../ui/kit";
 import { Tweens, easeOutBack } from "../utils/Tweens";
@@ -52,6 +54,8 @@ export class GameScene {
   private end: EndPanel;
   private debug: DebugPanel;
   private collection: CollectionScene;
+  private comboBook: ComboBook;
+  private pause: PausePanel;
 
   private hand: Card3D[] = [];
   /** Selection in click order — order matters for "first card" effects. */
@@ -69,6 +73,7 @@ export class GameScene {
     this.hud = new GameHud(adt, {
       onPlay: () => void this.playSelection(),
       onDiscard: () => void this.discardSelection(),
+      onComboBook: () => this.toggleComboBook(),
     });
     this.hud.setVisible(false);
     this.shop = new ShopPanel(adt, {
@@ -105,6 +110,7 @@ export class GameScene {
         this.audio.play("click");
         this.startRun(this.lastSeed);
       },
+      onMenu: () => this.quitToMenu(),
     });
     this.end.setVisible(false);
     this.debug = new DebugPanel(adt, {
@@ -130,6 +136,13 @@ export class GameScene {
         this.collection.open();
       },
     );
+
+    // Overlays created last so they render above every other panel
+    this.comboBook = new ComboBook(adt, this.run.comboMeta, () => this.toggleComboBook());
+    this.pause = new PausePanel(adt, {
+      onResume: () => this.pause.setVisible(false),
+      onAbandon: () => this.quitToMenu(),
+    });
 
     this.bindPointer();
     this.bindHotkeys();
@@ -214,6 +227,26 @@ export class GameScene {
     if (this.run.phase !== "inning" || this.busy) return;
     this.run.startInning();
     await this.beginInning();
+  }
+
+  private toggleComboBook(): void {
+    if (this.pause.isOpen || this.run.phase === "menu") return;
+    this.audio.play("click");
+    this.comboBook.setVisible(!this.comboBook.isOpen);
+  }
+
+  /** Abandon path: back to the title screen from pause or the end screen. */
+  private quitToMenu(): void {
+    this.audio.play("click");
+    this.pause.setVisible(false);
+    this.comboBook.setVisible(false);
+    this.end.setVisible(false);
+    this.shop.setVisible(false);
+    this.hud.setVisible(false);
+    this.clearHand(false);
+    this.run.phase = "menu";
+    this.world.updateScoreboard("CARDBALL", "CLASSIC", "");
+    this.menu.setVisible(true);
   }
 
   private endRun(victory: boolean): void {
@@ -460,7 +493,7 @@ export class GameScene {
 
   private bindPointer(): void {
     this.scene.onPointerObservable.add((info) => {
-      if (this.run.phase !== "inning") return;
+      if (this.run.phase !== "inning" || this.pause.isOpen || this.comboBook.isOpen) return;
       if (info.type === PointerEventTypes.POINTERMOVE) {
         const picked = this.scene.pick(this.scene.pointerX, this.scene.pointerY, (m) => m.name.startsWith("card-"));
         const card = this.cardFromMesh(picked?.pickedMesh?.name);
@@ -491,10 +524,30 @@ export class GameScene {
         this.refreshHud();
         return;
       }
-      if (this.run.phase === "menu") {
-        if (key === "Enter" && this.menu.visible) this.menu.submit();
+      if (key.toLowerCase() === "m") {
+        const muted = this.audio.toggleMute();
+        if (this.run.phase !== "menu") void this.hud.showPopup(muted ? "MUTED" : "SOUND ON", UI.cream, 450);
         return;
       }
+      if (this.run.phase === "menu") {
+        if (key === "Enter" && this.menu.visible) this.menu.submit();
+        return; // the binder owns Escape/arrows on the title screen
+      }
+      if (key.toLowerCase() === "h") {
+        this.toggleComboBook();
+        return;
+      }
+      if (key === "Escape") {
+        if (this.comboBook.isOpen) {
+          this.comboBook.setVisible(false);
+        } else if (this.pause.isOpen) {
+          this.pause.setVisible(false);
+        } else if ((this.run.phase === "inning" && !this.busy) || this.run.phase === "shop") {
+          this.pause.setVisible(true, this.lastSeed);
+        }
+        return;
+      }
+      if (this.pause.isOpen || this.comboBook.isOpen) return; // no cheats under overlays
       switch (key.toLowerCase()) {
         case "r":
           void this.restartInning();

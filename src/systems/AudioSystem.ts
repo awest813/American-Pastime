@@ -20,13 +20,21 @@ export type Stinger =
 export class AudioSystem {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  private muted = false;
+
+  /** @returns true if audio is now muted. */
+  toggleMute(): boolean {
+    this.muted = !this.muted;
+    if (this.master) this.master.gain.value = this.muted ? 0 : 0.35;
+    return this.muted;
+  }
 
   private ensure(): AudioContext | null {
     if (!this.ctx) {
       try {
         this.ctx = new AudioContext();
         this.master = this.ctx.createGain();
-        this.master.gain.value = 0.35;
+        this.master.gain.value = this.muted ? 0 : 0.35;
         this.master.connect(this.ctx.destination);
       } catch {
         return null;

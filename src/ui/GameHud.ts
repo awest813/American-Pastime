@@ -7,6 +7,7 @@ import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeTex
 export interface HudCallbacks {
   onPlay: () => void;
   onDiscard: () => void;
+  onComboBook: () => void;
 }
 
 const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
@@ -136,6 +137,15 @@ export class GameHud {
     this.previewTotal.fontFamily = UI.mono;
     this.previewTotal.fontWeight = "bold";
     previewStack.addControl(this.previewTotal);
+
+    // Combo reference lives right under the preview it explains
+    const comboBookButton = makeButton("comboBookButton", "COMBO BOOK (H)", UI.cream, "200px", "40px");
+    comboBookButton.fontSize = 16;
+    topRight(comboBookButton);
+    comboBookButton.left = "-94px";
+    comboBookButton.top = "552px";
+    comboBookButton.onPointerUpObservable.add(() => callbacks.onComboBook());
+    this.root.addControl(comboBookButton);
 
     // Bottom action bar
     const actionStack = makeStack(false);

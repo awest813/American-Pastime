@@ -34,7 +34,7 @@ export class MenuPanel {
     stack.addControl(subtitle);
 
     const howTo = makeText(
-      "Draw 8 cards. Play up to 5 as one at-bat.\nCombos turn cardboard stats into runs.\nBeat the inning target before your 4 plays run out.\nSurvive 9 innings to take the pennant.",
+      "Draw 8 cards. Play up to 5 as one at-bat.\nCombos turn cardboard stats into runs.\nBeat the inning target before your 4 plays run out.\nSurvive 9 innings to take the pennant.\n\nIn game:  H combo book · ESC pause · M mute",
       20,
     );
     howTo.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;

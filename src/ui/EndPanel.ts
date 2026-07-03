@@ -4,6 +4,7 @@ import { UI, makeButton, makeStack, makeText } from "./kit";
 export interface EndCallbacks {
   onNewRun: () => void;
   onRetrySeed: () => void;
+  onMenu: () => void;
 }
 
 /** Shared game-over / championship screen. */
@@ -50,6 +51,11 @@ export class EndPanel {
     const retry = makeButton("retryButton", "RETRY SEED", UI.cream, "240px", "60px");
     retry.onPointerUpObservable.add(() => callbacks.onRetrySeed());
     row.addControl(retry);
+
+    const menu = makeButton("endMenuButton", "BACK TO MENU", "#9a917f", "240px", "48px");
+    menu.paddingTop = "16px";
+    menu.onPointerUpObservable.add(() => callbacks.onMenu());
+    stack.addControl(menu);
   }
 
   show(victory: boolean, detail: string): void {

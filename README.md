@@ -15,6 +15,7 @@ npm run dev        # opens on http://localhost:8088
 
 - **Click cards** in your hand to select up to 5. Click order matters — pitch and equipment effects hit the *first* card hardest (the preview names your leadoff).
 - **Enter** on the title screen starts a run with the current seed.
+- **H** opens the Combo Book (all ten combos + the run formula), **ESC** pauses (resume or abandon to the menu), **M** mutes.
 - **PLAY HAND** commits the at-bat; the score preview on the right always shows the exact combos and projected runs before you commit.
 - **DISCARD** dumps the selection and redraws (3 per inning).
 - Beat the target within 4 plays → collect cash ($3 + $1 per unused play) → shop → next inning. Nine innings wins the run.
