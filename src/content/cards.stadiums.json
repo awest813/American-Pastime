@@ -1,0 +1,7 @@
+[
+  { "id": "short_porch", "name": "Short Porch Park", "description": "Power Swing only needs 16 total Power.", "effect": "short_porch" },
+  { "id": "windy_field", "name": "Windy Field", "description": "+1 Power to every played card. The wind is always blowing out.", "effect": "windy_field" },
+  { "id": "dome_stadium", "name": "Dome Stadium", "description": "Pitch stat penalties are ignored under the dome.", "effect": "dome_stadium" },
+  { "id": "muddy_diamond", "name": "Muddy Diamond", "description": "-1 Speed but +2 Power to every played card.", "effect": "muddy_diamond" },
+  { "id": "friendly_confines", "name": "The Friendly Confines", "description": "+3 base score on every play.", "effect": "friendly_confines" }
+]

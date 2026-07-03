@@ -1,0 +1,45 @@
+[
+  {
+    "id": "fastball",
+    "name": "Fastball",
+    "hand": "R",
+    "difficulty": 6,
+    "description": "Power x1.25, Contact x0.85. Swing hard.",
+    "statMods": { "power": 1.25, "contact": 0.85 }
+  },
+  {
+    "id": "curveball",
+    "name": "Curveball",
+    "hand": "R",
+    "difficulty": 6,
+    "description": "Contact x1.25, Power x0.85. Stay back on it.",
+    "statMods": { "contact": 1.25, "power": 0.85 }
+  },
+  {
+    "id": "changeup",
+    "name": "Changeup",
+    "hand": "L",
+    "difficulty": 5,
+    "description": "The first card of each play scores half. Way out in front.",
+    "statMods": {},
+    "special": "changeup"
+  },
+  {
+    "id": "knuckleball",
+    "name": "Knuckleball",
+    "hand": "R",
+    "difficulty": 7,
+    "description": "It dances. Patient hitters feast: total Discipline is added to base.",
+    "statMods": {},
+    "special": "knuckleball"
+  },
+  {
+    "id": "sinker",
+    "name": "Sinker",
+    "hand": "L",
+    "difficulty": 6,
+    "description": "Speed x0.75. Grounders everywhere: half of total Defense is added to base.",
+    "statMods": { "speed": 0.75 },
+    "special": "sinker"
+  }
+]
