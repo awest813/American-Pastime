@@ -13,12 +13,14 @@ npm install
 npm run dev        # opens on http://localhost:8088
 ```
 
-- **Click cards** in your hand to select up to 5. Click order matters — pitch and equipment effects hit the *first* card hardest.
+- **Click cards** in your hand to select up to 5. Click order matters — pitch and equipment effects hit the *first* card hardest (the preview names your leadoff).
+- **Enter** on the title screen starts a run with the current seed.
 - **PLAY HAND** commits the at-bat; the score preview on the right always shows the exact combos and projected runs before you commit.
 - **DISCARD** dumps the selection and redraws (3 per inning).
 - Beat the target within 4 plays → collect cash ($3 + $1 per unused play) → shop → next inning. Nine innings wins the run.
 - Runs are seeded: the same seed always deals the same season.
-- **CARD BINDER** on the title screen browses every card in 3D with team / position / era / rarity / trait filters, page flipping (arrow keys), and click-to-inspect. It doubles as the dev card-preview tool.
+- **CARD BINDER** on the title screen browses every card in 3D with team / position / era / rarity / trait filters (right-click a filter to cycle backward), page flipping (arrow keys), and click-to-inspect. It doubles as the dev card-preview tool.
+- The 3D scoreboard behind the diamond is the score display — it counts up as runs land and goes green when the target is met.
 
 ## Rules (first prototype tuning)
 

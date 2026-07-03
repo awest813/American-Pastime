@@ -138,6 +138,7 @@ export class GameScene {
     if (scene.getEngine().name === "WebGPU") {
       await import("@babylonjs/core/Engines/WebGPU/Extensions/engine.dynamicTexture");
     }
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault()); // right-click is a game input
     const adt = AdvancedDynamicTexture.CreateFullscreenUI("gameUI", true, scene);
     adt.idealWidth = 1600;
     return new GameScene(scene, canvas, adt);
@@ -157,10 +158,28 @@ export class GameScene {
     void this.beginInning();
   }
 
+  /** The 3D scoreboard is the primary score display. */
+  private updateBoard(runs: number): void {
+    const met = runs >= this.run.target;
+    this.world.updateScoreboard(
+      `${runs} / ${this.run.target}`,
+      `INNING ${this.run.inning} of ${RULES.finalInning}`,
+      this.run.pitch.name.toUpperCase(),
+      met ? "#7fd4a0" : "#ffd257",
+    );
+  }
+
+  private countUpBoard(from: number, to: number): Promise<void> {
+    this.world.flashScoreboard();
+    const durationMs = Math.min(900, 250 + (to - from) * 45);
+    return this.tweens.animate(durationMs, (t) => this.updateBoard(Math.round(from + (to - from) * t)));
+  }
+
   private async beginInning(): Promise<void> {
     this.clearHand();
     this.refreshHud();
-    this.world.updateScoreboard(`INNING ${this.run.inning}`, `0 / ${this.run.target}`, this.run.pitch.name.toUpperCase());
+    this.updateBoard(0);
+    void this.hud.showPopup(`INNING ${this.run.inning} · TARGET ${this.run.target}`, UI.cream, 900);
     await this.refillHand();
     this.refreshPreview();
   }
@@ -179,6 +198,12 @@ export class GameScene {
 
   private endRun(victory: boolean): void {
     this.hud.setVisible(false);
+    this.world.updateScoreboard(
+      victory ? "PENNANT WON!" : "SEASON OVER",
+      `SEED ${this.lastSeed}`,
+      victory ? "9 INNINGS SURVIVED" : `INNING ${this.run.inning}`,
+      victory ? "#7fd4a0" : "#e07a6a",
+    );
     this.end.show(
       victory,
       victory
@@ -310,15 +335,9 @@ export class GameScene {
     const runsBefore = this.run.runs;
     void this.hud.showPopup(`+${result.runs} RUNS!`, UI.gold, 1000);
     this.audio.play("runs");
-    await this.hud.animateRuns(runsBefore, runsBefore + result.runs, this.run.target);
+    await this.countUpBoard(runsBefore, runsBefore + result.runs);
 
     this.run.recordPlay(result.runs);
-    this.world.updateScoreboard(
-      `INNING ${this.run.inning}`,
-      `${this.run.runs} / ${this.run.target}`,
-      this.run.pitch.name.toUpperCase(),
-    );
-    this.world.flashScoreboard();
 
     await this.tweens.delay(350);
     for (const card3d of played) card3d.dispose();
@@ -388,19 +407,20 @@ export class GameScene {
   private cheatWinInning(): void {
     if (this.run.phase !== "inning" || this.busy) return;
     this.run.runs = this.run.target;
+    this.updateBoard(this.run.runs);
     void this.winInning();
   }
 
   // ── UI refresh ──────────────────────────────────────────────────────────
 
   private refreshHud(): void {
-    this.hud.update(this.run, this.deck.remaining);
+    this.hud.update(this.run, this.deck.remaining, this.selection.length);
     this.debug.refresh(this.run, this.deck.remaining, this.hand.map((c) => c.card.id));
   }
 
   private refreshPreview(): void {
-    this.hud.updatePreview(this.previewResult(), this.selection.length);
-    this.debug.refresh(this.run, this.deck.remaining, this.hand.map((c) => c.card.id));
+    this.hud.updatePreview(this.previewResult(), this.selection.length, this.selection[0]?.card.name ?? null);
+    this.refreshHud();
   }
 
   // ── Input ───────────────────────────────────────────────────────────────
@@ -416,6 +436,8 @@ export class GameScene {
       if (info.type === PointerEventTypes.POINTERMOVE) {
         const picked = this.scene.pick(this.scene.pointerX, this.scene.pointerY, (m) => m.name.startsWith("card-"));
         const card = this.cardFromMesh(picked?.pickedMesh?.name);
+        const canvas = this.scene.getEngine().getRenderingCanvas();
+        if (canvas) canvas.style.cursor = card && !this.busy ? "pointer" : "default";
         if (card !== this.hovered) {
           if (!this.busy) {
             this.hovered?.setHovered(false);
@@ -441,7 +463,10 @@ export class GameScene {
         this.refreshHud();
         return;
       }
-      if (this.run.phase === "menu") return;
+      if (this.run.phase === "menu") {
+        if (key === "Enter" && this.menu.visible) this.menu.submit();
+        return;
+      }
       switch (key.toLowerCase()) {
         case "r":
           void this.restartInning();

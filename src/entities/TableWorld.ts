@@ -128,8 +128,9 @@ export class TableWorld {
 
   private buildScoreboard(): DynamicTexture {
     const scene = this.scene;
+    // Low enough that all three text rows stay on-screen under the fixed camera
     const board = MeshBuilder.CreateBox("scoreboard", { width: 9, height: 3.4, depth: 0.35 }, scene);
-    board.position = new Vector3(0, 3.4, 11.2);
+    board.position = new Vector3(0, 2.65, 10.8);
 
     const tex = new DynamicTexture("scoreboardTex", { width: 1024, height: 384 }, scene, false);
     const mat = new StandardMaterial("scoreboardMat", scene);
@@ -143,7 +144,7 @@ export class TableWorld {
     postMat.diffuseColor = new Color3(0.15, 0.15, 0.18);
     for (const x of [-3.5, 3.5]) {
       const post = MeshBuilder.CreateCylinder("scoreboardPost", { height: 3.6, diameter: 0.28 }, scene);
-      post.position = new Vector3(x, 1.8, 11.2);
+      post.position = new Vector3(x, 1.8, 10.8);
       post.material = postMat;
     }
 
@@ -152,7 +153,8 @@ export class TableWorld {
     return tex;
   }
 
-  updateScoreboard(line1: string, line2: string, line3: string): void {
+  /** The 3D board is the primary score display; line1 is the big number row. */
+  updateScoreboard(line1: string, line2: string, line3: string, line1Color = "#ffd257"): void {
     const ctx = this.scoreboardTexture.getContext() as CanvasRenderingContext2D;
     ctx.fillStyle = "#101418";
     ctx.fillRect(0, 0, 1024, 384);
@@ -160,15 +162,15 @@ export class TableWorld {
     ctx.lineWidth = 12;
     ctx.strokeRect(6, 6, 1012, 372);
     ctx.textAlign = "center";
-    ctx.fillStyle = "#ffd257";
-    ctx.font = "bold 92px 'Courier New', monospace";
-    ctx.fillText(line1, 512, 130);
+    ctx.fillStyle = line1Color;
+    ctx.font = "bold 110px 'Courier New', monospace";
+    ctx.fillText(line1, 512, 150);
     ctx.fillStyle = "#f4efe2";
-    ctx.font = "bold 84px 'Courier New', monospace";
-    ctx.fillText(line2, 512, 240);
+    ctx.font = "bold 56px 'Courier New', monospace";
+    ctx.fillText(line2, 512, 250);
     ctx.fillStyle = "#7fd4a0";
-    ctx.font = "bold 64px 'Courier New', monospace";
-    ctx.fillText(line3, 512, 330);
+    ctx.font = "bold 54px 'Courier New', monospace";
+    ctx.fillText(line3, 512, 335);
     this.scoreboardTexture.update();
   }
 

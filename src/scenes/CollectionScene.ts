@@ -91,7 +91,8 @@ export class CollectionScene {
     for (const key of ["team", "position", "era", "rarity", "trait"]) {
       const button = makeButton(`filter-${key}`, "", UI.cream, key === "team" ? "260px" : "150px", "44px");
       button.fontSize = 16;
-      button.onPointerUpObservable.add(() => this.cycleFilter(key));
+      // Left-click cycles forward, right-click backward (handy for 10 positions)
+      button.onPointerUpObservable.add((info) => this.cycleFilter(key, info.buttonIndex === 2 ? -1 : 1));
       button.paddingLeft = "6px";
       barStack.addControl(button);
       this.filterButtons[key] = button;
@@ -136,7 +137,7 @@ export class CollectionScene {
     this.emptyText.isVisible = false;
     root.addControl(this.emptyText);
 
-    const hint = makeText("click a card to inspect · arrows flip pages", 15, "#9a917f");
+    const hint = makeText("click a card to inspect · right-click a filter to cycle back · arrows flip pages", 15, "#9a917f");
     bottomCenter(hint);
     hint.top = "-72px";
     root.addControl(hint);
@@ -169,9 +170,9 @@ export class CollectionScene {
     this.onClose();
   }
 
-  private cycleFilter(key: string): void {
+  private cycleFilter(key: string, direction = 1): void {
     const values = this.filterValues[key];
-    this.filterIndex[key] = (this.filterIndex[key] + 1) % values.length;
+    this.filterIndex[key] = (this.filterIndex[key] + direction + values.length) % values.length;
     this.page = 0;
     this.audio.play("click");
     this.refresh();
@@ -283,6 +284,8 @@ export class CollectionScene {
         this.setFocus(this.cardFromPick());
       } else if (info.type === PointerEventTypes.POINTERMOVE) {
         const card = this.cardFromPick();
+        const canvas = this.scene.getEngine().getRenderingCanvas();
+        if (canvas) canvas.style.cursor = card ? "pointer" : "default";
         if (card !== this.hovered) {
           if (this.hovered !== this.focused) this.hovered?.setHovered(false);
           if (card !== this.focused) card?.setHovered(true);

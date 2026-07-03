@@ -16,8 +16,9 @@ export class DebugPanel {
   constructor(adt: AdvancedDynamicTexture, callbacks: DebugCallbacks) {
     this.root = makePanel("330px", "420px");
     this.root.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    this.root.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+    this.root.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.root.left = "14px";
+    this.root.top = "342px"; // below the stadium/equipment panel
     this.root.background = "rgba(30, 12, 12, 0.92)";
     this.root.isVisible = false;
     adt.addControl(this.root);

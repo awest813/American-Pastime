@@ -9,26 +9,28 @@ export interface HudCallbacks {
   onDiscard: () => void;
 }
 
+const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
 /**
- * The in-inning HUD: scoreline, pitch card, equipment list, play/discard
- * buttons, and — most importantly — the live score preview that shows the
- * exact combos and projected runs for the current selection before the
- * player commits.
+ * The in-inning HUD. The 3D scoreboard owns the score itself; the HUD covers
+ * everything around it: pitch card, stadium/equipment, action buttons with
+ * resource counts, and the live score preview — the exact combos and
+ * projected runs for the current selection, before the player commits.
  */
 export class GameHud {
   private root: Rectangle;
-  private scoreLine: TextBlock;
-  private inningLine: TextBlock;
   private pitchText: TextBlock;
   private equipmentText: TextBlock;
   private statusLine: TextBlock;
+  private previewPanel: Rectangle;
   private previewTitle: TextBlock;
-  private previewLines: TextBlock;
+  private leadoffText: TextBlock;
+  private previewLabels: TextBlock;
+  private previewValues: TextBlock;
   private previewTotal: TextBlock;
   private playButton: Button;
   private discardButton: Button;
   private popupText: TextBlock;
-  private runsAnimating = false;
   private popupGeneration = 0;
 
   constructor(adt: AdvancedDynamicTexture, callbacks: HudCallbacks) {
@@ -38,21 +40,6 @@ export class GameHud {
     this.root.thickness = 0;
     this.root.isPointerBlocker = false;
     adt.addControl(this.root);
-
-    // Center-top scoreline
-    const scorePanel = makePanel("340px", "96px");
-    scorePanel.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
-    scorePanel.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    scorePanel.top = "14px";
-    this.root.addControl(scorePanel);
-    const scoreStack = makeStack();
-    scorePanel.addControl(scoreStack);
-    this.scoreLine = makeText("0 / 12 RUNS", 34, UI.gold);
-    this.scoreLine.fontFamily = UI.mono;
-    this.scoreLine.fontWeight = "bold";
-    scoreStack.addControl(this.scoreLine);
-    this.inningLine = makeText("INNING 1 of 9", 18);
-    scoreStack.addControl(this.inningLine);
 
     // Top-left pitch card
     const pitchPanel = makePanel("300px", "132px");
@@ -83,26 +70,47 @@ export class GameHud {
     gearPanel.addControl(this.equipmentText);
 
     // Right-side score preview
-    const previewPanel = makePanel("360px", "420px");
-    topRight(previewPanel);
-    previewPanel.left = "-14px";
-    previewPanel.top = "110px";
-    this.root.addControl(previewPanel);
+    this.previewPanel = makePanel("360px", "430px");
+    topRight(this.previewPanel);
+    this.previewPanel.left = "-14px";
+    this.previewPanel.top = "110px";
+    this.root.addControl(this.previewPanel);
     const previewStack = makeStack();
     previewStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     previewStack.paddingTop = "10px";
-    previewPanel.addControl(previewStack);
+    this.previewPanel.addControl(previewStack);
     this.previewTitle = makeText("SCORE PREVIEW", 22, UI.gold);
     this.previewTitle.fontFamily = UI.mono;
     previewStack.addControl(this.previewTitle);
-    this.previewLines = makeText("Select up to 5 cards.", 16);
-    this.previewLines.textWrapping = true;
-    this.previewLines.resizeToFit = false;
-    this.previewLines.width = "336px";
-    this.previewLines.height = "300px";
-    this.previewLines.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    this.previewLines.paddingLeft = "12px";
-    previewStack.addControl(this.previewLines);
+    this.leadoffText = makeText("", 16, UI.green);
+    this.leadoffText.paddingTop = "4px";
+    previewStack.addControl(this.leadoffText);
+
+    // Two synced columns: labels clip left, values align right, lines match 1:1.
+    const columns = new Rectangle();
+    columns.width = "336px";
+    columns.height = "290px";
+    columns.thickness = 0;
+    previewStack.addControl(columns);
+    this.previewLabels = makeText("", 16);
+    this.previewLabels.textWrapping = false;
+    this.previewLabels.resizeToFit = false;
+    this.previewLabels.width = "262px";
+    this.previewLabels.height = "290px";
+    this.previewLabels.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    this.previewLabels.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.previewLabels.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    columns.addControl(this.previewLabels);
+    this.previewValues = makeText("", 16, UI.gold);
+    this.previewValues.textWrapping = false;
+    this.previewValues.resizeToFit = false;
+    this.previewValues.width = "70px";
+    this.previewValues.height = "290px";
+    this.previewValues.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+    this.previewValues.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.previewValues.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+    columns.addControl(this.previewValues);
+
     this.previewTotal = makeText("", 30, UI.green);
     this.previewTotal.fontFamily = UI.mono;
     this.previewTotal.fontWeight = "bold";
@@ -114,14 +122,14 @@ export class GameHud {
     actionStack.top = "-10px";
     actionStack.height = "64px";
     this.root.addControl(actionStack);
-    this.playButton = makeButton("playButton", "PLAY HAND", UI.green);
+    this.playButton = makeButton("playButton", "PLAY HAND", UI.green, "230px");
     this.playButton.onPointerUpObservable.add(() => callbacks.onPlay());
     actionStack.addControl(this.playButton);
     const spacer = new Rectangle();
     spacer.width = "20px";
     spacer.thickness = 0;
     actionStack.addControl(spacer);
-    this.discardButton = makeButton("discardButton", "DISCARD", UI.red);
+    this.discardButton = makeButton("discardButton", "DISCARD", UI.red, "230px");
     this.discardButton.onPointerUpObservable.add(() => callbacks.onDiscard());
     actionStack.addControl(this.discardButton);
 
@@ -147,12 +155,7 @@ export class GameHud {
     this.root.isVisible = visible;
   }
 
-  update(run: RunSystem, deckCount: number): void {
-    if (!this.runsAnimating) {
-      this.scoreLine.text = `${run.runs} / ${run.target} RUNS`;
-      this.scoreLine.color = run.runs >= run.target ? UI.green : UI.gold;
-    }
-    this.inningLine.text = `INNING ${run.inning} of 9`;
+  update(run: RunSystem, deckCount: number, selectionCount: number): void {
     const hand = run.pitch.hand === "L" ? "LHP" : "RHP";
     this.pitchText.text = `NOW PITCHING: ${run.pitch.name.toUpperCase()} (${hand})\nDifficulty ${run.pitch.difficulty}\n\n${run.pitch.description}`;
     const gearLines = [`STADIUM: ${run.stadium?.name ?? "—"}`, run.stadium?.description ?? "", "", "EQUIPMENT:"];
@@ -162,49 +165,42 @@ export class GameHud {
       for (const e of run.equipment) gearLines.push(`  · ${e.name}`);
     }
     this.equipmentText.text = gearLines.join("\n");
-    this.statusLine.text = `Plays ${run.playsLeft} · Discards ${run.discardsLeft} · Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
-    this.setButtonsEnabled(run.playsLeft > 0, run.discardsLeft > 0);
+    this.statusLine.text = `Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
+
+    this.previewPanel.isVisible = run.phase === "inning";
+    const playLabel = this.playButton.textBlock;
+    if (playLabel) playLabel.text = `PLAY HAND · ${run.playsLeft}`;
+    const discardLabel = this.discardButton.textBlock;
+    if (discardLabel) discardLabel.text = `DISCARD · ${run.discardsLeft}`;
+    this.setButtonsEnabled(
+      run.phase === "inning" && run.playsLeft > 0 && selectionCount > 0,
+      run.phase === "inning" && run.discardsLeft > 0 && selectionCount > 0,
+    );
   }
 
-  updatePreview(result: ScoreResult | null, selectedCount: number): void {
+  updatePreview(result: ScoreResult | null, selectedCount: number, leadoffName: string | null): void {
+    this.previewTitle.text = `SCORE PREVIEW · ${selectedCount}/5`;
     if (!result || selectedCount === 0) {
-      this.previewLines.text = "Select up to 5 cards.\n\nFirst card matters: pitch and\nequipment effects hit it hardest.";
+      this.leadoffText.text = "";
+      this.previewLabels.text = "Click cards to build an at-bat.\n\nOrder matters: the pitch and\nyour equipment hit the FIRST\ncard hardest.";
+      this.previewValues.text = "";
       this.previewTotal.text = "";
       return;
     }
-    const lines = result.lines.map((l) => `${l.label}  ${l.value}`);
-    if (result.combos.length === 0) {
-      lines.push("(no combos detected)");
+    this.leadoffText.text = `Leadoff: ${truncate(leadoffName ?? "", 30)}`;
+    const labels: string[] = [];
+    const values: string[] = [];
+    for (const line of result.lines) {
+      labels.push(truncate(line.label, 30));
+      values.push(line.value);
     }
-    this.previewLines.text = lines.join("\n");
+    if (result.combos.length === 0) {
+      labels.push("(no combos detected)");
+      values.push("");
+    }
+    this.previewLabels.text = labels.join("\n");
+    this.previewValues.text = values.join("\n");
     this.previewTotal.text = `≈ ${result.runs} RUNS`;
-  }
-
-  /** Tick the run counter up with a scale pulse instead of snapping. */
-  animateRuns(from: number, to: number, target: number): Promise<void> {
-    this.runsAnimating = true;
-    const durationMs = Math.min(900, 250 + (to - from) * 45);
-    return new Promise((resolve) => {
-      const start = performance.now();
-      const tick = () => {
-        const t = Math.min(1, (performance.now() - start) / durationMs);
-        const shown = Math.round(from + (to - from) * t);
-        this.scoreLine.text = `${shown} / ${target} RUNS`;
-        this.scoreLine.color = shown >= target ? UI.green : UI.gold;
-        const pulse = 1 + Math.sin(t * Math.PI) * 0.25;
-        this.scoreLine.scaleX = pulse;
-        this.scoreLine.scaleY = pulse;
-        if (t >= 1) {
-          this.scoreLine.scaleX = 1;
-          this.scoreLine.scaleY = 1;
-          this.runsAnimating = false;
-          resolve();
-        } else {
-          requestAnimationFrame(tick);
-        }
-      };
-      tick();
-    });
   }
 
   setButtonsEnabled(play: boolean, discard: boolean): void {

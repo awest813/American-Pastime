@@ -13,6 +13,7 @@ export interface ShopCallbacks {
 export class ShopPanel {
   private root: Rectangle;
   private cashText: TextBlock;
+  private ownedText: TextBlock;
   private offersRow: StackPanel;
 
   constructor(adt: AdvancedDynamicTexture, private callbacks: ShopCallbacks) {
@@ -38,8 +39,15 @@ export class ShopPanel {
 
     this.cashText = makeText("", 24, UI.green);
     this.cashText.fontFamily = UI.mono;
-    this.cashText.paddingBottom = "18px";
     stack.addControl(this.cashText);
+
+    this.ownedText = makeText("", 16, "#9a917f");
+    this.ownedText.textWrapping = true;
+    this.ownedText.resizeToFit = false;
+    this.ownedText.width = "800px";
+    this.ownedText.height = "40px";
+    this.ownedText.paddingBottom = "8px";
+    stack.addControl(this.ownedText);
 
     this.offersRow = makeStack(false);
     this.offersRow.height = "300px";
@@ -63,6 +71,10 @@ export class ShopPanel {
 
   refresh(run: RunSystem): void {
     this.cashText.text = `CASH: $${run.cash}   ·   EQUIPMENT ${run.equipment.length}/5`;
+    this.ownedText.text =
+      run.equipment.length === 0
+        ? "Owned: nothing yet — your first piece of gear changes everything."
+        : `Owned: ${run.equipment.map((e) => e.name).join(" · ")}`;
     this.offersRow.clearControls();
     if (run.shopOffers.length === 0) {
       const soldOut = makeText("Sold out. The clubhouse kid shrugs.", 22);

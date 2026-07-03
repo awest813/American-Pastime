@@ -6,8 +6,10 @@ import { Random } from "../utils/Random";
 export class MenuPanel {
   private root: Rectangle;
   private seedInput: InputText;
+  private onStart: (seed: string) => void;
 
   constructor(adt: AdvancedDynamicTexture, onStart: (seed: string) => void, onCollection?: () => void) {
+    this.onStart = onStart;
     this.root = new Rectangle("menuRoot");
     this.root.width = 1;
     this.root.height = 1;
@@ -56,7 +58,7 @@ export class MenuPanel {
 
     const startButton = makeButton("startButton", "PLAY BALL", UI.green, "280px", "64px");
     startButton.fontSize = 28;
-    startButton.onPointerUpObservable.add(() => onStart(this.seedInput.text.trim() || Random.generateSeed()));
+    startButton.onPointerUpObservable.add(() => this.submit());
     stack.addControl(startButton);
 
     if (onCollection) {
@@ -70,6 +72,15 @@ export class MenuPanel {
 
   setVisible(visible: boolean): void {
     this.root.isVisible = visible;
+  }
+
+  get visible(): boolean {
+    return this.root.isVisible;
+  }
+
+  /** Start the run with the current seed (button click or Enter key). */
+  submit(): void {
+    this.onStart(this.seedInput.text.trim() || Random.generateSeed());
   }
 
   randomizeSeed(): void {
