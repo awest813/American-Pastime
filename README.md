@@ -75,6 +75,8 @@ src/
 
 Physics is cosmetic only (home-run ball launch); scoring is fully deterministic, and `ScoreSystem.evaluate` is pure — the preview and the committed play call the same function, so the projection is always honest.
 
+All juice is asset-free: sound stingers are synthesized with WebAudio (`systems/AudioSystem.ts` — bat crack, combo dings, organ fanfare, strikeout womp), and particles (confetti, infield dust, home-run sparkle trail in `entities/Effects.ts`) share one procedurally drawn dot texture. Big plays shake the camera, surge the stadium lights, and flash the scoreboard; the run counter ticks up instead of snapping.
+
 ## Commands
 
 - `npm run dev` — dev server

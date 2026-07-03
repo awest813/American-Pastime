@@ -28,6 +28,8 @@ export class GameHud {
   private playButton: Button;
   private discardButton: Button;
   private popupText: TextBlock;
+  private runsAnimating = false;
+  private popupGeneration = 0;
 
   constructor(adt: AdvancedDynamicTexture, callbacks: HudCallbacks) {
     this.root = new Rectangle("hudRoot");
@@ -146,8 +148,10 @@ export class GameHud {
   }
 
   update(run: RunSystem, deckCount: number): void {
-    this.scoreLine.text = `${run.runs} / ${run.target} RUNS`;
-    this.scoreLine.color = run.runs >= run.target ? UI.green : UI.gold;
+    if (!this.runsAnimating) {
+      this.scoreLine.text = `${run.runs} / ${run.target} RUNS`;
+      this.scoreLine.color = run.runs >= run.target ? UI.green : UI.gold;
+    }
     this.inningLine.text = `INNING ${run.inning} of 9`;
     const hand = run.pitch.hand === "L" ? "LHP" : "RHP";
     this.pitchText.text = `NOW PITCHING: ${run.pitch.name.toUpperCase()} (${hand})\nDifficulty ${run.pitch.difficulty}\n\n${run.pitch.description}`;
@@ -176,6 +180,33 @@ export class GameHud {
     this.previewTotal.text = `≈ ${result.runs} RUNS`;
   }
 
+  /** Tick the run counter up with a scale pulse instead of snapping. */
+  animateRuns(from: number, to: number, target: number): Promise<void> {
+    this.runsAnimating = true;
+    const durationMs = Math.min(900, 250 + (to - from) * 45);
+    return new Promise((resolve) => {
+      const start = performance.now();
+      const tick = () => {
+        const t = Math.min(1, (performance.now() - start) / durationMs);
+        const shown = Math.round(from + (to - from) * t);
+        this.scoreLine.text = `${shown} / ${target} RUNS`;
+        this.scoreLine.color = shown >= target ? UI.green : UI.gold;
+        const pulse = 1 + Math.sin(t * Math.PI) * 0.25;
+        this.scoreLine.scaleX = pulse;
+        this.scoreLine.scaleY = pulse;
+        if (t >= 1) {
+          this.scoreLine.scaleX = 1;
+          this.scoreLine.scaleY = 1;
+          this.runsAnimating = false;
+          resolve();
+        } else {
+          requestAnimationFrame(tick);
+        }
+      };
+      tick();
+    });
+  }
+
   setButtonsEnabled(play: boolean, discard: boolean): void {
     this.playButton.isEnabled = play;
     this.playButton.alpha = play ? 1 : 0.4;
@@ -185,6 +216,7 @@ export class GameHud {
 
   /** Slam a big combo/run announcement onto the screen, then fade it. */
   showPopup(text: string, color: string = UI.gold, holdMs = 850): Promise<void> {
+    const generation = ++this.popupGeneration; // a newer popup takes over the shared TextBlock
     this.popupText.text = text;
     this.popupText.color = color;
     this.popupText.isVisible = true;
@@ -192,6 +224,10 @@ export class GameHud {
     return new Promise((resolve) => {
       const start = performance.now();
       const tick = () => {
+        if (generation !== this.popupGeneration) {
+          resolve();
+          return;
+        }
         const elapsed = performance.now() - start;
         const grow = Math.min(1, elapsed / 160);
         this.popupText.scaleX = 0.6 + grow * 0.4;

@@ -170,6 +170,8 @@ export class Card3D {
   setHovered(hovered: boolean): void {
     if (this.selected) return;
     this.mesh.position.y = this.homePosition.y + (hovered ? 0.3 : 0);
+    const pop = hovered ? 1.07 : 1;
+    this.mesh.scaling.set(pop, pop, pop);
   }
 
   /** Snap to the hand pose implied by home position + selection lift. */
@@ -180,6 +182,7 @@ export class Card3D {
     }
     this.mesh.position.y = this.homePosition.y + (this.selected ? 0.55 : 0);
     this.mesh.rotation.copyFrom(this.homeRotation);
+    this.mesh.scaling.set(1, 1, 1);
   }
 
   dispose(): void {

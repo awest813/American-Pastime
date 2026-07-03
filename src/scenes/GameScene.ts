@@ -7,7 +7,9 @@ import type { Scene } from "@babylonjs/core/scene";
 
 import { BaseballToken } from "../entities/BaseballToken";
 import { Card3D } from "../entities/Card3D";
+import { Effects } from "../entities/Effects";
 import { TableWorld } from "../entities/TableWorld";
+import { AudioSystem } from "../systems/AudioSystem";
 import { ComboSystem } from "../systems/ComboSystem";
 import { DeckSystem } from "../systems/DeckSystem";
 import { RULES, RunSystem } from "../systems/RunSystem";
@@ -36,6 +38,8 @@ const DUGOUT = new Vector3(9.5, 0.4, -3.5);
 export class GameScene {
   private world: TableWorld;
   private tweens: Tweens;
+  private effects: Effects;
+  private audio = new AudioSystem();
   private run = new RunSystem();
   private deck: DeckSystem;
   private combos = new ComboSystem();
@@ -57,6 +61,7 @@ export class GameScene {
   private constructor(private scene: Scene, canvas: HTMLCanvasElement, adt: AdvancedDynamicTexture) {
     this.world = new TableWorld(scene, canvas);
     this.tweens = new Tweens(scene);
+    this.effects = new Effects(scene);
     this.deck = new DeckSystem(this.run.rng);
 
     this.hud = new GameHud(adt, {
@@ -66,17 +71,32 @@ export class GameScene {
     this.hud.setVisible(false);
     this.shop = new ShopPanel(adt, {
       onBuy: (offer) => {
-        if (this.run.buyEquipment(offer)) this.shop.refresh(this.run);
+        if (this.run.buyEquipment(offer)) {
+          this.audio.play("buy");
+          this.shop.refresh(this.run);
+        }
       },
       onReroll: () => {
-        if (this.run.rerollShop()) this.shop.refresh(this.run);
+        if (this.run.rerollShop()) {
+          this.audio.play("click");
+          this.shop.refresh(this.run);
+        }
       },
-      onContinue: () => this.nextInning(),
+      onContinue: () => {
+        this.audio.play("click");
+        this.nextInning();
+      },
     });
     this.shop.setVisible(false);
     this.end = new EndPanel(adt, {
-      onNewRun: () => this.startRun(),
-      onRetrySeed: () => this.startRun(this.lastSeed),
+      onNewRun: () => {
+        this.audio.play("click");
+        this.startRun();
+      },
+      onRetrySeed: () => {
+        this.audio.play("click");
+        this.startRun(this.lastSeed);
+      },
     });
     this.end.setVisible(false);
     this.debug = new DebugPanel(adt, {
@@ -87,7 +107,10 @@ export class GameScene {
       onWinInning: () => this.cheatWinInning(),
       onRedeal: () => void this.restartInning(),
     });
-    this.menu = new MenuPanel(adt, (seed) => this.startRun(seed));
+    this.menu = new MenuPanel(adt, (seed) => {
+      this.audio.play("click"); // also unlocks the AudioContext inside the user gesture
+      this.startRun(seed);
+    });
 
     this.bindPointer();
     this.bindHotkeys();
@@ -172,11 +195,17 @@ export class GameScene {
     });
     this.hand.push(...newCards);
     this.layoutHand();
-    // Deal with a stagger; new cards fly in from the deck spot.
+    // Deal with a stagger; new cards fly in from the deck spot with a spin flourish.
     const deals = newCards.map((card3d, i) =>
-      this.tweens
-        .delay(i * 90)
-        .then(() => this.tweens.moveTo(card3d.mesh, card3d.homePosition.clone(), 320, easeOutBack)),
+      this.tweens.delay(i * 90).then(() => {
+        this.audio.play("deal");
+        const fromY = -Math.PI * 2;
+        const toY = card3d.homeRotation.y;
+        void this.tweens.animate(320, (t) => {
+          card3d.mesh.rotation.y = fromY + (toY - fromY) * t;
+        });
+        return this.tweens.moveTo(card3d.mesh, card3d.homePosition.clone(), 320, easeOutBack);
+      }),
     );
     await Promise.all(deals);
     for (const card of this.hand) card.applyRestPose();
@@ -205,6 +234,7 @@ export class GameScene {
       card3d.setSelected(true);
       this.selection.push(card3d);
     }
+    this.audio.play("select");
     this.refreshPreview();
   }
 
@@ -234,25 +264,40 @@ export class GameScene {
     const playedCards = played.map((c) => c.card);
     const result = this.score.evaluate(playedCards, this.scoreContext());
 
-    // Cards stride out to the diamond and lie flat.
+    // Cards stride out to the diamond and slap down flat, kicking up dust.
     this.hand = this.hand.filter((c) => !played.includes(c));
     this.selection = [];
     const flights = played.map((card3d, i) => {
       const slot = new Vector3((i - (played.length - 1) / 2) * 1.7, 0.06 + i * 0.005, 1.6);
       return this.tweens.delay(i * 110).then(async () => {
+        this.audio.play("deal");
         void this.tweens.animate(300, (t) => {
           card3d.mesh.rotation.x = HAND_TILT + (Math.PI / 2 - HAND_TILT) * t;
         });
         await this.tweens.moveTo(card3d.mesh, slot, 340);
+        this.effects.dustPuff(slot.add(new Vector3(0, 0.15, 0)));
       });
     });
     await Promise.all(flights);
 
-    for (const combo of result.combos.slice(0, 3)) {
+    for (const [i, combo] of result.combos.slice(0, 3).entries()) {
+      this.audio.play("combo", i);
       await this.hud.showPopup(`${combo.name.toUpperCase()}!`, UI.cream, 620);
     }
-    BaseballToken.launch(this.scene, result.runs >= 14);
-    await this.hud.showPopup(`+${result.runs} RUNS!`, UI.gold, 1000);
+
+    const bigPlay = result.runs >= 14;
+    this.audio.play(bigPlay ? "homer" : "crack");
+    BaseballToken.launch(this.scene, bigPlay, this.effects);
+    if (bigPlay) {
+      this.world.pulseLights();
+      this.world.shakeCamera();
+    } else if (result.runs >= 8) {
+      this.world.shakeCamera(0.07, 250);
+    }
+    const runsBefore = this.run.runs;
+    void this.hud.showPopup(`+${result.runs} RUNS!`, UI.gold, 1000);
+    this.audio.play("runs");
+    await this.hud.animateRuns(runsBefore, runsBefore + result.runs, this.run.target);
 
     this.run.recordPlay(result.runs);
     this.world.updateScoreboard(
@@ -260,6 +305,7 @@ export class GameScene {
       `${this.run.runs} / ${this.run.target}`,
       this.run.pitch.name.toUpperCase(),
     );
+    this.world.flashScoreboard();
 
     await this.tweens.delay(350);
     for (const card3d of played) card3d.dispose();
@@ -273,6 +319,7 @@ export class GameScene {
       await this.winInning();
     } else if (this.run.inningLost) {
       this.run.phase = "gameOver";
+      this.audio.play("lose");
       await this.hud.showPopup("STRUCK OUT…", UI.red, 1100);
       this.endRun(false);
     } else {
@@ -289,7 +336,15 @@ export class GameScene {
     this.selection = [];
     await Promise.all(
       discarded.map((card3d, i) =>
-        this.tweens.delay(i * 70).then(() => this.tweens.moveTo(card3d.mesh, DUGOUT.add(new Vector3(0, 0, i * 0.3)), 300)),
+        this.tweens.delay(i * 70).then(() => {
+          this.audio.play("deal");
+          // Tumble end-over-end into the dugout pile
+          void this.tweens.animate(300, (t) => {
+            card3d.mesh.rotation.z = t * Math.PI * 1.5;
+            card3d.mesh.rotation.x = HAND_TILT + t * Math.PI;
+          });
+          return this.tweens.moveTo(card3d.mesh, DUGOUT.add(new Vector3(0, 0, i * 0.3)), 300);
+        }),
       ),
     );
     for (const card3d of discarded) card3d.dispose();
@@ -303,6 +358,8 @@ export class GameScene {
   }
 
   private async winInning(): Promise<void> {
+    this.audio.play("win");
+    this.effects.confetti(new Vector3(0, 2.5, 1.5));
     await this.hud.showPopup("INNING WON!", UI.green, 1000);
     this.run.finishInning();
     if (this.run.phase === "victory") {

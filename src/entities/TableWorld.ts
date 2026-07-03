@@ -17,6 +17,8 @@ import type { Scene } from "@babylonjs/core/scene";
 export class TableWorld {
   camera: ArcRotateCamera;
   private scoreboardTexture: DynamicTexture;
+  private scoreboardMat: StandardMaterial;
+  private lampMat: StandardMaterial;
 
   constructor(private scene: Scene, canvas: HTMLCanvasElement) {
     scene.clearColor = new Color4(0.05, 0.06, 0.12, 1);
@@ -135,6 +137,7 @@ export class TableWorld {
     mat.emissiveColor = new Color3(0.85, 0.85, 0.85); // glows like a night-game board
     mat.specularColor = Color3.Black();
     board.material = mat;
+    this.scoreboardMat = mat;
 
     const postMat = new StandardMaterial("postMat", scene);
     postMat.diffuseColor = new Color3(0.15, 0.15, 0.18);
@@ -169,12 +172,57 @@ export class TableWorld {
     this.scoreboardTexture.update();
   }
 
+  /** Drive a 0→1→0 pulse over the render loop; peak lands at t=0.5. */
+  private pulse(durationMs: number, apply: (intensity: number) => void): void {
+    const start = performance.now();
+    const observer = this.scene.onBeforeRenderObservable.add(() => {
+      const t = Math.min(1, (performance.now() - start) / durationMs);
+      apply(Math.sin(t * Math.PI));
+      if (t >= 1) this.scene.onBeforeRenderObservable.remove(observer);
+    });
+  }
+
+  /** Scoreboard glows hot for a beat when the score changes. */
+  flashScoreboard(): void {
+    this.pulse(500, (k) => {
+      const glow = 0.85 + k * 0.9;
+      this.scoreboardMat.emissiveColor.set(glow, glow, glow * 0.85);
+    });
+  }
+
+  /** Stadium lights surge on big plays. */
+  pulseLights(): void {
+    this.pulse(700, (k) => {
+      this.lampMat.emissiveColor.set(1 + k * 1.2, 0.95 + k * 1.1, 0.75 + k * 0.7);
+    });
+  }
+
+  /** Quick decaying camera shake; magnitude is world units at the target. */
+  shakeCamera(magnitude = 0.14, durationMs = 380): void {
+    const base = this.camera.target.clone();
+    const start = performance.now();
+    const observer = this.scene.onBeforeRenderObservable.add(() => {
+      const t = Math.min(1, (performance.now() - start) / durationMs);
+      const decay = (1 - t) * magnitude;
+      this.camera.target.set(
+        base.x + (Math.random() - 0.5) * decay,
+        base.y + (Math.random() - 0.5) * decay,
+        base.z + (Math.random() - 0.5) * decay,
+      );
+      if (t >= 1) {
+        this.camera.target.copyFrom(base);
+        this.scene.onBeforeRenderObservable.remove(observer);
+      }
+    });
+  }
+
   private buildLightTowers(): void {
     const scene = this.scene;
     const poleMat = new StandardMaterial("poleMat", scene);
     poleMat.diffuseColor = new Color3(0.2, 0.2, 0.24);
     const lampMat = new StandardMaterial("lampMat", scene);
     lampMat.emissiveColor = new Color3(1, 0.95, 0.75);
+    this.lampMat = lampMat;
 
     for (const [x, z] of [[-10, 8], [10, 8]] as const) {
       const pole = MeshBuilder.CreateCylinder("towerPole", { height: 7, diameter: 0.3 }, scene);

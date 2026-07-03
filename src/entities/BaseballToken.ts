@@ -5,6 +5,7 @@ import { PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugi
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
+import type { Effects } from "./Effects";
 
 /**
  * Cosmetic Havok juice: on a big play a baseball launches off home plate
@@ -13,7 +14,7 @@ import type { Scene } from "@babylonjs/core/scene";
 export class BaseballToken {
   private static groundAggregate: PhysicsAggregate | null = null;
 
-  static launch(scene: Scene, big: boolean): void {
+  static launch(scene: Scene, big: boolean, effects?: Effects): void {
     const physics = scene.getPhysicsEngine();
     const ball = MeshBuilder.CreateSphere("baseball", { diameter: 0.36 }, scene);
     ball.position = new Vector3(0, 0.5, -1.2); // home plate area
@@ -21,6 +22,10 @@ export class BaseballToken {
     mat.diffuseColor = new Color3(0.95, 0.93, 0.88);
     mat.emissiveColor = new Color3(0.35, 0.34, 0.32);
     ball.material = mat;
+
+    if (big) {
+      effects?.ballTrail(ball, 2600);
+    }
 
     if (physics) {
       if (!BaseballToken.groundAggregate) {
