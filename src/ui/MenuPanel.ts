@@ -7,7 +7,7 @@ export class MenuPanel {
   private root: Rectangle;
   private seedInput: InputText;
 
-  constructor(adt: AdvancedDynamicTexture, onStart: (seed: string) => void) {
+  constructor(adt: AdvancedDynamicTexture, onStart: (seed: string) => void, onCollection?: () => void) {
     this.root = new Rectangle("menuRoot");
     this.root.width = 1;
     this.root.height = 1;
@@ -58,6 +58,14 @@ export class MenuPanel {
     startButton.fontSize = 28;
     startButton.onPointerUpObservable.add(() => onStart(this.seedInput.text.trim() || Random.generateSeed()));
     stack.addControl(startButton);
+
+    if (onCollection) {
+      const binderButton = makeButton("binderButton", "CARD BINDER", UI.cream, "280px", "52px");
+      binderButton.fontSize = 22;
+      binderButton.paddingTop = "14px";
+      binderButton.onPointerUpObservable.add(() => onCollection());
+      stack.addControl(binderButton);
+    }
   }
 
   setVisible(visible: boolean): void {

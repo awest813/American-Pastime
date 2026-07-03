@@ -7,6 +7,7 @@ import type { Scene } from "@babylonjs/core/scene";
 
 import { BaseballToken } from "../entities/BaseballToken";
 import { Card3D } from "../entities/Card3D";
+import { CollectionScene } from "./CollectionScene";
 import { Effects } from "../entities/Effects";
 import { TableWorld } from "../entities/TableWorld";
 import { AudioSystem } from "../systems/AudioSystem";
@@ -50,6 +51,7 @@ export class GameScene {
   private shop: ShopPanel;
   private end: EndPanel;
   private debug: DebugPanel;
+  private collection: CollectionScene;
 
   private hand: Card3D[] = [];
   /** Selection in click order — order matters for "first card" effects. */
@@ -107,10 +109,21 @@ export class GameScene {
       onWinInning: () => this.cheatWinInning(),
       onRedeal: () => void this.restartInning(),
     });
-    this.menu = new MenuPanel(adt, (seed) => {
-      this.audio.play("click"); // also unlocks the AudioContext inside the user gesture
-      this.startRun(seed);
+    this.collection = new CollectionScene(scene, adt, this.tweens, this.audio, this.run.players, () => {
+      this.menu.setVisible(true);
     });
+    this.menu = new MenuPanel(
+      adt,
+      (seed) => {
+        this.audio.play("click"); // also unlocks the AudioContext inside the user gesture
+        this.startRun(seed);
+      },
+      () => {
+        this.audio.play("click");
+        this.menu.setVisible(false);
+        this.collection.open();
+      },
+    );
 
     this.bindPointer();
     this.bindHotkeys();

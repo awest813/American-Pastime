@@ -18,6 +18,7 @@ npm run dev        # opens on http://localhost:8088
 - **DISCARD** dumps the selection and redraws (3 per inning).
 - Beat the target within 4 plays → collect cash ($3 + $1 per unused play) → shop → next inning. Nine innings wins the run.
 - Runs are seeded: the same seed always deals the same season.
+- **CARD BINDER** on the title screen browses every card in 3D with team / position / era / rarity / trait filters, page flipping (arrow keys), and click-to-inspect. It doubles as the dev card-preview tool.
 
 ## Rules (first prototype tuning)
 
@@ -62,6 +63,7 @@ Content in JSON, gameplay in systems, visuals in entities/scenes — add cards w
 ```
 src/
   scenes/GameScene.ts      orchestrator: deal → select → preview → play → shop loop
+  scenes/CollectionScene.ts  the card binder: filterable, pageable 3D card browser
   systems/                 pure, deterministic game logic
     RunSystem.ts           run state, targets, cash, shop
     DeckSystem.ts          draw/discard piles, reshuffle
