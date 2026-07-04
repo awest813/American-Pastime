@@ -3,6 +3,7 @@ import { UI, makeButton, makeStack, makeText } from "./kit";
 
 export interface PauseCallbacks {
   onResume: () => void;
+  onSettings: () => void;
   onAbandon: () => void;
 }
 
@@ -42,6 +43,11 @@ export class PausePanel {
     const resume = makeButton("pauseResume", "RESUME (ESC)", UI.green, "300px", "58px");
     resume.onPointerUpObservable.add(() => callbacks.onResume());
     stack.addControl(resume);
+
+    const settings = makeButton("pauseSettings", "SETTINGS", UI.cream, "300px", "52px");
+    settings.paddingTop = "14px";
+    settings.onPointerUpObservable.add(() => callbacks.onSettings());
+    stack.addControl(settings);
 
     const abandon = makeButton("pauseAbandon", "ABANDON RUN", UI.red, "300px", "52px");
     abandon.paddingTop = "14px";

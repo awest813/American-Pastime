@@ -8,6 +8,8 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 
+import { settings } from "../systems/Settings";
+
 /**
  * The tabletop baseball shrine: fixed broadcast-style camera, a card-table
  * surface with a painted diamond, a scoreboard in the back, and stadium
@@ -208,6 +210,7 @@ export class TableWorld {
 
   /** Quick decaying camera shake; magnitude is world units at the target. */
   shakeCamera(magnitude = 0.14, durationMs = 380): void {
+    if (!settings.screenShake) return;
     const base = this.camera.target.clone();
     const start = performance.now();
     const observer = this.scene.onBeforeRenderObservable.add(() => {

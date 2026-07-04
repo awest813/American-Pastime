@@ -1,3 +1,5 @@
+import { saveSettings, settings } from "./Settings";
+
 export type Stinger =
   | "click"
   | "deal"
@@ -20,13 +22,29 @@ export type Stinger =
 export class AudioSystem {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  private muted = false;
 
-  /** @returns true if audio is now muted. */
+  /** Master gain at volume 1.0; the stinger mix sits well under clipping here. */
+  private static readonly MAX_GAIN = 0.5;
+
+  get muted(): boolean {
+    return settings.muted;
+  }
+
+  /** @returns true if audio is now muted. Persisted across sessions. */
   toggleMute(): boolean {
-    this.muted = !this.muted;
-    if (this.master) this.master.gain.value = this.muted ? 0 : 0.35;
-    return this.muted;
+    settings.muted = !settings.muted;
+    saveSettings();
+    this.applyVolume();
+    return settings.muted;
+  }
+
+  /** Re-read volume/mute from settings (called when the settings panel changes them). */
+  applyVolume(): void {
+    if (this.master) this.master.gain.value = this.currentGain();
+  }
+
+  private currentGain(): number {
+    return settings.muted ? 0 : AudioSystem.MAX_GAIN * settings.volume;
   }
 
   private ensure(): AudioContext | null {
@@ -34,7 +52,7 @@ export class AudioSystem {
       try {
         this.ctx = new AudioContext();
         this.master = this.ctx.createGain();
-        this.master.gain.value = this.muted ? 0 : 0.35;
+        this.master.gain.value = this.currentGain();
         this.master.connect(this.ctx.destination);
       } catch {
         return null;

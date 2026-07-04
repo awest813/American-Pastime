@@ -15,6 +15,7 @@ import { ComboSystem } from "../systems/ComboSystem";
 import { DeckSystem } from "../systems/DeckSystem";
 import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
+import { SPEED_SCALE, settings } from "../systems/Settings";
 import type { PlayerCard, ScoreResult } from "../systems/types";
 import { ComboBook } from "../ui/ComboBook";
 import { DebugPanel } from "../ui/DebugPanel";
@@ -22,6 +23,7 @@ import { EndPanel } from "../ui/EndPanel";
 import { GameHud } from "../ui/GameHud";
 import { MenuPanel } from "../ui/MenuPanel";
 import { PausePanel } from "../ui/PausePanel";
+import { SettingsPanel } from "../ui/SettingsPanel";
 import { ShopPanel } from "../ui/ShopPanel";
 import { UI } from "../ui/kit";
 import { Tweens, easeOutBack } from "../utils/Tweens";
@@ -56,6 +58,7 @@ export class GameScene {
   private collection: CollectionScene;
   private comboBook: ComboBook;
   private pause: PausePanel;
+  private settingsPanel: SettingsPanel;
 
   private hand: Card3D[] = [];
   /** Selection in click order — order matters for "first card" effects. */
@@ -124,25 +127,38 @@ export class GameScene {
     this.collection = new CollectionScene(scene, adt, this.tweens, this.audio, this.run.players, () => {
       this.menu.setVisible(true);
     });
-    this.menu = new MenuPanel(
-      adt,
-      (seed) => {
+    this.menu = new MenuPanel(adt, {
+      onStart: (seed) => {
         this.audio.play("click"); // also unlocks the AudioContext inside the user gesture
         this.startRun(seed);
       },
-      () => {
+      onCollection: () => {
         this.audio.play("click");
         this.menu.setVisible(false);
         this.collection.open();
       },
-    );
+      onSettings: () => {
+        this.audio.play("click");
+        this.settingsPanel.setVisible(true);
+      },
+    });
 
     // Overlays created last so they render above every other panel
     this.comboBook = new ComboBook(adt, this.run.comboMeta, () => this.toggleComboBook());
     this.pause = new PausePanel(adt, {
       onResume: () => this.pause.setVisible(false),
+      onSettings: () => {
+        this.audio.play("click");
+        this.settingsPanel.setVisible(true);
+      },
       onAbandon: () => this.quitToMenu(),
     });
+    // Settings sit above even the pause screen (it opens from there too)
+    this.settingsPanel = new SettingsPanel(adt, this.audio, {
+      onClose: () => undefined, // whichever screen was underneath is still there
+      onApply: () => this.applySettings(),
+    });
+    this.applySettings();
 
     this.bindPointer();
     this.bindHotkeys();
@@ -165,6 +181,12 @@ export class GameScene {
     const adt = AdvancedDynamicTexture.CreateFullscreenUI("gameUI", true, scene);
     adt.idealWidth = 1600;
     return new GameScene(scene, canvas, adt);
+  }
+
+  /** Push persisted settings into the live systems they drive. */
+  private applySettings(): void {
+    Tweens.timeScale = SPEED_SCALE[settings.speed];
+    this.audio.applyVolume();
   }
 
   // ── Run flow ────────────────────────────────────────────────────────────
@@ -234,7 +256,7 @@ export class GameScene {
   }
 
   private toggleComboBook(): void {
-    if (this.pause.isOpen || this.run.phase === "menu") return;
+    if (this.pause.isOpen || this.settingsPanel.isOpen || this.run.phase === "menu") return;
     this.audio.play("click");
     this.comboBook.setVisible(!this.comboBook.isOpen);
   }
@@ -242,6 +264,7 @@ export class GameScene {
   /** Abandon path: back to the title screen from pause or the end screen. */
   private quitToMenu(): void {
     this.audio.play("click");
+    this.settingsPanel.setVisible(false);
     this.pause.setVisible(false);
     this.comboBook.setVisible(false);
     this.end.setVisible(false);
@@ -497,7 +520,7 @@ export class GameScene {
 
   private bindPointer(): void {
     this.scene.onPointerObservable.add((info) => {
-      if (this.run.phase !== "inning" || this.pause.isOpen || this.comboBook.isOpen) return;
+      if (this.run.phase !== "inning" || this.pause.isOpen || this.comboBook.isOpen || this.settingsPanel.isOpen) return;
       if (info.type === PointerEventTypes.POINTERMOVE) {
         const picked = this.scene.pick(this.scene.pointerX, this.scene.pointerY, (m) => m.name.startsWith("card-"));
         const card = this.cardFromMesh(picked?.pickedMesh?.name);
@@ -530,19 +553,35 @@ export class GameScene {
       }
       if (key.toLowerCase() === "m") {
         const muted = this.audio.toggleMute();
-        if (this.run.phase !== "menu") void this.hud.showPopup(muted ? "MUTED" : "SOUND ON", UI.cream, 450);
+        this.settingsPanel.refresh(); // keep the SOUND toggle honest if the panel is up
+        if (this.run.phase !== "menu" && !this.settingsPanel.isOpen) {
+          void this.hud.showPopup(muted ? "MUTED" : "SOUND ON", UI.cream, 450);
+        }
         return;
       }
       if (this.run.phase === "menu") {
-        if (key === "Enter" && this.menu.visible) this.menu.submit();
-        return; // the binder owns Escape/arrows on the title screen
+        if (key === "Escape") {
+          if (this.settingsPanel.isOpen) {
+            this.settingsPanel.close();
+          } else if (this.menu.visible && !this.menu.onHome) {
+            this.audio.play("click");
+            this.menu.showHome();
+          }
+          return; // the binder owns its own Escape/arrows
+        }
+        if (key === "Enter" && this.menu.visible && this.menu.onHome && !this.settingsPanel.isOpen) {
+          this.menu.submit();
+        }
+        return;
       }
       if (key.toLowerCase() === "h") {
         this.toggleComboBook();
         return;
       }
       if (key === "Escape") {
-        if (this.comboBook.isOpen) {
+        if (this.settingsPanel.isOpen) {
+          this.settingsPanel.close();
+        } else if (this.comboBook.isOpen) {
           this.comboBook.setVisible(false);
         } else if (this.pause.isOpen) {
           this.pause.setVisible(false);
@@ -551,7 +590,7 @@ export class GameScene {
         }
         return;
       }
-      if (this.pause.isOpen || this.comboBook.isOpen) return; // no cheats under overlays
+      if (this.pause.isOpen || this.comboBook.isOpen || this.settingsPanel.isOpen) return; // no cheats under overlays
       switch (key.toLowerCase()) {
         case "r":
           void this.restartInning();
