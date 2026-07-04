@@ -19,6 +19,7 @@ export class MenuPanel {
   private homeStack: StackPanel;
   private howToStack: StackPanel;
   private seedInput: InputText;
+  private seedInputFocused = false;
   private callbacks: MenuCallbacks;
 
   constructor(adt: AdvancedDynamicTexture, callbacks: MenuCallbacks) {
@@ -75,6 +76,9 @@ export class MenuPanel {
     this.seedInput.focusedBackground = "#ffffff";
     this.seedInput.fontFamily = UI.mono;
     this.seedInput.fontSize = 20;
+    // Track focus so global letter hotkeys (M mute…) don't fire while typing a seed
+    this.seedInput.onFocusObservable.add(() => (this.seedInputFocused = true));
+    this.seedInput.onBlurObservable.add(() => (this.seedInputFocused = false));
     seedRow.addControl(this.seedInput);
     const reroll = makeButton("seedReroll", "⚂", UI.cream, "48px", "44px");
     reroll.fontSize = 24;
@@ -164,6 +168,11 @@ export class MenuPanel {
   /** True when the home view (with the start button) is showing. */
   get onHome(): boolean {
     return this.homeStack.isVisible;
+  }
+
+  /** True while the seed InputText has keyboard focus. */
+  get seedFocused(): boolean {
+    return this.visible && this.seedInputFocused;
   }
 
   showHome(): void {

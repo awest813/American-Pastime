@@ -179,7 +179,11 @@ export class GameScene {
     }
     canvas.addEventListener("contextmenu", (e) => e.preventDefault()); // right-click is a game input
     const adt = AdvancedDynamicTexture.CreateFullscreenUI("gameUI", true, scene);
+    // Scale by whichever axis is tighter so tall panels (combo book, shop)
+    // never clip on short/wide windows
     adt.idealWidth = 1600;
+    adt.idealHeight = 900;
+    adt.useSmallestIdeal = true;
     return new GameScene(scene, canvas, adt);
   }
 
@@ -551,6 +555,8 @@ export class GameScene {
         this.refreshHud();
         return;
       }
+      // Letter keys belong to the seed box while it's focused, not to hotkeys
+      if (this.menu.seedFocused && key.length === 1) return;
       if (key.toLowerCase() === "m") {
         const muted = this.audio.toggleMute();
         this.settingsPanel.refresh(); // keep the SOUND toggle honest if the panel is up

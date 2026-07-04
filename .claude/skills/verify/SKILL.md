@@ -21,15 +21,20 @@ WebGPU init fails headlessly and the app falls back to WebGL2 — the two
 ## Drive
 
 All UI is Babylon GUI rendered inside the canvas — there is no DOM to query.
-Use a 1600x900 viewport: the fullscreen ADT has `idealWidth = 1600`, so GUI
-measure coordinates equal page coordinates. Find buttons by control name via
-the dev handle and click with the real mouse:
+Control `_currentMeasure` values are already in screen/CSS pixels at any
+viewport size (the ADT uses idealWidth/idealHeight only to scale fonts and
+control sizes) — click the measure center directly, never rescale it. Find
+buttons by control name via the dev handle and click with the real mouse:
 
 ```js
 await page.waitForFunction(() => !!window.__cardball); // GameScene instance (DEV only)
 // walk scene.textures.find(t => t.name === "gameUI")._rootContainer recursively,
 // match control.name, click center of control._currentMeasure with page.mouse.click
 ```
+
+Keyboard focus gotcha: `page.keyboard` only reaches the scene after a real
+click on the canvas — click a GUI button (e.g. `startButton`) before relying
+on Enter/ESC/letter hotkeys.
 
 Useful control names: `startButton`, `seedInput`, `seedReroll`, `binderButton`,
 `howToButton`, `settingsButton`, `pauseResume`, `pauseSettings`, `pauseAbandon`,
