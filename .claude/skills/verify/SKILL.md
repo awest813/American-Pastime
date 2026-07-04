@@ -43,9 +43,15 @@ click on the canvas — click a GUI button (e.g. `startButton`) before relying
 on Enter/ESC/letter hotkeys.
 
 Useful control names: `startButton`, `seedInput`, `seedReroll`, `binderButton`,
-`howToButton`, `settingsButton`, `pauseResume`, `pauseSettings`, `pauseAbandon`,
+`howToButton`, `settingsButton`, `continueButton`, `pauseResume`,
+`pauseSettings`, `pauseRunCode`, `pauseCodeBox`, `pauseAbandon`,
 `volumeUp/volumeDown/muteToggle/shakeToggle/speedToggle/settingsBack`,
 `playButton`, `discardButton`, `comboBookButton`.
+
+Run codes: pause → `pauseRunCode` exports a `CB1.…` string (clipboard needs
+`permissions: ["clipboard-read","clipboard-write"]` on the context; the
+`pauseCodeBox` InputText always holds it). Paste a code into `seedInput` and
+click `startButton` to import.
 
 Hotkeys: Enter starts a season from the title, ESC pauses/backs out,
 H combo book, M mute, F1 debug panel. Settings persist in localStorage under

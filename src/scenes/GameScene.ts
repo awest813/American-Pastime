@@ -15,7 +15,7 @@ import { ComboSystem } from "../systems/ComboSystem";
 import { DeckSystem } from "../systems/DeckSystem";
 import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
-import { clearSave, loadSave, persistSave, summarize, type SaveData } from "../systems/Save";
+import { clearSave, createSaveData, decodeRunCode, encodeRunCode, isRunCode, loadSave, persistSave, summarize, type SaveData } from "../systems/Save";
 import { SPEED_SCALE, settings } from "../systems/Settings";
 import type { PlayerCard, ScoreResult } from "../systems/types";
 import { ComboBook } from "../ui/ComboBook";
@@ -134,6 +134,10 @@ export class GameScene {
     this.menu = new MenuPanel(adt, {
       onStart: (seed) => {
         this.audio.play("click"); // also unlocks the AudioContext inside the user gesture
+        if (isRunCode(seed)) {
+          void this.importRunCode(seed); // a pasted run code resumes instead of reseeding
+          return;
+        }
         this.startRun(seed);
       },
       onContinue: () => {
@@ -169,6 +173,10 @@ export class GameScene {
         this.settingsPanel.setVisible(true);
       },
       onAbandon: () => this.quitToMenu(),
+      getRunCode: () => {
+        this.audio.play("click");
+        return this.exportRunCode();
+      },
     });
     // Settings sit above even the pause screen (it opens from there too)
     this.settingsPanel = new SettingsPanel(adt, this.audio, {
@@ -237,6 +245,33 @@ export class GameScene {
       selection: this.selection.map((c) => c.card.id),
       lastSeed: this.lastSeed,
     });
+  }
+
+  /** Snapshot the current run as a shareable code (pause menu button). */
+  private exportRunCode(): Promise<string | null> {
+    if (this.busy || (this.run.phase !== "inning" && this.run.phase !== "shop")) {
+      return Promise.resolve(null);
+    }
+    return encodeRunCode(
+      createSaveData({
+        run: this.run.serialize(),
+        deck: this.deck.snapshot(),
+        hand: this.hand.map((c) => c.card.id),
+        selection: this.selection.map((c) => c.card.id),
+        lastSeed: this.lastSeed,
+      }),
+    );
+  }
+
+  /** Resume a run from a pasted code; becomes the autosave so CONTINUE works. */
+  private async importRunCode(code: string): Promise<void> {
+    const save = await decodeRunCode(code);
+    if (!save) {
+      this.menu.flashSeedError("that run code didn't check out — paste the whole thing");
+      return;
+    }
+    persistSave(save);
+    this.resumeRun(save);
   }
 
   /** Rebuild a run from a save and drop the player back where they left off. */

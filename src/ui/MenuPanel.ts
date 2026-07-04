@@ -1,7 +1,7 @@
 import { Control, InputText, Rectangle, StackPanel, type AdvancedDynamicTexture, type Button, type TextBlock } from "@babylonjs/gui/2D";
 import { UI, makeButton, makeStack, makeText, setButtonBackground } from "./kit";
 import { Random } from "../utils/Random";
-import type { SaveSummary } from "../systems/Save";
+import { describeAge, type SaveSummary } from "../systems/Save";
 
 export interface MenuCallbacks {
   onStart: (seed: string) => void;
@@ -13,6 +13,7 @@ export interface MenuCallbacks {
 }
 
 const PHASE_LABEL: Record<string, string> = { inning: "at bat", shop: "in the shop" };
+const SEED_LABEL_DEFAULT = "run seed — same seed, same season · or paste a run code";
 
 /**
  * The title screen. Two views inside one panel:
@@ -32,6 +33,8 @@ export class MenuPanel {
   private continueButton!: Button;
   private continueSummary!: TextBlock;
   private startButton!: Button;
+  private seedLabel!: TextBlock;
+  private seedLabelTimer: ReturnType<typeof setTimeout> | null = null;
   /** True while PLAY BALL is armed to erase an existing save (two-step confirm). */
   private confirmingNew = false;
   private confirmTimer: ReturnType<typeof setTimeout> | null = null;
@@ -114,10 +117,10 @@ export class MenuPanel {
     reroll.onPointerUpObservable.add(() => this.randomizeSeed());
     seedRow.addControl(reroll);
 
-    const seedLabel = makeText("run seed — same seed, same season", 15, "#9a917f");
-    seedLabel.paddingTop = "4px";
-    seedLabel.paddingBottom = "30px";
-    stack.addControl(seedLabel);
+    this.seedLabel = makeText(SEED_LABEL_DEFAULT, 15, "#9a917f");
+    this.seedLabel.paddingTop = "4px";
+    this.seedLabel.paddingBottom = "30px";
+    stack.addControl(this.seedLabel);
 
     // Secondary menu row
     const menuRow = makeStack(false);
@@ -172,6 +175,10 @@ export class MenuPanel {
         "THE SEASON — Win an inning, hit the shop: equipment, upgrades, rerolls.",
         "Innings 3, 6, and 9 are boss pitchers with a rule of their own.",
         "Survive all 9 innings to take the pennant.",
+        "",
+        "SAVING — Your run autosaves; CONTINUE RUN picks it back up.",
+        "Pause → COPY RUN CODE snapshots the exact moment as a paste-able code;",
+        "drop a code into the seed box here to load it on any machine.",
       ].join("\n"),
       21,
     );
@@ -223,9 +230,24 @@ export class MenuPanel {
     this.continueSummary.isVisible = this.hasSave;
     if (summary) {
       const where = PHASE_LABEL[summary.phase] ?? summary.phase;
-      this.continueSummary.text = `${summary.seed} · inning ${summary.inning} · ${where} · $${summary.cash}`;
+      const parts = [summary.seed, `inning ${summary.inning}`, where, `$${summary.cash}`];
+      if (summary.equipment > 0) parts.push(`${summary.equipment} gear`);
+      parts.push(describeAge(summary.savedAt));
+      this.continueSummary.text = parts.join(" · ");
     }
     this.resetConfirm();
+  }
+
+  /** Briefly flag a bad run-code paste on the seed label, then restore it. */
+  flashSeedError(message: string): void {
+    if (this.seedLabelTimer !== null) clearTimeout(this.seedLabelTimer);
+    this.seedLabel.text = message;
+    this.seedLabel.color = UI.red;
+    this.seedLabelTimer = setTimeout(() => {
+      this.seedLabel.text = SEED_LABEL_DEFAULT;
+      this.seedLabel.color = "#9a917f";
+      this.seedLabelTimer = null;
+    }, 4000);
   }
 
   private resetConfirm(): void {

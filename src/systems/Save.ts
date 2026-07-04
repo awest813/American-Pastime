@@ -20,6 +20,8 @@ export interface SaveSummary {
   seed: string;
   cash: number;
   phase: RunPhase;
+  equipment: number;
+  savedAt: number;
 }
 
 const STORAGE_KEY = "cardball.save.v1";
@@ -60,10 +62,14 @@ export function loadSave(): SaveData | null {
   }
 }
 
+/** Stamp a payload with the current version and timestamp. */
+export function createSaveData(data: Omit<SaveData, "version" | "savedAt">): SaveData {
+  return { ...data, version: SAVE_VERSION, savedAt: Date.now() };
+}
+
 export function persistSave(data: Omit<SaveData, "version" | "savedAt">): void {
   try {
-    const full: SaveData = { ...data, version: SAVE_VERSION, savedAt: Date.now() };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(full));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(createSaveData(data)));
   } catch {
     // storage full or blocked (private mode) — the run simply won't be resumable
   }
@@ -83,5 +89,98 @@ export function summarize(save: SaveData): SaveSummary {
     seed: save.run.rng.seed,
     cash: save.run.cash,
     phase: save.run.phase,
+    equipment: save.run.equipment.length,
+    savedAt: save.savedAt,
   };
+}
+
+/** "just now" / "12m ago" / "3h ago" / "2d ago" for the continue summary. */
+export function describeAge(savedAt: number): string {
+  const minutes = Math.floor((Date.now() - savedAt) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+// ── Run codes ────────────────────────────────────────────────────────────────
+// A run code is a full SaveData packed into a paste-able string:
+//   CB1.<fnv1a checksum of payload>.<payload>
+// where payload is deflate-compressed JSON in base64url ("D" marker) or, when
+// CompressionStream is unavailable, plain base64url JSON ("J" marker).
+
+const CODE_PREFIX = "CB1.";
+
+export function isRunCode(text: string): boolean {
+  return text.trim().startsWith(CODE_PREFIX);
+}
+
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBytes(text: string): Uint8Array {
+  const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function pipeThrough(bytes: Uint8Array, stream: GenericTransformStream): Promise<Uint8Array> {
+  const blob = new Blob([bytes as BlobPart]);
+  const out = await new Response(blob.stream().pipeThrough(stream)).arrayBuffer();
+  return new Uint8Array(out);
+}
+
+/** Pack the save into a shareable string. */
+export async function encodeRunCode(save: SaveData): Promise<string> {
+  const json = new TextEncoder().encode(JSON.stringify(save));
+  let payload: string;
+  if (typeof CompressionStream !== "undefined") {
+    payload = `D${bytesToBase64Url(await pipeThrough(json, new CompressionStream("deflate")))}`;
+  } else {
+    payload = `J${bytesToBase64Url(json)}`;
+  }
+  return `${CODE_PREFIX}${fnv1a(payload)}.${payload}`;
+}
+
+/** Unpack and validate a pasted run code; null on any corruption or mismatch. */
+export async function decodeRunCode(code: string): Promise<SaveData | null> {
+  try {
+    const trimmed = code.trim();
+    if (!trimmed.startsWith(CODE_PREFIX)) return null;
+    const rest = trimmed.slice(CODE_PREFIX.length);
+    const dot = rest.indexOf(".");
+    if (dot < 0) return null;
+    const checksum = rest.slice(0, dot);
+    const payload = rest.slice(dot + 1);
+    if (fnv1a(payload) !== checksum) return null; // truncated or mangled paste
+    const marker = payload[0];
+    const bytes = base64UrlToBytes(payload.slice(1));
+    let json: string;
+    if (marker === "D") {
+      json = new TextDecoder().decode(await pipeThrough(bytes, new DecompressionStream("deflate")));
+    } else if (marker === "J") {
+      json = new TextDecoder().decode(bytes);
+    } else {
+      return null;
+    }
+    const parsed: unknown = JSON.parse(json);
+    return looksValid(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
