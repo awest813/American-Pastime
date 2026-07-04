@@ -4,6 +4,8 @@ export interface SettingsData {
   /** Master volume 0..1, applied on top of the stinger mix. */
   volume: number;
   muted: boolean;
+  /** Looping crowd-murmur bed under the stingers during a run. */
+  ambience: boolean;
   screenShake: boolean;
   /** Animation speed preset; maps to Tweens.timeScale. */
   speed: GameSpeed;
@@ -22,6 +24,7 @@ const STORAGE_KEY = "cardball.settings.v1";
 const DEFAULTS: SettingsData = {
   volume: 0.7,
   muted: false,
+  ambience: true,
   screenShake: true,
   speed: "normal",
 };
@@ -34,6 +37,7 @@ function sanitize(raw: unknown): SettingsData {
     data.volume = Math.min(1, Math.max(0, record.volume));
   }
   if (typeof record.muted === "boolean") data.muted = record.muted;
+  if (typeof record.ambience === "boolean") data.ambience = record.ambience;
   if (typeof record.screenShake === "boolean") data.screenShake = record.screenShake;
   if (record.speed === "normal" || record.speed === "fast" || record.speed === "turbo") {
     data.speed = record.speed;
@@ -60,4 +64,10 @@ export function saveSettings(): void {
   } catch {
     // storage may be unavailable; settings still apply for this session
   }
+}
+
+/** Put every option back to factory defaults (and persist that). */
+export function resetSettings(): void {
+  Object.assign(settings, DEFAULTS);
+  saveSettings();
 }

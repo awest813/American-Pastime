@@ -219,6 +219,11 @@ export class GameScene {
   private applySettings(): void {
     Tweens.timeScale = SPEED_SCALE[settings.speed];
     this.audio.applyVolume();
+    // Reconcile the crowd bed with the setting, but only run it during a run —
+    // never behind the title screen.
+    const inRun = this.run.phase === "inning" || this.run.phase === "shop";
+    if (settings.ambience && inRun) this.audio.startAmbience();
+    else if (!settings.ambience) this.audio.stopAmbience();
   }
 
   // ── Run flow ────────────────────────────────────────────────────────────
@@ -233,6 +238,7 @@ export class GameScene {
     this.deck = new DeckSystem(this.run.rng);
     this.deck.reset(this.run.deckCards);
     this.hud.setVisible(true);
+    this.audio.startAmbience();
     void this.beginInning();
   }
 
@@ -303,6 +309,7 @@ export class GameScene {
     }
 
     this.hud.setVisible(true);
+    this.audio.startAmbience();
     this.updateBoard(this.run.runs);
 
     if (this.run.phase === "shop") {
@@ -405,6 +412,7 @@ export class GameScene {
     this.shop.setVisible(false);
     this.hud.setVisible(false);
     this.clearHand(false);
+    this.audio.stopAmbience();
     this.run.phase = "menu";
     clearSave(); // abandoning ends the run — no resume point
     this.world.updateScoreboard("CARDBALL", "CLASSIC", "");
@@ -415,6 +423,10 @@ export class GameScene {
     this.hud.setVisible(false);
     this.clearHand(false); // leftover cards shouldn't linger behind the end panel
     clearSave(); // the run is over; nothing left to resume
+    // Victory: the crowd roars and keeps murmuring under the pennant screen.
+    // Loss: fade the stadium to silence — the season's over.
+    if (victory) this.audio.swellAmbience(4);
+    else this.audio.stopAmbience();
     this.world.updateScoreboard(
       victory ? "PENNANT WON!" : "SEASON OVER",
       `SEED ${this.lastSeed}`,
@@ -530,6 +542,7 @@ export class GameScene {
     // Cards stride out to the diamond and slap down flat, kicking up dust.
     this.hand = this.hand.filter((c) => !played.includes(c));
     this.selection = [];
+    this.hud.setSelectionBadges([]); // badges vanish as the cards leave, before their meshes dispose
     const flights = played.map((card3d, i) => {
       const slot = new Vector3((i - (played.length - 1) / 2) * 1.7, 0.06 + i * 0.005, 1.6);
       return this.tweens.delay(i * 110).then(async () => {
@@ -554,8 +567,10 @@ export class GameScene {
     if (bigPlay) {
       this.world.pulseLights();
       this.world.shakeCamera();
+      this.audio.swellAmbience(4); // the crowd erupts on a homer
     } else if (result.runs >= 8) {
       this.world.shakeCamera(0.07, 250);
+      this.audio.swellAmbience(2.4); // a solid rally gets a rise
     }
     const runsBefore = this.run.runs;
     void this.hud.showPopup(`+${result.runs} RUNS!`, UI.gold, 1000);
@@ -592,6 +607,7 @@ export class GameScene {
     const discarded = this.selection;
     this.hand = this.hand.filter((c) => !discarded.includes(c));
     this.selection = [];
+    this.hud.setSelectionBadges([]); // clear before the discarded meshes tumble off and dispose
     await Promise.all(
       discarded.map((card3d, i) =>
         this.tweens.delay(i * 70).then(() => {
@@ -618,6 +634,7 @@ export class GameScene {
 
   private async winInning(): Promise<void> {
     this.audio.play("win");
+    this.audio.swellAmbience(3.2); // crowd cheers the inning home
     this.effects.confetti(new Vector3(0, 2.5, 1.5));
     await this.hud.showPopup("INNING WON!", UI.green, 1000);
     this.run.finishInning();
@@ -648,6 +665,7 @@ export class GameScene {
 
   private refreshPreview(): void {
     this.hud.updatePreview(this.previewResult(), this.selection.length, this.selection[0]?.card.name ?? null);
+    this.hud.setSelectionBadges(this.selection.map((c) => c.mesh));
     this.refreshHud();
   }
 
@@ -732,7 +750,28 @@ export class GameScene {
         }
         return;
       }
-      if (this.pause.isOpen || this.comboBook.isOpen || this.settingsPanel.isOpen) return; // no cheats under overlays
+      if (this.pause.isOpen || this.comboBook.isOpen || this.settingsPanel.isOpen) return; // overlays swallow gameplay keys
+
+      // ── Player gameplay controls ──
+      if (this.run.phase === "inning") {
+        if (key >= "1" && key <= "8") {
+          const card = this.hand[Number(key) - 1];
+          if (card) this.toggleSelect(card);
+          return;
+        }
+        if (key === "Enter" || key === " ") {
+          info.event.preventDefault(); // Space would otherwise scroll/click
+          void this.playSelection();
+          return;
+        }
+        if (key.toLowerCase() === "x") {
+          void this.discardSelection();
+          return;
+        }
+      }
+
+      // ── Dev cheats — only while the F1 debug panel is open ──
+      if (!this.debug.visible) return;
       switch (key.toLowerCase()) {
         case "r":
           void this.restartInning();

@@ -1,6 +1,6 @@
 import { Control, Rectangle, TextBlock, type AdvancedDynamicTexture, type Button, type StackPanel } from "@babylonjs/gui/2D";
 import type { AudioSystem } from "../systems/AudioSystem";
-import { SPEED_ORDER, saveSettings, settings, type GameSpeed } from "../systems/Settings";
+import { SPEED_ORDER, resetSettings, saveSettings, settings, type GameSpeed } from "../systems/Settings";
 import { UI, makeButton, makePanel, makeStack, makeText, setButtonBackground } from "./kit";
 
 export interface SettingsCallbacks {
@@ -25,6 +25,7 @@ export class SettingsPanel {
   private root: Rectangle;
   private volumeMeter: TextBlock;
   private muteButton: Button;
+  private ambienceButton: Button;
   private shakeButton: Button;
   private speedButton: Button;
   private callbacks: SettingsCallbacks;
@@ -40,7 +41,7 @@ export class SettingsPanel {
     this.root.isVisible = false;
     adt.addControl(this.root);
 
-    const panel = makePanel("620px", "560px");
+    const panel = makePanel("620px", "656px");
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -85,6 +86,11 @@ export class SettingsPanel {
       this.changed(false);
     });
 
+    this.ambienceButton = this.makeToggleButton(this.makeRow(stack, "CROWD MURMUR"), "ambienceToggle", () => {
+      settings.ambience = !settings.ambience;
+      this.changed(); // onApply reconciles the crowd bed with the current phase
+    });
+
     this.shakeButton = this.makeToggleButton(this.makeRow(stack, "SCREEN SHAKE"), "shakeToggle", () => {
       settings.screenShake = !settings.screenShake;
       this.changed();
@@ -98,13 +104,27 @@ export class SettingsPanel {
 
     const hint = makeText("M toggles sound anywhere · speed affects animations only", 15, "#9a917f");
     hint.paddingTop = "18px";
-    hint.paddingBottom = "16px";
+    hint.paddingBottom = "14px";
     stack.addControl(hint);
 
-    const back = makeButton("settingsBack", "BACK (ESC)", UI.green, "260px", "56px");
-    back.paddingTop = "8px";
+    const buttonRow = makeStack(false);
+    buttonRow.height = "58px";
+    stack.addControl(buttonRow);
+    const reset = makeButton("settingsReset", "RESET DEFAULTS", "#9a917f", "240px", "50px");
+    reset.fontSize = 18;
+    reset.onPointerUpObservable.add(() => {
+      resetSettings();
+      this.audio.applyVolume(); // mute/volume may have changed
+      this.changed();
+    });
+    buttonRow.addControl(reset);
+    const gap = new Rectangle();
+    gap.width = "20px";
+    gap.thickness = 0;
+    buttonRow.addControl(gap);
+    const back = makeButton("settingsBack", "BACK (ESC)", UI.green, "240px", "50px");
     back.onPointerUpObservable.add(() => this.close());
-    stack.addControl(back);
+    buttonRow.addControl(back);
   }
 
   /** A label-left / control-right row inside the settings card. */
@@ -173,6 +193,7 @@ export class SettingsPanel {
     this.volumeMeter.color = settings.muted ? "#9a917f" : UI.gold;
 
     this.setToggle(this.muteButton, !settings.muted, settings.muted ? "MUTED" : "ON");
+    this.setToggle(this.ambienceButton, settings.ambience, settings.ambience ? "ON" : "OFF");
     this.setToggle(this.shakeButton, settings.screenShake, settings.screenShake ? "ON" : "OFF");
     this.setToggle(this.speedButton, true, SPEED_LABELS[settings.speed]);
   }

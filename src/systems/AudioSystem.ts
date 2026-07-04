@@ -22,9 +22,13 @@ export type Stinger =
 export class AudioSystem {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  private ambienceSource: AudioBufferSourceNode | null = null;
+  private ambienceGain: GainNode | null = null;
 
   /** Master gain at volume 1.0; the stinger mix sits well under clipping here. */
   private static readonly MAX_GAIN = 0.5;
+  /** Resting level of the crowd bed, relative to the master bus. */
+  private static readonly AMBIENCE_LEVEL = 0.055;
 
   get muted(): boolean {
     return settings.muted;
@@ -45,6 +49,72 @@ export class AudioSystem {
 
   private currentGain(): number {
     return settings.muted ? 0 : AudioSystem.MAX_GAIN * settings.volume;
+  }
+
+  // ── Crowd ambience ────────────────────────────────────────────────────────
+
+  /** Fade in a looping crowd-murmur bed (integrated noise, so it rumbles
+   *  instead of hissing). No-op if disabled in settings or already playing. */
+  startAmbience(): void {
+    if (!settings.ambience || this.ambienceSource) return;
+    const ctx = this.ensure();
+    if (!ctx || !this.master) return;
+
+    const seconds = 4;
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * seconds, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    let walk = 0;
+    for (let i = 0; i < data.length; i++) {
+      walk = (walk + (Math.random() * 2 - 1) * 0.02) * 0.998; // brown-ish noise
+      data[i] = walk * 3.5;
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 700;
+    const gain = ctx.createGain();
+    const t = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(AudioSystem.AMBIENCE_LEVEL, t + 1.5);
+    src.connect(filter).connect(gain).connect(this.master);
+    src.start();
+    this.ambienceSource = src;
+    this.ambienceGain = gain;
+  }
+
+  /** Fade the crowd out (back at the menu, or ambience toggled off). */
+  stopAmbience(): void {
+    if (!this.ambienceSource || !this.ambienceGain || !this.ctx) {
+      this.ambienceSource = null;
+      this.ambienceGain = null;
+      return;
+    }
+    const t = this.ctx.currentTime;
+    const gain = this.ambienceGain.gain;
+    gain.cancelScheduledValues(t);
+    gain.setValueAtTime(Math.max(0.0001, gain.value), t);
+    gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    this.ambienceSource.stop(t + 0.7);
+    this.ambienceSource = null;
+    this.ambienceGain = null;
+  }
+
+  /** The crowd rises for a beat on big moments, then settles back down. */
+  swellAmbience(intensity = 3): void {
+    if (!this.ambienceGain || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const gain = this.ambienceGain.gain;
+    gain.cancelScheduledValues(t);
+    gain.setValueAtTime(Math.max(0.0001, gain.value), t);
+    gain.exponentialRampToValueAtTime(AudioSystem.AMBIENCE_LEVEL * intensity, t + 0.2);
+    gain.exponentialRampToValueAtTime(AudioSystem.AMBIENCE_LEVEL, t + 2.5);
+  }
+
+  get ambiencePlaying(): boolean {
+    return this.ambienceSource !== null;
   }
 
   private ensure(): AudioContext | null {

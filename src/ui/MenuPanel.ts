@@ -139,7 +139,7 @@ export class MenuPanel {
       menuRow.addControl(button);
     }
 
-    const hint = makeText("ENTER starts a season · in game: H combo book · ESC pause · M mute", 15, "#9a917f");
+    const hint = makeText("ENTER starts a season · in game: 1-8 pick · ENTER play · X discard · H combo · ESC pause", 15, "#9a917f");
     hint.paddingTop = "30px";
     stack.addControl(hint);
 
@@ -165,8 +165,9 @@ export class MenuPanel {
 
     const rules = makeText(
       [
-        "THE AT-BAT — Draw 8 cards, click up to 5 to build one at-bat.",
-        "Order matters: the pitch and your equipment hit the FIRST card hardest.",
+        "THE AT-BAT — Draw 8 cards, click (or press 1-8) up to 5 for one at-bat.",
+        "Order matters: the pitch and your equipment hit the FIRST card hardest —",
+        "the gold badges show your batting order. ENTER swings, X discards.",
         "The score preview shows exactly what a selection is worth before you swing.",
         "",
         "THE INNING — Beat the target before your 4 plays run out.",
@@ -186,7 +187,7 @@ export class MenuPanel {
     rules.paddingBottom = "26px";
     stack.addControl(rules);
 
-    const keys = makeText("H combo book · ESC pause · M mute · ENTER play from the title", 17, UI.green);
+    const keys = makeText("1-8 pick · ENTER play · X discard · H combo book · ESC pause · M mute", 17, UI.green);
     keys.fontFamily = UI.mono;
     keys.paddingBottom = "30px";
     stack.addControl(keys);
