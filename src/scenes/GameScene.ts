@@ -120,7 +120,7 @@ export class GameScene {
       onMenu: () => this.quitToMenu(),
     });
     this.end.setVisible(false);
-    this.debug = new DebugPanel(adt, {
+    this.debug = new DebugPanel(adt, scene, {
       onGiveCash: () => {
         this.run.cash += 10;
         this.refreshHud();
@@ -203,6 +203,9 @@ export class GameScene {
       await import("@babylonjs/core/Engines/WebGPU/Extensions/engine.dynamicTexture");
     }
     canvas.addEventListener("contextmenu", (e) => e.preventDefault()); // right-click is a game input
+    // We ray-pick manually in our own POINTERMOVE handlers; Babylon's built-in
+    // per-move scene pick would duplicate that work for a pickInfo nobody reads.
+    scene.skipPointerMovePicking = true;
     const adt = AdvancedDynamicTexture.CreateFullscreenUI("gameUI", true, scene);
     // Scale by whichever axis is tighter so tall panels (combo book, shop)
     // never clip on short/wide windows

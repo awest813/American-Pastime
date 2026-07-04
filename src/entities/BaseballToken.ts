@@ -14,9 +14,13 @@ import type { Effects } from "./Effects";
 export class BaseballToken {
   private static groundAggregate: PhysicsAggregate | null = null;
 
+  /** Live physics balls; the engine only steps while this is non-zero. */
+  private static liveBalls = 0;
+
   static launch(scene: Scene, big: boolean, effects?: Effects): void {
     const physics = scene.getPhysicsEngine();
-    const ball = MeshBuilder.CreateSphere("baseball", { diameter: 0.36 }, scene);
+    const ball = MeshBuilder.CreateSphere("baseball", { diameter: 0.36, segments: 12 }, scene);
+    ball.isPickable = false;
     ball.position = new Vector3(0, 0.5, -1.2); // home plate area
     const mat = new StandardMaterial("baseballMat", scene);
     mat.diffuseColor = new Color3(0.95, 0.93, 0.88);
@@ -28,6 +32,9 @@ export class BaseballToken {
     }
 
     if (physics) {
+      // Wake the (otherwise idle) physics engine only while a ball is in the air
+      scene.physicsEnabled = true;
+      BaseballToken.liveBalls++;
       if (!BaseballToken.groundAggregate) {
         const ground = scene.getMeshByName("diamondTable");
         if (ground) {
@@ -42,6 +49,10 @@ export class BaseballToken {
         aggregate.dispose();
         ball.material?.dispose();
         ball.dispose();
+        if (--BaseballToken.liveBalls <= 0) {
+          BaseballToken.liveBalls = 0;
+          scene.physicsEnabled = false; // back to sleep until the next launch
+        }
       }, 3200);
     } else {
       // No physics engine (e.g. it failed to load): simple arc fallback.

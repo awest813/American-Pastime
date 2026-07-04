@@ -45,6 +45,22 @@ export class TableWorld {
     this.buildTable();
     this.scoreboardTexture = this.buildScoreboard();
     this.buildLightTowers();
+    this.freezeStatics();
+  }
+
+  /** The world never moves: stop recomputing matrices and re-validating
+   *  materials for it every frame, and keep it out of pointer picking (only
+   *  cards are pickable). The lamp and scoreboard materials animate their
+   *  emissive uniforms (pulses/flashes), and frozen materials skip uniform
+   *  re-binding — so those two stay unfrozen. */
+  private freezeStatics(): void {
+    const animated = new Set([this.scoreboardMat, this.lampMat]);
+    for (const mesh of this.scene.meshes) {
+      mesh.isPickable = false;
+      mesh.freezeWorldMatrix();
+      mesh.doNotSyncBoundingInfo = true;
+      if (mesh.material && !animated.has(mesh.material as StandardMaterial)) mesh.material.freeze();
+    }
   }
 
   private buildTable(): void {
@@ -165,8 +181,15 @@ export class TableWorld {
     ctx.fillText(text, 512, y);
   }
 
+  private lastBoardKey = "";
+
   /** The 3D board is the primary score display; line1 is the big number row. */
   updateScoreboard(line1: string, line2: string, line3: string, line1Color = "#ffd257"): void {
+    // The count-up animation calls this every frame; skip the 1024x384 canvas
+    // redraw + GPU upload whenever the rounded content hasn't changed.
+    const key = `${line1}|${line2}|${line3}|${line1Color}`;
+    if (key === this.lastBoardKey) return;
+    this.lastBoardKey = key;
     const ctx = this.scoreboardTexture.getContext() as CanvasRenderingContext2D;
     ctx.fillStyle = "#101418";
     ctx.fillRect(0, 0, 1024, 384);

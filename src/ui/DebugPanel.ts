@@ -1,4 +1,5 @@
 import { Control, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
+import type { Scene } from "@babylonjs/core/scene";
 import type { RunSystem } from "../systems/RunSystem";
 import { UI, makeButton, makePanel, makeStack, makeText } from "./kit";
 
@@ -8,13 +9,16 @@ export interface DebugCallbacks {
   onRedeal: () => void;
 }
 
-/** F1 dev panel: run state at a glance plus cheat buttons for fast testing. */
+/** F1 dev panel: run state + live perf stats plus cheat buttons for testing. */
 export class DebugPanel {
   private root: Rectangle;
   private info: TextBlock;
+  private perfText: TextBlock;
+  private frameCount = 0;
+  private lastDrawTotal = 0;
 
-  constructor(adt: AdvancedDynamicTexture, callbacks: DebugCallbacks) {
-    this.root = makePanel("330px", "420px");
+  constructor(adt: AdvancedDynamicTexture, private scene: Scene, callbacks: DebugCallbacks) {
+    this.root = makePanel("330px", "460px");
     this.root.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     this.root.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.root.left = "14px";
@@ -22,6 +26,21 @@ export class DebugPanel {
     this.root.background = "rgba(30, 12, 12, 0.92)";
     this.root.isVisible = false;
     adt.addControl(this.root);
+
+    // Live perf readout: cheap sampling every ~10 frames, only while open.
+    // Runs after the render so the engine's draw counter holds this frame's count.
+    this.scene.onAfterRenderObservable.add(() => {
+      if (!this.root.isVisible || ++this.frameCount % 10 !== 0) return;
+      const engine = this.scene.getEngine();
+      // the engine counter is cumulative (nothing resets it); diff across the window
+      const drawTotal = (engine as unknown as { _drawCalls?: { current: number } })._drawCalls?.current ?? 0;
+      const drawCalls = Math.round((drawTotal - this.lastDrawTotal) / 10);
+      this.lastDrawTotal = drawTotal;
+      this.perfText.text =
+        `${engine.getFps().toFixed(0)} fps · ${drawCalls} draws · ` +
+        `${this.scene.getActiveMeshes().length}/${this.scene.meshes.length} meshes · ` +
+        `${(engine.getRenderWidth() * engine.getRenderHeight() / 1e6).toFixed(1)}MP`;
+    });
 
     const stack = makeStack();
     stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
@@ -31,6 +50,12 @@ export class DebugPanel {
     const title = makeText("DEBUG (F1)", 22, UI.red);
     title.fontFamily = UI.mono;
     stack.addControl(title);
+
+    this.perfText = makeText("", 14, UI.gold);
+    this.perfText.fontFamily = UI.mono;
+    this.perfText.paddingTop = "4px";
+    this.perfText.paddingBottom = "6px";
+    stack.addControl(this.perfText);
 
     this.info = makeText("", 15);
     this.info.textWrapping = true;

@@ -47,6 +47,7 @@ export class Card3D {
     mat.emissiveColor = new Color3(0.55, 0.55, 0.55); // cards stay readable under stadium lights
     mat.specularColor = new Color3(0.08, 0.08, 0.08);
     mat.backFaceCulling = false;
+    mat.freeze(); // texture repaints (upgrades) mutate content, not defines
     this.mesh.material = mat;
 
     this.mesh.outlineColor = Color3.FromHexString("#ffd257");

@@ -29,6 +29,10 @@ class App {
 
   async bootstrap(): Promise<void> {
     this.engine = await this._createEngine();
+    // adaptToDeviceRatio honors full DPR; past 2 the extra pixels cost fill
+    // rate (2.25x at DPR 3) with no visible gain on a scene this stylized.
+    // hardwareScalingLevel is 1/effectiveDPR, so capping at DPR 2 means 0.5.
+    if ((window.devicePixelRatio || 1) > 2) this.engine.setHardwareScalingLevel(0.5);
     this.scene = new Scene(this.engine);
 
     if (templateConfig.features.physics) {
@@ -100,12 +104,23 @@ class App {
     if (!this.scene.enablePhysics(gravity, plugin)) {
       throw new Error("Failed to initialize the Havok physics engine.");
     }
+    // Physics only serves the ~3s cosmetic ball launch; don't step the WASM
+    // engine every frame while nothing is simulating. BaseballToken flips
+    // this on around each live ball.
+    this.scene.physicsEnabled = false;
   }
+
+  private lastFpsUpdate = 0;
 
   _fps(): void {
     if (!templateConfig.debug.showFps) {
       return;
     }
+
+    // Writing to the DOM every frame forces layout work 60x/sec; 2 Hz reads the same.
+    const now = performance.now();
+    if (now - this.lastFpsUpdate < 500) return;
+    this.lastFpsUpdate = now;
 
     const dom = document.getElementById("display-fps");
     if (dom) {
