@@ -282,6 +282,7 @@ export class GameScene {
 
   private endRun(victory: boolean): void {
     this.hud.setVisible(false);
+    this.clearHand(false); // leftover cards shouldn't linger behind the end panel
     this.world.updateScoreboard(
       victory ? "PENNANT WON!" : "SEASON OVER",
       `SEED ${this.lastSeed}`,
