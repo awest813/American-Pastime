@@ -15,8 +15,14 @@ npm run dev -- --port 5199 --strictPort # vite; ignore the xdg-open ENOENT error
 Headless Chromium (pre-installed at /opt/pw-browsers) + global Playwright
 (`/opt/node22/lib/node_modules/playwright`) work. Launch with
 `args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"]`;
-WebGPU init fails headlessly and the app falls back to WebGL2 — the two
-`BJS ... WebGPU creation/initialization` console errors are expected noise.
+no WebGPU adapter exists headlessly, so the app logs one
+`WebGPU adapter unavailable; using WebGL2.` info line and runs on WebGL2.
+
+Do NOT try to validate the WebGPU-positive path in this container:
+enabling software WebGPU (`--enable-unsafe-webgpu` + Vulkan/SwiftShader)
+yields an adapter whose device is immediately lost and the tab crashes at
+the Chromium level — an environment limit, not an app bug. `?renderer=webgl`
+/ `?renderer=webgpu` force a backend when you need to pin one.
 
 ## Drive
 
