@@ -1,3 +1,9 @@
+/** Serializable RNG position: the seed plus the advanced internal state. */
+export interface RandomSnapshot {
+  seed: string;
+  state: number;
+}
+
 /**
  * Deterministic seeded RNG so every run is replayable from its seed
  * (e.g. "SEASON-0420"). Mulberry32 over an FNV-1a hash of the seed string.
@@ -9,6 +15,19 @@ export class Random {
   constructor(seed?: string) {
     this.seed = seed ?? Random.generateSeed();
     this.state = Random.hash(this.seed);
+  }
+
+  /** Capture the exact generator position so a resumed run stays deterministic. */
+  snapshot(): RandomSnapshot {
+    return { seed: this.seed, state: this.state };
+  }
+
+  /** Rebuild an RNG mid-sequence from a snapshot (seed alone is not enough — the
+   *  state has already advanced past the seed's initial hash). */
+  static restore(snap: RandomSnapshot): Random {
+    const rng = new Random(snap.seed);
+    rng.state = snap.state >>> 0;
+    return rng;
   }
 
   static generateSeed(): string {

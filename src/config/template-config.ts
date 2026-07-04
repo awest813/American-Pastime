@@ -18,7 +18,7 @@ export const templateConfig = {
       adaptToDeviceRatio: true,
       antialias: true,
       powerPreference: "high-performance" as const,
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: false, // the game never reads the canvas back; skipping the copy is free perf
       stencil: true,
       disableWebGL2Support: false,
     },

@@ -15,6 +15,8 @@ import { ComboSystem } from "../systems/ComboSystem";
 import { DeckSystem } from "../systems/DeckSystem";
 import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
+import { clearSave, createSaveData, decodeRunCode, encodeRunCode, isRunCode, loadSave, persistSave, summarize, type SaveData } from "../systems/Save";
+import { SPEED_SCALE, settings } from "../systems/Settings";
 import type { PlayerCard, ScoreResult } from "../systems/types";
 import { ComboBook } from "../ui/ComboBook";
 import { DebugPanel } from "../ui/DebugPanel";
@@ -22,6 +24,7 @@ import { EndPanel } from "../ui/EndPanel";
 import { GameHud } from "../ui/GameHud";
 import { MenuPanel } from "../ui/MenuPanel";
 import { PausePanel } from "../ui/PausePanel";
+import { SettingsPanel } from "../ui/SettingsPanel";
 import { ShopPanel } from "../ui/ShopPanel";
 import { UI } from "../ui/kit";
 import { Tweens, easeOutBack } from "../utils/Tweens";
@@ -56,6 +59,7 @@ export class GameScene {
   private collection: CollectionScene;
   private comboBook: ComboBook;
   private pause: PausePanel;
+  private settingsPanel: SettingsPanel;
 
   private hand: Card3D[] = [];
   /** Selection in click order — order matters for "first card" effects. */
@@ -81,18 +85,21 @@ export class GameScene {
         if (this.run.buyEquipment(offer)) {
           this.audio.play("buy");
           this.shop.refresh(this.run);
+          this.autosave(); // cash + gear changed
         }
       },
       onUpgrade: (card) => {
         if (this.run.upgradeCard(card)) {
           this.audio.play("win");
           this.shop.refresh(this.run);
+          this.autosave(); // deck card promoted
         }
       },
       onReroll: () => {
         if (this.run.rerollShop()) {
           this.audio.play("click");
           this.shop.refresh(this.run);
+          this.autosave(); // offers rerolled, cash spent, RNG advanced
         }
       },
       onContinue: () => {
@@ -113,7 +120,7 @@ export class GameScene {
       onMenu: () => this.quitToMenu(),
     });
     this.end.setVisible(false);
-    this.debug = new DebugPanel(adt, {
+    this.debug = new DebugPanel(adt, scene, {
       onGiveCash: () => {
         this.run.cash += 10;
         this.refreshHud();
@@ -124,25 +131,59 @@ export class GameScene {
     this.collection = new CollectionScene(scene, adt, this.tweens, this.audio, this.run.players, () => {
       this.menu.setVisible(true);
     });
-    this.menu = new MenuPanel(
-      adt,
-      (seed) => {
+    this.menu = new MenuPanel(adt, {
+      onStart: (seed) => {
         this.audio.play("click"); // also unlocks the AudioContext inside the user gesture
+        if (isRunCode(seed)) {
+          void this.importRunCode(seed); // a pasted run code resumes instead of reseeding
+          return;
+        }
         this.startRun(seed);
       },
-      () => {
+      onContinue: () => {
+        const save = loadSave();
+        if (!save) {
+          this.menu.refreshContinue(); // save vanished between boot and click
+          return;
+        }
+        this.audio.play("click");
+        this.resumeRun(save);
+      },
+      onCollection: () => {
         this.audio.play("click");
         this.menu.setVisible(false);
         this.collection.open();
       },
-    );
+      onSettings: () => {
+        this.audio.play("click");
+        this.settingsPanel.setVisible(true);
+      },
+      loadSummary: () => {
+        const save = loadSave();
+        return save ? summarize(save) : null;
+      },
+    });
 
     // Overlays created last so they render above every other panel
     this.comboBook = new ComboBook(adt, this.run.comboMeta, () => this.toggleComboBook());
     this.pause = new PausePanel(adt, {
       onResume: () => this.pause.setVisible(false),
+      onSettings: () => {
+        this.audio.play("click");
+        this.settingsPanel.setVisible(true);
+      },
       onAbandon: () => this.quitToMenu(),
+      getRunCode: () => {
+        this.audio.play("click");
+        return this.exportRunCode();
+      },
     });
+    // Settings sit above even the pause screen (it opens from there too)
+    this.settingsPanel = new SettingsPanel(adt, this.audio, {
+      onClose: () => undefined, // whichever screen was underneath is still there
+      onApply: () => this.applySettings(),
+    });
+    this.applySettings();
 
     this.bindPointer();
     this.bindHotkeys();
@@ -162,9 +203,27 @@ export class GameScene {
       await import("@babylonjs/core/Engines/WebGPU/Extensions/engine.dynamicTexture");
     }
     canvas.addEventListener("contextmenu", (e) => e.preventDefault()); // right-click is a game input
+    // We ray-pick manually in our own POINTERMOVE handlers; Babylon's built-in
+    // per-move scene pick would duplicate that work for a pickInfo nobody reads.
+    scene.skipPointerMovePicking = true;
     const adt = AdvancedDynamicTexture.CreateFullscreenUI("gameUI", true, scene);
+    // Scale by whichever axis is tighter so tall panels (combo book, shop)
+    // never clip on short/wide windows
     adt.idealWidth = 1600;
+    adt.idealHeight = 900;
+    adt.useSmallestIdeal = true;
     return new GameScene(scene, canvas, adt);
+  }
+
+  /** Push persisted settings into the live systems they drive. */
+  private applySettings(): void {
+    Tweens.timeScale = SPEED_SCALE[settings.speed];
+    this.audio.applyVolume();
+    // Reconcile the crowd bed with the setting, but only run it during a run —
+    // never behind the title screen.
+    const inRun = this.run.phase === "inning" || this.run.phase === "shop";
+    if (settings.ambience && inRun) this.audio.startAmbience();
+    else if (!settings.ambience) this.audio.stopAmbience();
   }
 
   // ── Run flow ────────────────────────────────────────────────────────────
@@ -179,7 +238,110 @@ export class GameScene {
     this.deck = new DeckSystem(this.run.rng);
     this.deck.reset(this.run.deckCards);
     this.hud.setVisible(true);
+    this.audio.startAmbience();
     void this.beginInning();
+  }
+
+  /** Persist a resume point. No-op unless the run is in a resumable phase and
+   *  settled (never mid-animation, so the saved hand matches the saved piles). */
+  private autosave(): void {
+    if (this.busy) return;
+    if (this.run.phase !== "inning" && this.run.phase !== "shop") return;
+    persistSave({
+      run: this.run.serialize(),
+      deck: this.deck.snapshot(),
+      hand: this.hand.map((c) => c.card.id),
+      selection: this.selection.map((c) => c.card.id),
+      lastSeed: this.lastSeed,
+    });
+  }
+
+  /** Snapshot the current run as a shareable code (pause menu button). */
+  private exportRunCode(): Promise<string | null> {
+    if (this.busy || (this.run.phase !== "inning" && this.run.phase !== "shop")) {
+      return Promise.resolve(null);
+    }
+    return encodeRunCode(
+      createSaveData({
+        run: this.run.serialize(),
+        deck: this.deck.snapshot(),
+        hand: this.hand.map((c) => c.card.id),
+        selection: this.selection.map((c) => c.card.id),
+        lastSeed: this.lastSeed,
+      }),
+    );
+  }
+
+  /** Resume a run from a pasted code; becomes the autosave so CONTINUE works. */
+  private async importRunCode(code: string): Promise<void> {
+    const save = await decodeRunCode(code);
+    if (!save) {
+      this.menu.flashSeedError("that run code didn't check out — paste the whole thing");
+      return;
+    }
+    persistSave(save);
+    this.resumeRun(save);
+  }
+
+  /** Rebuild a run from a save and drop the player back where they left off. */
+  private resumeRun(save: SaveData): void {
+    this.menu.setVisible(false);
+    this.end.setVisible(false);
+    this.shop.setVisible(false);
+    this.clearHand(false);
+
+    const deckCards = this.run.restore(save.run);
+    if (!deckCards) {
+      // Content changed under the save; discard it and stay on the menu.
+      clearSave();
+      this.menu.refreshContinue();
+      this.menu.setVisible(true);
+      return;
+    }
+    this.lastSeed = save.lastSeed;
+    this.deck = new DeckSystem(this.run.rng);
+    const byId = new Map(deckCards.map((c) => [c.id, c]));
+    if (!this.deck.restore(save.deck, byId)) {
+      clearSave();
+      this.menu.refreshContinue();
+      this.menu.setVisible(true);
+      return;
+    }
+
+    this.hud.setVisible(true);
+    this.audio.startAmbience();
+    this.updateBoard(this.run.runs);
+
+    if (this.run.phase === "shop") {
+      this.shop.refresh(this.run);
+      this.shop.setVisible(true);
+      this.refreshHud();
+      return;
+    }
+
+    // Mid-inning: rebuild the hand meshes and the selection highlight, no re-deal.
+    const cardById = new Map(deckCards.map((c) => [c.id, c]));
+    for (const id of save.hand) {
+      const card = cardById.get(id);
+      if (!card) continue;
+      this.hand.push(new Card3D(this.scene, card));
+    }
+    this.layoutHand();
+    for (const card3d of this.hand) {
+      card3d.mesh.position.copyFrom(card3d.homePosition);
+      card3d.mesh.rotation.copyFrom(card3d.homeRotation);
+      card3d.applyRestPose();
+    }
+    const handById = new Map(this.hand.map((c) => [c.card.id, c]));
+    for (const id of save.selection) {
+      const card3d = handById.get(id);
+      if (!card3d) continue;
+      card3d.setSelected(true);
+      this.selection.push(card3d);
+    }
+    this.layoutHand(); // reflect the raised selection offset
+    this.refreshHud();
+    this.refreshPreview();
   }
 
   /** The 3D scoreboard is the primary score display. */
@@ -209,6 +371,7 @@ export class GameScene {
     void this.announceInning();
     await this.refillHand();
     this.refreshPreview();
+    this.autosave(); // fresh hand dealt — a clean checkpoint to resume from
   }
 
   private async announceInning(): Promise<void> {
@@ -234,7 +397,7 @@ export class GameScene {
   }
 
   private toggleComboBook(): void {
-    if (this.pause.isOpen || this.run.phase === "menu") return;
+    if (this.pause.isOpen || this.settingsPanel.isOpen || this.run.phase === "menu") return;
     this.audio.play("click");
     this.comboBook.setVisible(!this.comboBook.isOpen);
   }
@@ -242,19 +405,28 @@ export class GameScene {
   /** Abandon path: back to the title screen from pause or the end screen. */
   private quitToMenu(): void {
     this.audio.play("click");
+    this.settingsPanel.setVisible(false);
     this.pause.setVisible(false);
     this.comboBook.setVisible(false);
     this.end.setVisible(false);
     this.shop.setVisible(false);
     this.hud.setVisible(false);
     this.clearHand(false);
+    this.audio.stopAmbience();
     this.run.phase = "menu";
+    clearSave(); // abandoning ends the run — no resume point
     this.world.updateScoreboard("CARDBALL", "CLASSIC", "");
     this.menu.setVisible(true);
   }
 
   private endRun(victory: boolean): void {
     this.hud.setVisible(false);
+    this.clearHand(false); // leftover cards shouldn't linger behind the end panel
+    clearSave(); // the run is over; nothing left to resume
+    // Victory: the crowd roars and keeps murmuring under the pennant screen.
+    // Loss: fade the stadium to silence — the season's over.
+    if (victory) this.audio.swellAmbience(4);
+    else this.audio.stopAmbience();
     this.world.updateScoreboard(
       victory ? "PENNANT WON!" : "SEASON OVER",
       `SEED ${this.lastSeed}`,
@@ -370,6 +542,7 @@ export class GameScene {
     // Cards stride out to the diamond and slap down flat, kicking up dust.
     this.hand = this.hand.filter((c) => !played.includes(c));
     this.selection = [];
+    this.hud.setSelectionBadges([]); // badges vanish as the cards leave, before their meshes dispose
     const flights = played.map((card3d, i) => {
       const slot = new Vector3((i - (played.length - 1) / 2) * 1.7, 0.06 + i * 0.005, 1.6);
       return this.tweens.delay(i * 110).then(async () => {
@@ -394,8 +567,10 @@ export class GameScene {
     if (bigPlay) {
       this.world.pulseLights();
       this.world.shakeCamera();
+      this.audio.swellAmbience(4); // the crowd erupts on a homer
     } else if (result.runs >= 8) {
       this.world.shakeCamera(0.07, 250);
+      this.audio.swellAmbience(2.4); // a solid rally gets a rise
     }
     const runsBefore = this.run.runs;
     void this.hud.showPopup(`+${result.runs} RUNS!`, UI.gold, 1000);
@@ -421,6 +596,7 @@ export class GameScene {
       this.endRun(false);
     } else {
       await this.refillHand();
+      this.autosave(); // play resolved, still batting — checkpoint the new hand
     }
   }
 
@@ -431,6 +607,7 @@ export class GameScene {
     const discarded = this.selection;
     this.hand = this.hand.filter((c) => !discarded.includes(c));
     this.selection = [];
+    this.hud.setSelectionBadges([]); // clear before the discarded meshes tumble off and dispose
     await Promise.all(
       discarded.map((card3d, i) =>
         this.tweens.delay(i * 70).then(() => {
@@ -452,10 +629,12 @@ export class GameScene {
     this.refreshHud();
     this.refreshPreview();
     await this.refillHand();
+    this.autosave(); // discard resolved — checkpoint the refreshed hand
   }
 
   private async winInning(): Promise<void> {
     this.audio.play("win");
+    this.audio.swellAmbience(3.2); // crowd cheers the inning home
     this.effects.confetti(new Vector3(0, 2.5, 1.5));
     await this.hud.showPopup("INNING WON!", UI.green, 1000);
     this.run.finishInning();
@@ -466,6 +645,7 @@ export class GameScene {
       this.shop.refresh(this.run);
       this.shop.setVisible(true);
       this.refreshHud();
+      this.autosave(); // shop is a resume point too (offers/upgrades are rolled)
     }
   }
 
@@ -485,6 +665,7 @@ export class GameScene {
 
   private refreshPreview(): void {
     this.hud.updatePreview(this.previewResult(), this.selection.length, this.selection[0]?.card.name ?? null);
+    this.hud.setSelectionBadges(this.selection.map((c) => c.mesh));
     this.refreshHud();
   }
 
@@ -497,7 +678,7 @@ export class GameScene {
 
   private bindPointer(): void {
     this.scene.onPointerObservable.add((info) => {
-      if (this.run.phase !== "inning" || this.pause.isOpen || this.comboBook.isOpen) return;
+      if (this.run.phase !== "inning" || this.pause.isOpen || this.comboBook.isOpen || this.settingsPanel.isOpen) return;
       if (info.type === PointerEventTypes.POINTERMOVE) {
         const picked = this.scene.pick(this.scene.pointerX, this.scene.pointerY, (m) => m.name.startsWith("card-"));
         const card = this.cardFromMesh(picked?.pickedMesh?.name);
@@ -528,21 +709,39 @@ export class GameScene {
         this.refreshHud();
         return;
       }
+      // Letter keys belong to the seed box while it's focused, not to hotkeys
+      if (this.menu.seedFocused && key.length === 1) return;
       if (key.toLowerCase() === "m") {
         const muted = this.audio.toggleMute();
-        if (this.run.phase !== "menu") void this.hud.showPopup(muted ? "MUTED" : "SOUND ON", UI.cream, 450);
+        this.settingsPanel.refresh(); // keep the SOUND toggle honest if the panel is up
+        if (this.run.phase !== "menu" && !this.settingsPanel.isOpen) {
+          void this.hud.showPopup(muted ? "MUTED" : "SOUND ON", UI.cream, 450);
+        }
         return;
       }
       if (this.run.phase === "menu") {
-        if (key === "Enter" && this.menu.visible) this.menu.submit();
-        return; // the binder owns Escape/arrows on the title screen
+        if (key === "Escape") {
+          if (this.settingsPanel.isOpen) {
+            this.settingsPanel.close();
+          } else if (this.menu.visible && !this.menu.onHome) {
+            this.audio.play("click");
+            this.menu.showHome();
+          }
+          return; // the binder owns its own Escape/arrows
+        }
+        if (key === "Enter" && this.menu.visible && this.menu.onHome && !this.settingsPanel.isOpen) {
+          this.menu.submit();
+        }
+        return;
       }
       if (key.toLowerCase() === "h") {
         this.toggleComboBook();
         return;
       }
       if (key === "Escape") {
-        if (this.comboBook.isOpen) {
+        if (this.settingsPanel.isOpen) {
+          this.settingsPanel.close();
+        } else if (this.comboBook.isOpen) {
           this.comboBook.setVisible(false);
         } else if (this.pause.isOpen) {
           this.pause.setVisible(false);
@@ -551,7 +750,28 @@ export class GameScene {
         }
         return;
       }
-      if (this.pause.isOpen || this.comboBook.isOpen) return; // no cheats under overlays
+      if (this.pause.isOpen || this.comboBook.isOpen || this.settingsPanel.isOpen) return; // overlays swallow gameplay keys
+
+      // ── Player gameplay controls ──
+      if (this.run.phase === "inning") {
+        if (key >= "1" && key <= "8") {
+          const card = this.hand[Number(key) - 1];
+          if (card) this.toggleSelect(card);
+          return;
+        }
+        if (key === "Enter" || key === " ") {
+          info.event.preventDefault(); // Space would otherwise scroll/click
+          void this.playSelection();
+          return;
+        }
+        if (key.toLowerCase() === "x") {
+          void this.discardSelection();
+          return;
+        }
+      }
+
+      // ── Dev cheats — only while the F1 debug panel is open ──
+      if (!this.debug.visible) return;
       switch (key.toLowerCase()) {
         case "r":
           void this.restartInning();

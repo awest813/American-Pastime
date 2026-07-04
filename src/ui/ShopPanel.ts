@@ -1,4 +1,4 @@
-import { Control, Rectangle, StackPanel, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
+import { Control, Rectangle, StackPanel, TextBlock, type AdvancedDynamicTexture, type Button } from "@babylonjs/gui/2D";
 import type { RunSystem } from "../systems/RunSystem";
 import { RARITY_DISPLAY, type EquipmentCard, type PlayerCard } from "../systems/types";
 import { UI, makeButton, makePanel, makeStack, makeText } from "./kit";
@@ -25,6 +25,7 @@ export class ShopPanel {
   private ownedText: TextBlock;
   private offersRow: StackPanel;
   private upgradeRow: StackPanel;
+  private rerollButton: Button;
 
   constructor(adt: AdvancedDynamicTexture, private callbacks: ShopCallbacks) {
     this.root = new Rectangle("shopRoot");
@@ -77,9 +78,9 @@ export class ShopPanel {
     buttonRow.paddingTop = "16px";
     buttonRow.height = "78px";
     stack.addControl(buttonRow);
-    const reroll = makeButton("rerollButton", "REROLL  $1", UI.cream, "200px");
-    reroll.onPointerUpObservable.add(() => this.callbacks.onReroll());
-    buttonRow.addControl(reroll);
+    this.rerollButton = makeButton("rerollButton", "REROLL  $1", UI.cream, "200px");
+    this.rerollButton.onPointerUpObservable.add(() => this.callbacks.onReroll());
+    buttonRow.addControl(this.rerollButton);
     const gap = new Rectangle();
     gap.width = "24px";
     gap.thickness = 0;
@@ -91,6 +92,9 @@ export class ShopPanel {
 
   refresh(run: RunSystem): void {
     this.cashText.text = `CASH: $${run.cash}   ·   EQUIPMENT ${run.equipment.length}/5`;
+    const canReroll = run.cash >= 1;
+    this.rerollButton.isEnabled = canReroll;
+    this.rerollButton.alpha = canReroll ? 1 : 0.5;
     this.ownedText.text =
       run.equipment.length === 0
         ? "Owned: nothing yet — your first piece of gear changes everything."

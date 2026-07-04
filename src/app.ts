@@ -29,6 +29,10 @@ class App {
 
   async bootstrap(): Promise<void> {
     this.engine = await this._createEngine();
+    // adaptToDeviceRatio honors full DPR; past 2 the extra pixels cost fill
+    // rate (2.25x at DPR 3) with no visible gain on a scene this stylized.
+    // hardwareScalingLevel is 1/effectiveDPR, so capping at DPR 2 means 0.5.
+    if ((window.devicePixelRatio || 1) > 2) this.engine.setHardwareScalingLevel(0.5);
     this.scene = new Scene(this.engine);
 
     if (templateConfig.features.physics) {
@@ -42,16 +46,26 @@ class App {
   }
 
   async _createEngine(): Promise<Engine | WebGPUEngine> {
-    if (templateConfig.rendering.webgpuFirst && "gpu" in navigator) {
+    // ?renderer=webgl escapes a machine whose WebGPU adapter exists but is
+    // broken (crashes happen below the app, so we can't auto-detect that);
+    // ?renderer=webgpu forces the attempt even with webgpuFirst off.
+    const override = new URLSearchParams(window.location.search).get("renderer");
+    const tryWebgpu = override === "webgpu" || (override !== "webgl" && templateConfig.rendering.webgpuFirst);
+    if (tryWebgpu && (await this._webgpuUsable())) {
+      const webgpu = new WebGPUEngine(this.canvas, {
+        adaptToDeviceRatio: templateConfig.rendering.engine.adaptToDeviceRatio,
+        antialias: templateConfig.rendering.engine.antialias,
+      });
       try {
-        const webgpu = new WebGPUEngine(this.canvas, {
-          adaptToDeviceRatio: templateConfig.rendering.engine.adaptToDeviceRatio,
-          antialias: templateConfig.rendering.engine.antialias,
-        });
         await webgpu.initAsync();
         return webgpu;
       } catch (error) {
         console.warn("WebGPU initialization failed, falling back to WebGL2.", error);
+        try {
+          webgpu.dispose();
+        } catch {
+          // a half-initialized engine may not dispose cleanly; WebGL takes over regardless
+        }
       }
     }
 
@@ -64,6 +78,24 @@ class App {
     });
   }
 
+  /** True only when the browser can actually hand over a WebGPU adapter.
+   *  navigator.gpu existing is not enough (headless/blocklisted GPUs expose it
+   *  with no adapter), and constructing WebGPUEngine anyway makes Babylon log
+   *  fatal errors before we can fall back. */
+  async _webgpuUsable(): Promise<boolean> {
+    try {
+      const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown | null> } }).gpu;
+      if (gpu && (await gpu.requestAdapter()) !== null) {
+        return true;
+      }
+      console.info("WebGPU adapter unavailable; using WebGL2.");
+      return false;
+    } catch {
+      console.info("WebGPU support probe failed; using WebGL2.");
+      return false;
+    }
+  }
+
   async _setPhysics(): Promise<void> {
     const gravity = new Vector3(0, -9.81, 0);
     const { default: HavokPhysics } = await import("@babylonjs/havok");
@@ -72,12 +104,23 @@ class App {
     if (!this.scene.enablePhysics(gravity, plugin)) {
       throw new Error("Failed to initialize the Havok physics engine.");
     }
+    // Physics only serves the ~3s cosmetic ball launch; don't step the WASM
+    // engine every frame while nothing is simulating. BaseballToken flips
+    // this on around each live ball.
+    this.scene.physicsEnabled = false;
   }
+
+  private lastFpsUpdate = 0;
 
   _fps(): void {
     if (!templateConfig.debug.showFps) {
       return;
     }
+
+    // Writing to the DOM every frame forces layout work 60x/sec; 2 Hz reads the same.
+    const now = performance.now();
+    if (now - this.lastFpsUpdate < 500) return;
+    this.lastFpsUpdate = now;
 
     const dom = document.getElementById("display-fps");
     if (dom) {

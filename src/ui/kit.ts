@@ -34,6 +34,18 @@ export function makeText(text: string, size: number, color: string = UI.cream): 
   return block;
 }
 
+/** Blend a #rrggbb color toward white; non-hex inputs pass through untouched. */
+function brighten(color: string, amount: number): string {
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) return color;
+  const channel = (offset: number) => {
+    const value = parseInt(color.slice(offset, offset + 2), 16);
+    return Math.round(value + (255 - value) * amount)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${channel(1)}${channel(3)}${channel(5)}`;
+}
+
 export function makeButton(name: string, label: string, background: string, width = "220px", height = "52px"): Button {
   const button = Button.CreateSimpleButton(name, label);
   button.width = width;
@@ -47,7 +59,23 @@ export function makeButton(name: string, label: string, background: string, widt
   button.fontWeight = "bold";
   button.paddingTop = "4px";
   button.paddingBottom = "4px";
+  // Hover feedback: brighten toward white, restore the current base on leave.
+  // The base lives in metadata so setButtonBackground can restyle live buttons.
+  button.metadata = { baseBackground: background };
+  button.hoverCursor = "pointer";
+  button.pointerEnterAnimation = () => {
+    button.background = brighten((button.metadata as { baseBackground: string }).baseBackground, 0.25);
+  };
+  button.pointerOutAnimation = () => {
+    button.background = (button.metadata as { baseBackground: string }).baseBackground;
+  };
   return button;
+}
+
+/** Restyle a kit button (e.g. toggle state) without breaking hover restore. */
+export function setButtonBackground(button: Button, background: string): void {
+  button.metadata = { baseBackground: background };
+  button.background = background;
 }
 
 export function makeStack(vertical = true): StackPanel {

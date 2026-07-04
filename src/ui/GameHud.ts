@@ -1,6 +1,7 @@
-import { Control, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
+import { Control, Ellipse, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
 import type { Button } from "@babylonjs/gui/2D";
-import type { RunSystem } from "../systems/RunSystem";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import { RULES, type RunSystem } from "../systems/RunSystem";
 import type { ScoreResult } from "../systems/types";
 import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeText, topLeft, topRight } from "./kit";
 import { Tweens } from "../utils/Tweens";
@@ -37,6 +38,8 @@ export class GameHud {
   private discardButton: Button;
   private popupText: TextBlock;
   private popupGeneration = 0;
+  /** Numbered badges that mark the batting order of the current selection. */
+  private orderBadges: Ellipse[] = [];
 
   constructor(adt: AdvancedDynamicTexture, callbacks: HudCallbacks) {
     this.root = new Rectangle("hudRoot");
@@ -181,10 +184,47 @@ export class GameHud {
     this.popupText.top = "-60px";
     this.popupText.isVisible = false;
     this.root.addControl(this.popupText);
+
+    // Batting-order badges: one gold disc per selectable card, added straight
+    // to the ADT so linkWithMesh can project them onto the 3D cards.
+    for (let i = 0; i < RULES.maxCardsPerPlay; i++) {
+      const badge = new Ellipse(`orderBadge-${i}`);
+      badge.width = "38px";
+      badge.height = "38px";
+      badge.background = UI.gold;
+      badge.color = UI.ink;
+      badge.thickness = 3;
+      badge.isVisible = false;
+      badge.isPointerBlocker = false;
+      const label = new TextBlock(`orderBadgeText-${i}`, `${i + 1}`);
+      label.color = UI.ink;
+      label.fontFamily = UI.mono;
+      label.fontWeight = "bold";
+      label.fontSize = 22;
+      badge.addControl(label);
+      adt.addControl(badge);
+      this.orderBadges.push(badge);
+    }
   }
 
   setVisible(visible: boolean): void {
     this.root.isVisible = visible;
+    if (!visible) this.setSelectionBadges([]);
+  }
+
+  /** Pin numbered badges to the selected cards in click order; hide the rest.
+   *  Called on every selection change. */
+  setSelectionBadges(meshes: AbstractMesh[]): void {
+    this.orderBadges.forEach((badge, i) => {
+      if (i < meshes.length) {
+        badge.linkWithMesh(meshes[i]);
+        badge.linkOffsetY = "-96px"; // ride above the raised card
+        badge.isVisible = true;
+      } else {
+        badge.linkWithMesh(null);
+        badge.isVisible = false;
+      }
+    });
   }
 
   update(run: RunSystem, deckCount: number, selectionCount: number): void {
