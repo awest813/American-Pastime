@@ -49,8 +49,16 @@ Useful control names: `startButton`, `seedInput`, `seedReroll`, `binderButton`,
 
 Hotkeys: Enter starts a season from the title, ESC pauses/backs out,
 H combo book, M mute, F1 debug panel. Settings persist in localStorage under
-`cardball.settings.v1`. `window.__cardballSetSpeed(8)` fast-forwards tweens
-for soak tests.
+`cardball.settings.v1`; the resumable run autosaves to `cardball.save.v1`.
+`window.__cardballSetSpeed(8)` fast-forwards tweens for soak tests.
+
+Save/resume: to test resume, drive a run, `page.reload()` (localStorage
+survives within a `browser.newContext()`), then click `continueButton`.
+`window.__cardball.run.serialize()` / `.restore()` and `resumeRun(save)` are
+callable directly for deterministic edge-case checks (content-mismatch,
+corrupt blob) without fighting click timing — the GUI continue button often
+reports a stale measure right after a reload relayout, so prefer the direct
+call when asserting the failure path.
 
 ## Flows worth driving
 

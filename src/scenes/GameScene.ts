@@ -15,6 +15,7 @@ import { ComboSystem } from "../systems/ComboSystem";
 import { DeckSystem } from "../systems/DeckSystem";
 import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
+import { clearSave, loadSave, persistSave, summarize, type SaveData } from "../systems/Save";
 import { SPEED_SCALE, settings } from "../systems/Settings";
 import type { PlayerCard, ScoreResult } from "../systems/types";
 import { ComboBook } from "../ui/ComboBook";
@@ -84,18 +85,21 @@ export class GameScene {
         if (this.run.buyEquipment(offer)) {
           this.audio.play("buy");
           this.shop.refresh(this.run);
+          this.autosave(); // cash + gear changed
         }
       },
       onUpgrade: (card) => {
         if (this.run.upgradeCard(card)) {
           this.audio.play("win");
           this.shop.refresh(this.run);
+          this.autosave(); // deck card promoted
         }
       },
       onReroll: () => {
         if (this.run.rerollShop()) {
           this.audio.play("click");
           this.shop.refresh(this.run);
+          this.autosave(); // offers rerolled, cash spent, RNG advanced
         }
       },
       onContinue: () => {
@@ -132,6 +136,15 @@ export class GameScene {
         this.audio.play("click"); // also unlocks the AudioContext inside the user gesture
         this.startRun(seed);
       },
+      onContinue: () => {
+        const save = loadSave();
+        if (!save) {
+          this.menu.refreshContinue(); // save vanished between boot and click
+          return;
+        }
+        this.audio.play("click");
+        this.resumeRun(save);
+      },
       onCollection: () => {
         this.audio.play("click");
         this.menu.setVisible(false);
@@ -140,6 +153,10 @@ export class GameScene {
       onSettings: () => {
         this.audio.play("click");
         this.settingsPanel.setVisible(true);
+      },
+      loadSummary: () => {
+        const save = loadSave();
+        return save ? summarize(save) : null;
       },
     });
 
@@ -208,6 +225,80 @@ export class GameScene {
     void this.beginInning();
   }
 
+  /** Persist a resume point. No-op unless the run is in a resumable phase and
+   *  settled (never mid-animation, so the saved hand matches the saved piles). */
+  private autosave(): void {
+    if (this.busy) return;
+    if (this.run.phase !== "inning" && this.run.phase !== "shop") return;
+    persistSave({
+      run: this.run.serialize(),
+      deck: this.deck.snapshot(),
+      hand: this.hand.map((c) => c.card.id),
+      selection: this.selection.map((c) => c.card.id),
+      lastSeed: this.lastSeed,
+    });
+  }
+
+  /** Rebuild a run from a save and drop the player back where they left off. */
+  private resumeRun(save: SaveData): void {
+    this.menu.setVisible(false);
+    this.end.setVisible(false);
+    this.shop.setVisible(false);
+    this.clearHand(false);
+
+    const deckCards = this.run.restore(save.run);
+    if (!deckCards) {
+      // Content changed under the save; discard it and stay on the menu.
+      clearSave();
+      this.menu.refreshContinue();
+      this.menu.setVisible(true);
+      return;
+    }
+    this.lastSeed = save.lastSeed;
+    this.deck = new DeckSystem(this.run.rng);
+    const byId = new Map(deckCards.map((c) => [c.id, c]));
+    if (!this.deck.restore(save.deck, byId)) {
+      clearSave();
+      this.menu.refreshContinue();
+      this.menu.setVisible(true);
+      return;
+    }
+
+    this.hud.setVisible(true);
+    this.updateBoard(this.run.runs);
+
+    if (this.run.phase === "shop") {
+      this.shop.refresh(this.run);
+      this.shop.setVisible(true);
+      this.refreshHud();
+      return;
+    }
+
+    // Mid-inning: rebuild the hand meshes and the selection highlight, no re-deal.
+    const cardById = new Map(deckCards.map((c) => [c.id, c]));
+    for (const id of save.hand) {
+      const card = cardById.get(id);
+      if (!card) continue;
+      this.hand.push(new Card3D(this.scene, card));
+    }
+    this.layoutHand();
+    for (const card3d of this.hand) {
+      card3d.mesh.position.copyFrom(card3d.homePosition);
+      card3d.mesh.rotation.copyFrom(card3d.homeRotation);
+      card3d.applyRestPose();
+    }
+    const handById = new Map(this.hand.map((c) => [c.card.id, c]));
+    for (const id of save.selection) {
+      const card3d = handById.get(id);
+      if (!card3d) continue;
+      card3d.setSelected(true);
+      this.selection.push(card3d);
+    }
+    this.layoutHand(); // reflect the raised selection offset
+    this.refreshHud();
+    this.refreshPreview();
+  }
+
   /** The 3D scoreboard is the primary score display. */
   private updateBoard(runs: number): void {
     const met = runs >= this.run.target;
@@ -235,6 +326,7 @@ export class GameScene {
     void this.announceInning();
     await this.refillHand();
     this.refreshPreview();
+    this.autosave(); // fresh hand dealt — a clean checkpoint to resume from
   }
 
   private async announceInning(): Promise<void> {
@@ -276,6 +368,7 @@ export class GameScene {
     this.hud.setVisible(false);
     this.clearHand(false);
     this.run.phase = "menu";
+    clearSave(); // abandoning ends the run — no resume point
     this.world.updateScoreboard("CARDBALL", "CLASSIC", "");
     this.menu.setVisible(true);
   }
@@ -283,6 +376,7 @@ export class GameScene {
   private endRun(victory: boolean): void {
     this.hud.setVisible(false);
     this.clearHand(false); // leftover cards shouldn't linger behind the end panel
+    clearSave(); // the run is over; nothing left to resume
     this.world.updateScoreboard(
       victory ? "PENNANT WON!" : "SEASON OVER",
       `SEED ${this.lastSeed}`,
@@ -449,6 +543,7 @@ export class GameScene {
       this.endRun(false);
     } else {
       await this.refillHand();
+      this.autosave(); // play resolved, still batting — checkpoint the new hand
     }
   }
 
@@ -480,6 +575,7 @@ export class GameScene {
     this.refreshHud();
     this.refreshPreview();
     await this.refillHand();
+    this.autosave(); // discard resolved — checkpoint the refreshed hand
   }
 
   private async winInning(): Promise<void> {
@@ -494,6 +590,7 @@ export class GameScene {
       this.shop.refresh(this.run);
       this.shop.setVisible(true);
       this.refreshHud();
+      this.autosave(); // shop is a resume point too (offers/upgrades are rolled)
     }
   }
 

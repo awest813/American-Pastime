@@ -1,16 +1,23 @@
-import { Control, InputText, Rectangle, StackPanel, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
-import { UI, makeButton, makeStack, makeText } from "./kit";
+import { Control, InputText, Rectangle, StackPanel, type AdvancedDynamicTexture, type Button, type TextBlock } from "@babylonjs/gui/2D";
+import { UI, makeButton, makeStack, makeText, setButtonBackground } from "./kit";
 import { Random } from "../utils/Random";
+import type { SaveSummary } from "../systems/Save";
 
 export interface MenuCallbacks {
   onStart: (seed: string) => void;
+  onContinue: () => void;
   onCollection: () => void;
   onSettings: () => void;
+  /** Current resumable save, or null. Re-read on every home-view show. */
+  loadSummary: () => SaveSummary | null;
 }
+
+const PHASE_LABEL: Record<string, string> = { inning: "at bat", shop: "in the shop" };
 
 /**
  * The title screen. Two views inside one panel:
- *  - HOME: title block, PLAY BALL, the seed row, and the secondary menu
+ *  - HOME: an optional CONTINUE RUN button (when a save exists), the title
+ *    block, PLAY BALL, the seed row, and the secondary menu
  *    (Card Binder / How to Play / Settings).
  *  - HOW TO PLAY: the full rulebook page, back with ESC.
  */
@@ -21,6 +28,14 @@ export class MenuPanel {
   private seedInput: InputText;
   private seedInputFocused = false;
   private callbacks: MenuCallbacks;
+
+  private continueButton!: Button;
+  private continueSummary!: TextBlock;
+  private startButton!: Button;
+  /** True while PLAY BALL is armed to erase an existing save (two-step confirm). */
+  private confirmingNew = false;
+  private confirmTimer: ReturnType<typeof setTimeout> | null = null;
+  private hasSave = false;
 
   constructor(adt: AdvancedDynamicTexture, callbacks: MenuCallbacks) {
     this.callbacks = callbacks;
@@ -33,6 +48,7 @@ export class MenuPanel {
 
     this.homeStack = this.buildHome();
     this.howToStack = this.buildHowTo();
+    this.showHome(); // set the initial CONTINUE visibility before the first frame
   }
 
   // ── HOME view ─────────────────────────────────────────────────────────────
@@ -55,13 +71,25 @@ export class MenuPanel {
     stack.addControl(subtitle);
 
     const divider = makeText("· · · ⚾ · · ·", 20, "#9a917f");
-    divider.paddingBottom = "26px";
+    divider.paddingBottom = "22px";
     stack.addControl(divider);
 
-    const startButton = makeButton("startButton", "PLAY BALL", UI.green, "300px", "68px");
-    startButton.fontSize = 30;
-    startButton.onPointerUpObservable.add(() => this.submit());
-    stack.addControl(startButton);
+    // CONTINUE RUN — the prominent action when a run is in progress. Hidden
+    // (with its summary) when there's no save; refreshContinue() toggles it.
+    this.continueButton = makeButton("continueButton", "CONTINUE RUN", UI.gold, "340px", "62px");
+    this.continueButton.fontSize = 26;
+    this.continueButton.onPointerUpObservable.add(() => this.callbacks.onContinue());
+    stack.addControl(this.continueButton);
+    this.continueSummary = makeText("", 15, "#9a917f");
+    this.continueSummary.fontFamily = UI.mono;
+    this.continueSummary.paddingTop = "6px";
+    this.continueSummary.paddingBottom = "14px";
+    stack.addControl(this.continueSummary);
+
+    this.startButton = makeButton("startButton", "PLAY BALL", UI.green, "300px", "68px");
+    this.startButton.fontSize = 30;
+    this.startButton.onPointerUpObservable.add(() => this.submit());
+    stack.addControl(this.startButton);
 
     // Seed row: input + dice reroll, directly under the start button
     const seedRow = makeStack(false);
@@ -178,6 +206,7 @@ export class MenuPanel {
   showHome(): void {
     this.homeStack.isVisible = true;
     this.howToStack.isVisible = false;
+    this.refreshContinue();
   }
 
   showHowTo(): void {
@@ -185,8 +214,34 @@ export class MenuPanel {
     this.howToStack.isVisible = true;
   }
 
+  /** Re-read the save slot and show/hide CONTINUE accordingly. Also resets the
+   *  PLAY BALL confirm, since the save state may have changed underneath it. */
+  refreshContinue(): void {
+    const summary = this.callbacks.loadSummary();
+    this.hasSave = summary !== null;
+    this.continueButton.isVisible = this.hasSave;
+    this.continueSummary.isVisible = this.hasSave;
+    if (summary) {
+      const where = PHASE_LABEL[summary.phase] ?? summary.phase;
+      this.continueSummary.text = `${summary.seed} · inning ${summary.inning} · ${where} · $${summary.cash}`;
+    }
+    this.resetConfirm();
+  }
+
+  private resetConfirm(): void {
+    if (this.confirmTimer !== null) {
+      clearTimeout(this.confirmTimer);
+      this.confirmTimer = null;
+    }
+    this.confirmingNew = false;
+    const label = this.startButton.textBlock;
+    if (label) label.text = "PLAY BALL";
+    setButtonBackground(this.startButton, UI.green);
+  }
+
   setVisible(visible: boolean): void {
     if (visible) this.showHome();
+    else this.resetConfirm();
     this.root.isVisible = visible;
   }
 
@@ -194,8 +249,19 @@ export class MenuPanel {
     return this.root.isVisible;
   }
 
-  /** Start the run with the current seed (button click or Enter key). */
+  /** Start a fresh run. When a save exists, the first press arms a confirm
+   *  (PLAY BALL would erase the run in progress); a second press within a few
+   *  seconds actually starts. Without a save it starts immediately. */
   submit(): void {
+    if (this.hasSave && !this.confirmingNew) {
+      this.confirmingNew = true;
+      const label = this.startButton.textBlock;
+      if (label) label.text = "ERASE RUN & START?";
+      setButtonBackground(this.startButton, UI.red);
+      this.confirmTimer = setTimeout(() => this.resetConfirm(), 3500);
+      return;
+    }
+    this.resetConfirm();
     this.callbacks.onStart(this.seedInput.text.trim() || Random.generateSeed());
   }
 

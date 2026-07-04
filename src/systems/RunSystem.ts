@@ -5,7 +5,33 @@ import pitchesJson from "../content/pitches.json";
 import combosJson from "../content/combos.json";
 import bossesJson from "../content/bosses.json";
 import { RARITY_LADDER, type BossCard, type ComboMeta, type EquipmentCard, type PitchCard, type PlayerCard, type Position, type Rarity, type StadiumCard, type Stat } from "./types";
-import { Random } from "../utils/Random";
+import { Random, type RandomSnapshot } from "../utils/Random";
+
+/**
+ * A serializable snapshot of a run. Cards that live in the static content pools
+ * (equipment, stadium, pitch, boss) are stored by id; the per-run player deck —
+ * which carries upgrades and so cannot be derived from the base roster — is
+ * stored in full and is the canonical card list every other reference points at.
+ */
+export interface RunState {
+  rng: RandomSnapshot;
+  phase: RunPhase;
+  inning: number;
+  target: number;
+  runs: number;
+  playsLeft: number;
+  discardsLeft: number;
+  cash: number;
+  equipment: string[];
+  stadium: string | null;
+  pitch: string;
+  boss: string | null;
+  umpireTarget: Position | null;
+  usedBosses: string[];
+  shopOffers: string[];
+  upgradeCandidates: string[];
+  deckCards: PlayerCard[];
+}
 
 /** Price of promoting a card, keyed by the tier it is promoted TO. */
 const UPGRADE_COST: Partial<Record<Rarity, number>> = { Starter: 3, AllStar: 5, Legend: 8 };
@@ -191,5 +217,86 @@ export class RunSystem {
   nextInning(): void {
     this.inning += 1;
     this.startInning();
+  }
+
+  // ── Save / resume ─────────────────────────────────────────────────────────
+
+  /** Snapshot every run-level field, including the RNG position and the
+   *  upgraded per-run deck, so the run can be resumed byte-for-byte later. */
+  serialize(): RunState {
+    return {
+      rng: this.rng.snapshot(),
+      phase: this.phase,
+      inning: this.inning,
+      target: this.target,
+      runs: this.runs,
+      playsLeft: this.playsLeft,
+      discardsLeft: this.discardsLeft,
+      cash: this.cash,
+      equipment: this.equipment.map((e) => e.id),
+      stadium: this.stadium?.id ?? null,
+      pitch: this.pitch.id,
+      boss: this.boss?.id ?? null,
+      umpireTarget: this.umpireTarget,
+      usedBosses: [...this.usedBosses],
+      shopOffers: this.shopOffers.map((o) => o.id),
+      upgradeCandidates: this.upgradeCandidates.map((c) => c.id),
+      deckCards: this.deckCards.map((c) => ({ ...c })),
+    };
+  }
+
+  /** Rebuild run state from a snapshot. References into the static content
+   *  pools are re-resolved by id; if a required one is missing (the content
+   *  changed under an old save) the whole restore fails so the caller can
+   *  discard the save rather than resume a corrupt run.
+   *  @returns the restored per-run deck (for the DeckSystem/hand), or null on failure. */
+  restore(state: RunState): PlayerCard[] | null {
+    const pitch = this.pitches.find((p) => p.id === state.pitch);
+    if (!pitch) return null;
+    const stadium = state.stadium ? this.stadiums.find((s) => s.id === state.stadium) : null;
+    if (state.stadium && !stadium) return null;
+    const boss = state.boss ? this.bosses.find((b) => b.id === state.boss) : null;
+    if (state.boss && !boss) return null;
+
+    const equipment: EquipmentCard[] = [];
+    for (const id of state.equipment) {
+      const gear = this.equipmentPool.find((e) => e.id === id);
+      if (!gear) return null;
+      equipment.push(gear);
+    }
+    const shopOffers: EquipmentCard[] = [];
+    for (const id of state.shopOffers) {
+      const gear = this.equipmentPool.find((e) => e.id === id);
+      if (!gear) return null;
+      shopOffers.push(gear);
+    }
+
+    // The saved deck is canonical (carries upgrades); everything else keys into it.
+    this.deckCards = state.deckCards.map((c) => ({ ...c }));
+    const deckById = new Map(this.deckCards.map((c) => [c.id, c]));
+    const upgradeCandidates: PlayerCard[] = [];
+    for (const id of state.upgradeCandidates) {
+      const card = deckById.get(id);
+      if (!card) return null;
+      upgradeCandidates.push(card);
+    }
+
+    this.rng = Random.restore(state.rng);
+    this.phase = state.phase;
+    this.inning = state.inning;
+    this.target = state.target;
+    this.runs = state.runs;
+    this.playsLeft = state.playsLeft;
+    this.discardsLeft = state.discardsLeft;
+    this.cash = state.cash;
+    this.equipment = equipment;
+    this.stadium = stadium ?? null;
+    this.pitch = pitch;
+    this.boss = boss ?? null;
+    this.umpireTarget = state.umpireTarget;
+    this.usedBosses = new Set(state.usedBosses);
+    this.shopOffers = shopOffers;
+    this.upgradeCandidates = upgradeCandidates;
+    return this.deckCards;
   }
 }
