@@ -17,7 +17,7 @@ import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
 import { clearSave, createSaveData, decodeRunCode, encodeRunCode, isRunCode, loadSave, persistSave, summarize, type SaveData } from "../systems/Save";
 import { SPEED_SCALE, settings } from "../systems/Settings";
-import type { PlayerCard, ScoreResult } from "../systems/types";
+import type { BattingApproach, PlayerCard, ScoreResult } from "../systems/types";
 import { ComboBook } from "../ui/ComboBook";
 import { DebugPanel } from "../ui/DebugPanel";
 import { EndPanel } from "../ui/EndPanel";
@@ -65,6 +65,7 @@ export class GameScene {
   /** Selection in click order — order matters for "first card" effects. */
   private selection: Card3D[] = [];
   private hovered: Card3D | null = null;
+  private approach: BattingApproach = "swing";
   private busy = false;
   private lastSeed = "";
 
@@ -78,6 +79,7 @@ export class GameScene {
       onPlay: () => void this.playSelection(),
       onDiscard: () => void this.discardSelection(),
       onComboBook: () => this.toggleComboBook(),
+      onApproach: (approach) => this.setApproach(approach),
     });
     this.hud.setVisible(false);
     this.shop = new ShopPanel(adt, {
@@ -208,8 +210,16 @@ export class GameScene {
     scene.skipPointerMovePicking = true;
     const adt = AdvancedDynamicTexture.CreateFullscreenUI("gameUI", true, scene);
     // Scale by whichever axis is tighter so tall panels (combo book, shop)
-    // never clip on short/wide windows
-    adt.idealWidth = 1600;
+    // never clip on short/wide windows. Portrait panes need a narrower ideal
+    // width so menus remain readable, while desktop keeps the roomy HUD layout.
+    const updateGuiScale = () => {
+      const rect = canvas.getBoundingClientRect();
+      const width = rect.width || window.innerWidth;
+      const height = rect.height || window.innerHeight;
+      adt.idealWidth = height > width * 1.15 ? 1000 : 1600;
+    };
+    updateGuiScale();
+    window.addEventListener("resize", updateGuiScale);
     adt.idealHeight = 900;
     adt.useSmallestIdeal = true;
     return new GameScene(scene, canvas, adt);
@@ -233,6 +243,7 @@ export class GameScene {
     this.end.setVisible(false);
     this.shop.setVisible(false);
     this.clearHand(false); // the old run's cards must not bleed into the fresh deck
+    this.approach = "swing";
     this.run.startRun(seed);
     this.lastSeed = this.run.rng.seed;
     this.deck = new DeckSystem(this.run.rng);
@@ -252,6 +263,7 @@ export class GameScene {
       deck: this.deck.snapshot(),
       hand: this.hand.map((c) => c.card.id),
       selection: this.selection.map((c) => c.card.id),
+      approach: this.approach,
       lastSeed: this.lastSeed,
     });
   }
@@ -267,6 +279,7 @@ export class GameScene {
         deck: this.deck.snapshot(),
         hand: this.hand.map((c) => c.card.id),
         selection: this.selection.map((c) => c.card.id),
+        approach: this.approach,
         lastSeed: this.lastSeed,
       }),
     );
@@ -289,6 +302,7 @@ export class GameScene {
     this.end.setVisible(false);
     this.shop.setVisible(false);
     this.clearHand(false);
+    this.approach = save.approach ?? "swing";
 
     const deckCards = this.run.restore(save.run);
     if (!deckCards) {
@@ -352,7 +366,7 @@ export class GameScene {
       : this.run.pitch.name.toUpperCase();
     this.world.updateScoreboard(
       `${runs} / ${this.run.target}`,
-      `INNING ${this.run.inning} of ${RULES.finalInning}`,
+      `INNING ${this.run.inning} · OUTS ${this.run.outs}/${RULES.outsPerInning}`,
       line3,
       met ? "#7fd4a0" : "#ffd257",
     );
@@ -386,6 +400,7 @@ export class GameScene {
 
   private nextInning(): void {
     this.shop.setVisible(false);
+    this.approach = "swing";
     this.run.nextInning();
     void this.beginInning();
   }
@@ -437,7 +452,7 @@ export class GameScene {
       victory,
       victory
         ? `Nine innings survived. The cardboard engine hums.\nSeed ${this.lastSeed} · $${this.run.cash} left over`
-        : `Struck out in inning ${this.run.inning}: ${this.run.runs} of ${this.run.target} runs.\nSeed ${this.lastSeed}`,
+        : `Retired in inning ${this.run.inning}: ${this.run.runs} of ${this.run.target} runs.\nSeed ${this.lastSeed}`,
     );
   }
 
@@ -508,6 +523,15 @@ export class GameScene {
     }
     this.audio.play("select");
     this.refreshPreview();
+    this.autosave();
+  }
+
+  private setApproach(approach: BattingApproach): void {
+    if (this.busy || this.run.phase !== "inning") return;
+    this.approach = approach;
+    this.audio.play("click");
+    this.refreshPreview();
+    this.autosave();
   }
 
   // ── Scoring actions ─────────────────────────────────────────────────────
@@ -519,6 +543,9 @@ export class GameScene {
       equipment: this.run.equipment,
       runsSoFar: this.run.runs,
       target: this.run.target,
+      outs: this.run.outs,
+      bases: this.run.bases,
+      approach: this.approach,
       boss: this.run.boss,
       umpireTarget: this.run.umpireTarget,
       playsLeft: this.run.playsLeft,
@@ -561,23 +588,24 @@ export class GameScene {
       await this.hud.showPopup(`${combo.name.toUpperCase()}!`, UI.cream, 620);
     }
 
-    const bigPlay = result.runs >= 14;
+    const bigPlay = result.bases >= 4;
     this.audio.play(bigPlay ? "homer" : "crack");
     BaseballToken.launch(this.scene, bigPlay, this.effects);
     if (bigPlay) {
       this.world.pulseLights();
       this.world.shakeCamera();
       this.audio.swellAmbience(4); // the crowd erupts on a homer
-    } else if (result.runs >= 8) {
+    } else if (result.bases >= 2 || result.runs > 0) {
       this.world.shakeCamera(0.07, 250);
       this.audio.swellAmbience(2.4); // a solid rally gets a rise
     }
     const runsBefore = this.run.runs;
-    void this.hud.showPopup(`+${result.runs} RUNS!`, UI.gold, 1000);
-    this.audio.play("runs");
+    const popup = result.runs > 0 ? `+${result.runs} RUN${result.runs === 1 ? "" : "S"}!` : result.outs > 0 ? `${result.outcome.toUpperCase()}` : `${result.outcome.toUpperCase()}!`;
+    void this.hud.showPopup(popup, result.runs > 0 ? UI.gold : result.outs > 0 ? UI.red : UI.green, 1000);
+    if (result.runs > 0) this.audio.play("runs");
     await this.countUpBoard(runsBefore, runsBefore + result.runs);
 
-    this.run.recordPlay(result.runs, result.playCost);
+    this.run.recordPlay(result.runs, result.playCost, result.outs, result.basesAfter);
 
     await this.tweens.delay(350);
     for (const card3d of played) card3d.dispose();
@@ -592,7 +620,7 @@ export class GameScene {
     } else if (this.run.inningLost) {
       this.run.phase = "gameOver";
       this.audio.play("lose");
-      await this.hud.showPopup("STRUCK OUT…", UI.red, 1100);
+      await this.hud.showPopup("RETIRED...", UI.red, 1100);
       this.endRun(false);
     } else {
       await this.refillHand();
@@ -659,7 +687,7 @@ export class GameScene {
   // ── UI refresh ──────────────────────────────────────────────────────────
 
   private refreshHud(): void {
-    this.hud.update(this.run, this.deck.remaining, this.selection.length);
+    this.hud.update(this.run, this.deck.remaining, this.selection.length, this.approach);
     this.debug.refresh(this.run, this.deck.remaining, this.hand.map((c) => c.card.id));
   }
 
@@ -754,6 +782,18 @@ export class GameScene {
 
       // ── Player gameplay controls ──
       if (this.run.phase === "inning") {
+        if (key.toLowerCase() === "q") {
+          this.setApproach("swing");
+          return;
+        }
+        if (key.toLowerCase() === "w") {
+          this.setApproach("small_ball");
+          return;
+        }
+        if (key.toLowerCase() === "e") {
+          this.setApproach("take");
+          return;
+        }
         if (key >= "1" && key <= "8") {
           const card = this.hand[Number(key) - 1];
           if (card) this.toggleSelect(card);

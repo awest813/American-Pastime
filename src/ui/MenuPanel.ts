@@ -1,5 +1,5 @@
 import { Control, InputText, Rectangle, StackPanel, type AdvancedDynamicTexture, type Button, type TextBlock } from "@babylonjs/gui/2D";
-import { UI, makeButton, makeStack, makeText, setButtonBackground } from "./kit";
+import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle, setButtonBackground } from "./kit";
 import { Random } from "../utils/Random";
 import { describeAge, type SaveSummary } from "../systems/Save";
 
@@ -24,8 +24,8 @@ const SEED_LABEL_DEFAULT = "run seed — same seed, same season · or paste a ru
  */
 export class MenuPanel {
   private root: Rectangle;
-  private homeStack: StackPanel;
-  private howToStack: StackPanel;
+  private homeStack: Rectangle;
+  private howToStack: Rectangle;
   private seedInput: InputText;
   private seedInputFocused = false;
   private callbacks: MenuCallbacks;
@@ -45,7 +45,7 @@ export class MenuPanel {
     this.root = new Rectangle("menuRoot");
     this.root.width = 1;
     this.root.height = 1;
-    this.root.background = "rgba(8, 10, 18, 0.82)";
+    this.root.background = UI.overlayBg;
     this.root.thickness = 0;
     adt.addControl(this.root);
 
@@ -56,15 +56,17 @@ export class MenuPanel {
 
   // ── HOME view ─────────────────────────────────────────────────────────────
 
-  private buildHome(): StackPanel {
-    const stack = makeStack();
-    stack.width = "960px";
-    this.root.addControl(stack);
+  private buildHome(): Rectangle {
+    const panel = makePanel("920px", "760px");
+    this.root.addControl(panel);
 
-    const title = makeText("CARDBALL CLASSIC", 76, UI.gold);
-    title.fontFamily = UI.mono;
-    title.fontWeight = "bold";
-    title.shadowColor = "black";
+    const stack = makeStack();
+    stack.width = "860px";
+    stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    stack.paddingTop = "32px";
+    panel.addControl(stack);
+
+    const title = makeTitle("CARDBALL CLASSIC", 70);
     title.shadowOffsetX = 4;
     title.shadowOffsetY = 4;
     stack.addControl(title);
@@ -73,8 +75,9 @@ export class MenuPanel {
     subtitle.paddingBottom = "10px";
     stack.addControl(subtitle);
 
-    const divider = makeText("· · · ⚾ · · ·", 20, "#9a917f");
-    divider.paddingBottom = "22px";
+    const divider = makeRule("560px");
+    divider.paddingTop = "6px";
+    divider.paddingBottom = "24px";
     stack.addControl(divider);
 
     // CONTINUE RUN — the prominent action when a run is in progress. Hidden
@@ -83,7 +86,7 @@ export class MenuPanel {
     this.continueButton.fontSize = 26;
     this.continueButton.onPointerUpObservable.add(() => this.callbacks.onContinue());
     stack.addControl(this.continueButton);
-    this.continueSummary = makeText("", 15, "#9a917f");
+    this.continueSummary = makeText("", 15, UI.muted);
     this.continueSummary.fontFamily = UI.mono;
     this.continueSummary.paddingTop = "6px";
     this.continueSummary.paddingBottom = "14px";
@@ -117,9 +120,9 @@ export class MenuPanel {
     reroll.onPointerUpObservable.add(() => this.randomizeSeed());
     seedRow.addControl(reroll);
 
-    this.seedLabel = makeText(SEED_LABEL_DEFAULT, 15, "#9a917f");
+    this.seedLabel = makeText(SEED_LABEL_DEFAULT, 15, UI.muted);
     this.seedLabel.paddingTop = "4px";
-    this.seedLabel.paddingBottom = "30px";
+    this.seedLabel.paddingBottom = "24px";
     stack.addControl(this.seedLabel);
 
     // Secondary menu row
@@ -139,64 +142,62 @@ export class MenuPanel {
       menuRow.addControl(button);
     }
 
-    const hint = makeText("ENTER starts a season · in game: 1-8 pick · ENTER play · X discard · H combo · ESC pause", 15, "#9a917f");
-    hint.paddingTop = "30px";
+    const hint = makeText("seeded seasons · autosave · card binder", 15, UI.muted);
+    hint.paddingTop = "28px";
     stack.addControl(hint);
 
-    return stack;
+    return panel;
   }
 
   // ── HOW TO PLAY view ──────────────────────────────────────────────────────
 
-  private buildHowTo(): StackPanel {
-    const stack = makeStack();
-    stack.width = "960px";
-    stack.isVisible = false;
-    this.root.addControl(stack);
+  private buildHowTo(): Rectangle {
+    const panel = makePanel("980px", "760px");
+    panel.isVisible = false;
+    this.root.addControl(panel);
 
-    const title = makeText("HOW TO PLAY", 48, UI.gold);
-    title.fontFamily = UI.mono;
-    title.fontWeight = "bold";
-    title.shadowColor = "black";
-    title.shadowOffsetX = 3;
-    title.shadowOffsetY = 3;
-    title.paddingBottom = "24px";
+    const stack = makeStack();
+    stack.width = "900px";
+    stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    stack.paddingTop = "30px";
+    panel.addControl(stack);
+
+    const title = makeTitle("HOW TO PLAY", 44);
+    title.paddingBottom = "18px";
     stack.addControl(title);
 
     const rules = makeText(
       [
-        "THE AT-BAT — Draw 8 cards, click (or press 1-8) up to 5 for one at-bat.",
-        "Order matters: the pitch and your equipment hit the FIRST card hardest —",
-        "the gold badges show your batting order. ENTER swings, X discards.",
-        "The score preview shows exactly what a selection is worth before you swing.",
+        "THE AT-BAT — Draw 8 cards and choose up to 5.",
+        "Pick Swing, Small Ball, or Take before you commit.",
+        "Small Ball moves runners before two outs; after that, hit away.",
+        "The preview shows outcome, runs, outs, and bases.",
         "",
-        "THE INNING — Beat the target before your 4 plays run out.",
-        "Discards (3 per inning) swap unwanted cards without spending a play.",
+        "THE INNING — Beat the target before 3 outs or 4 at-bats.",
+        "Discards swap unwanted cards without spending a play.",
         "",
-        "THE SEASON — Win an inning, hit the shop: equipment, upgrades, rerolls.",
-        "Innings 3, 6, and 9 are boss pitchers with a rule of their own.",
+        "THE SEASON — Win, shop, upgrade, and survive.",
+        "Innings 3, 6, and 9 bring boss pitchers.",
         "Survive all 9 innings to take the pennant.",
         "",
-        "SAVING — Your run autosaves; CONTINUE RUN picks it back up.",
-        "Pause → COPY RUN CODE snapshots the exact moment as a paste-able code;",
-        "drop a code into the seed box here to load it on any machine.",
+        "SAVING — Runs autosave, and run codes travel.",
       ].join("\n"),
-      21,
+      26,
     );
     rules.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
     rules.paddingBottom = "26px";
     stack.addControl(rules);
 
-    const keys = makeText("1-8 pick · ENTER play · X discard · H combo book · ESC pause · M mute", 17, UI.green);
+    const keys = makeText("Q Swing · W Small Ball · E Take · Enter at-bat · X discard", 18, UI.green);
     keys.fontFamily = UI.mono;
-    keys.paddingBottom = "30px";
+    keys.paddingBottom = "24px";
     stack.addControl(keys);
 
     const back = makeButton("howToBack", "BACK (ESC)", UI.cream, "240px", "52px");
     back.onPointerUpObservable.add(() => this.showHome());
     stack.addControl(back);
 
-    return stack;
+    return panel;
   }
 
   // ── View state ────────────────────────────────────────────────────────────
@@ -246,7 +247,7 @@ export class MenuPanel {
     this.seedLabel.color = UI.red;
     this.seedLabelTimer = setTimeout(() => {
       this.seedLabel.text = SEED_LABEL_DEFAULT;
-      this.seedLabel.color = "#9a917f";
+      this.seedLabel.color = UI.muted;
       this.seedLabelTimer = null;
     }, 4000);
   }

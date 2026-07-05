@@ -1,7 +1,7 @@
 import { Control, Rectangle, TextBlock, type AdvancedDynamicTexture, type Button, type StackPanel } from "@babylonjs/gui/2D";
 import type { AudioSystem } from "../systems/AudioSystem";
 import { SPEED_ORDER, resetSettings, saveSettings, settings, type GameSpeed } from "../systems/Settings";
-import { UI, makeButton, makePanel, makeStack, makeText, setButtonBackground } from "./kit";
+import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle, setButtonBackground } from "./kit";
 
 export interface SettingsCallbacks {
   onClose: () => void;
@@ -35,32 +35,30 @@ export class SettingsPanel {
     this.root = new Rectangle("settingsRoot");
     this.root.width = 1;
     this.root.height = 1;
-    this.root.background = "rgba(8, 10, 18, 0.82)";
+    this.root.background = UI.overlayBg;
     this.root.thickness = 0;
     this.root.isPointerBlocker = true;
     this.root.isVisible = false;
     adt.addControl(this.root);
 
-    const panel = makePanel("620px", "656px");
+    const panel = makePanel("660px", "640px");
     this.root.addControl(panel);
 
     const stack = makeStack();
     stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    stack.paddingTop = "26px";
+    stack.paddingTop = "28px";
     panel.addControl(stack);
 
-    const title = makeText("CLUBHOUSE SETTINGS", 38, UI.gold);
-    title.fontFamily = UI.mono;
-    title.fontWeight = "bold";
-    title.shadowColor = "black";
-    title.shadowOffsetX = 3;
-    title.shadowOffsetY = 3;
+    const title = makeTitle("CLUBHOUSE SETTINGS", 36);
     stack.addControl(title);
 
-    const subtitle = makeText("saved between seasons", 16, "#9a917f");
+    const subtitle = makeText("saved between seasons", 16, UI.muted);
     subtitle.paddingTop = "4px";
-    subtitle.paddingBottom = "26px";
+    subtitle.paddingBottom = "12px";
     stack.addControl(subtitle);
+    const rule = makeRule("500px");
+    rule.paddingBottom = "18px";
+    stack.addControl(rule);
 
     // ── Volume row: [−] meter [+] ──
     const volumeRow = this.makeRow(stack, "CROWD VOLUME");
@@ -102,7 +100,7 @@ export class SettingsPanel {
       this.changed();
     });
 
-    const hint = makeText("M toggles sound anywhere · speed affects animations only", 15, "#9a917f");
+    const hint = makeText("sound, crowd, shake, and animation pace", 15, UI.muted);
     hint.paddingTop = "18px";
     hint.paddingBottom = "14px";
     stack.addControl(hint);
@@ -110,7 +108,7 @@ export class SettingsPanel {
     const buttonRow = makeStack(false);
     buttonRow.height = "58px";
     stack.addControl(buttonRow);
-    const reset = makeButton("settingsReset", "RESET DEFAULTS", "#9a917f", "240px", "50px");
+    const reset = makeButton("settingsReset", "RESET DEFAULTS", UI.muted, "240px", "50px");
     reset.fontSize = 18;
     reset.onPointerUpObservable.add(() => {
       resetSettings();
@@ -122,7 +120,7 @@ export class SettingsPanel {
     gap.width = "20px";
     gap.thickness = 0;
     buttonRow.addControl(gap);
-    const back = makeButton("settingsBack", "BACK (ESC)", UI.green, "240px", "50px");
+    const back = makeButton("settingsBack", "DONE (ESC)", UI.green, "240px", "50px");
     back.onPointerUpObservable.add(() => this.close());
     buttonRow.addControl(back);
   }
@@ -130,8 +128,8 @@ export class SettingsPanel {
   /** A label-left / control-right row inside the settings card. */
   private makeRow(stack: StackPanel, label: string): StackPanel {
     const row = new Rectangle();
-    row.width = "540px";
-    row.height = "62px";
+    row.width = "560px";
+    row.height = "58px";
     row.thickness = 0;
     stack.addControl(row);
 
@@ -190,7 +188,7 @@ export class SettingsPanel {
   refresh(): void {
     const steps = Math.round(settings.volume * 10);
     this.volumeMeter.text = `${"▮".repeat(steps)}${"▯".repeat(10 - steps)}`;
-    this.volumeMeter.color = settings.muted ? "#9a917f" : UI.gold;
+    this.volumeMeter.color = settings.muted ? UI.muted : UI.gold;
 
     this.setToggle(this.muteButton, !settings.muted, settings.muted ? "MUTED" : "ON");
     this.setToggle(this.ambienceButton, settings.ambience, settings.ambience ? "ON" : "OFF");
@@ -201,6 +199,6 @@ export class SettingsPanel {
   private setToggle(button: Button, active: boolean, label: string): void {
     const text = button.textBlock;
     if (text) text.text = label;
-    setButtonBackground(button, active ? UI.green : "#9a917f");
+    setButtonBackground(button, active ? UI.green : UI.muted);
   }
 }

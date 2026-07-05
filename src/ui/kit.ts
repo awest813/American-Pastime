@@ -6,8 +6,12 @@ export const UI = {
   gold: "#ffd257",
   green: "#7fd4a0",
   red: "#e07a6a",
+  muted: "#9a917f",
+  field: "#203f2c",
+  card: "#241f18",
   ink: "#1c1a16",
-  panelBg: "rgba(16, 20, 24, 0.88)",
+  overlayBg: "rgba(8, 10, 18, 0.82)",
+  panelBg: "rgba(16, 20, 24, 0.92)",
   panelBorder: "#5a5245",
   serif: "Georgia",
   mono: "Courier New",
@@ -20,7 +24,7 @@ export function makePanel(width: string | number, height: string | number): Rect
   panel.background = UI.panelBg;
   panel.color = UI.panelBorder;
   panel.thickness = 2;
-  panel.cornerRadius = 10;
+  panel.cornerRadius = 8;
   return panel;
 }
 
@@ -32,6 +36,35 @@ export function makeText(text: string, size: number, color: string = UI.cream): 
   block.fontFamily = UI.serif;
   block.resizeToFit = true;
   return block;
+}
+
+export function makeTitle(text: string, size = 40): TextBlock {
+  const title = makeText(text, size, UI.gold);
+  title.fontFamily = UI.mono;
+  title.fontWeight = "bold";
+  title.shadowColor = "black";
+  title.shadowOffsetX = 3;
+  title.shadowOffsetY = 3;
+  return title;
+}
+
+export function makeRule(width = "520px"): Rectangle {
+  const rule = new Rectangle();
+  rule.width = width;
+  rule.height = "2px";
+  rule.background = UI.panelBorder;
+  rule.color = UI.panelBorder;
+  rule.thickness = 0;
+  rule.alpha = 0.85;
+  return rule;
+}
+
+export function makeSpacer(width: string | number, height: string | number): Rectangle {
+  const spacer = new Rectangle();
+  spacer.width = width;
+  spacer.height = height;
+  spacer.thickness = 0;
+  return spacer;
 }
 
 /** Blend a #rrggbb color toward white; non-hex inputs pass through untouched. */

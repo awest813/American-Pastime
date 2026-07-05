@@ -10,6 +10,8 @@ import { templateConfig } from "./config/template-config";
 import { GameScene } from "./scenes/GameScene";
 import { getSceneRuntimeState } from "./playground/scene-runtime";
 
+type GpuNavigator = Navigator & { gpu?: { requestAdapter(): Promise<unknown | null> } };
+
 class App {
   public engine: Engine | WebGPUEngine;
   public scene: Scene;
@@ -50,7 +52,8 @@ class App {
     // broken (crashes happen below the app, so we can't auto-detect that);
     // ?renderer=webgpu forces the attempt even with webgpuFirst off.
     const override = new URLSearchParams(window.location.search).get("renderer");
-    const tryWebgpu = override === "webgpu" || (override !== "webgl" && templateConfig.rendering.webgpuFirst);
+    const preferWebgl = override === "webgl" || (override !== "webgpu" && this._isSafari());
+    const tryWebgpu = override === "webgpu" || (!preferWebgl && templateConfig.rendering.webgpuFirst);
     if (tryWebgpu && (await this._webgpuUsable())) {
       const webgpu = new WebGPUEngine(this.canvas, {
         adaptToDeviceRatio: templateConfig.rendering.engine.adaptToDeviceRatio,
@@ -84,7 +87,7 @@ class App {
    *  fatal errors before we can fall back. */
   async _webgpuUsable(): Promise<boolean> {
     try {
-      const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown | null> } }).gpu;
+      const gpu = (navigator as GpuNavigator).gpu;
       if (gpu && (await gpu.requestAdapter()) !== null) {
         return true;
       }
@@ -94,6 +97,13 @@ class App {
       console.info("WebGPU support probe failed; using WebGL2.");
       return false;
     }
+  }
+
+  /** Safari/WebKit can expose WebGPU while still being the least predictable
+   *  path for Babylon. Default it to WebGL2; ?renderer=webgpu still opts in. */
+  private _isSafari(): boolean {
+    const ua = navigator.userAgent;
+    return /Safari/i.test(ua) && !/(Chrome|Chromium|CriOS|FxiOS|Edg|EdgiOS|OPR|Opera)/i.test(ua);
   }
 
   async _setPhysics(): Promise<void> {

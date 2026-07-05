@@ -1,7 +1,7 @@
 import { Control, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
 import type { Scene } from "@babylonjs/core/scene";
-import type { RunSystem } from "../systems/RunSystem";
-import { UI, makeButton, makePanel, makeStack, makeText } from "./kit";
+import { RULES, type RunSystem } from "../systems/RunSystem";
+import { UI, makeButton, makePanel, makeStack, makeText, makeTitle } from "./kit";
 
 export interface DebugCallbacks {
   onGiveCash: () => void;
@@ -47,8 +47,8 @@ export class DebugPanel {
     stack.paddingTop = "12px";
     this.root.addControl(stack);
 
-    const title = makeText("DEBUG (F1)", 22, UI.red);
-    title.fontFamily = UI.mono;
+    const title = makeTitle("DEBUG", 22);
+    title.color = UI.red;
     stack.addControl(title);
 
     this.perfText = makeText("", 14, UI.gold);
@@ -90,7 +90,8 @@ export class DebugPanel {
       `seed: ${run.rng.seed}`,
       `phase: ${run.phase}`,
       `inning ${run.inning}  target ${run.target}  runs ${run.runs}`,
-      `plays ${run.playsLeft}  discards ${run.discardsLeft}  cash $${run.cash}`,
+      `outs ${run.outs}/${RULES.outsPerInning}  bases ${run.bases.first ? "1" : "-"}${run.bases.second ? "2" : "-"}${run.bases.third ? "3" : "-"}`,
+      `at-bats ${run.playsLeft}  discards ${run.discardsLeft}  cash $${run.cash}`,
       `deck: ${deckCount}`,
       `pitch: ${run.pitch.id}  stadium: ${run.stadium?.id ?? "-"}`,
       `boss: ${run.boss?.id ?? "-"}${run.umpireTarget ? ` (${run.umpireTarget})` : ""}`,

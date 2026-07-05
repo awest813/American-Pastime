@@ -7,12 +7,15 @@ import type { Scene } from "@babylonjs/core/scene";
 import { Card3D } from "../entities/Card3D";
 import type { AudioSystem } from "../systems/AudioSystem";
 import type { PlayerCard } from "../systems/types";
-import { UI, makeButton, makePanel, makeStack, makeText, bottomCenter } from "../ui/kit";
+import { UI, makeButton, makePanel, makeStack, makeText, makeTitle, bottomCenter } from "../ui/kit";
 import { Tweens } from "../utils/Tweens";
 
 const PAGE_SIZE = 10; // 5 columns x 2 rows, a binder page
 const COLUMNS = 5;
 const TILT = 0.72; // same screen-facing tilt as the hand fan
+const CARD_X_SPACING = 1.42;
+const CARD_Y_SPACING = 2.28;
+const FILTER_LABELS: Record<string, string> = { team: "TEAM", position: "POS", era: "ERA", rarity: "TIER", trait: "TRAIT" };
 
 /**
  * The card binder: every player card laid out on a tilted "page" facing the
@@ -75,16 +78,14 @@ export class CollectionScene {
     adt.addControl(root);
 
     // Top filter bar
-    const bar = makePanel("1240px", "76px");
+    const bar = makePanel("1320px", "76px");
     bar.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     bar.top = "12px";
     root.addControl(bar);
     const barStack = makeStack(false);
     bar.addControl(barStack);
 
-    const title = makeText("CARD BINDER", 24, UI.gold);
-    title.fontFamily = UI.mono;
-    title.fontWeight = "bold";
+    const title = makeTitle("CARD BINDER", 24);
     title.paddingRight = "18px";
     barStack.addControl(title);
 
@@ -129,7 +130,7 @@ export class CollectionScene {
     gap.thickness = 0;
     bottomBar.addControl(gap);
 
-    const back = makeButton("binderBack", "BACK (ESC)", UI.red, "170px", "48px");
+    const back = makeButton("binderBack", "BACK", UI.red, "170px", "48px");
     back.onPointerUpObservable.add(() => this.close());
     bottomBar.addControl(back);
 
@@ -137,7 +138,7 @@ export class CollectionScene {
     this.emptyText.isVisible = false;
     root.addControl(this.emptyText);
 
-    const hint = makeText("click a card to inspect · right-click a filter to cycle back · arrows flip pages", 15, "#9a917f");
+    const hint = makeText("click a card to inspect · filters cycle the binder page", 15, UI.muted);
     bottomCenter(hint);
     hint.top = "-72px";
     root.addControl(hint);
@@ -204,8 +205,8 @@ export class CollectionScene {
   private slotPosition(index: number): Vector3 {
     const col = index % COLUMNS;
     const row = Math.floor(index / COLUMNS);
-    const dx = (col - (COLUMNS - 1) / 2) * 1.78;
-    const dy = (0.5 - row) * 2.4;
+    const dx = (col - (COLUMNS - 1) / 2) * CARD_X_SPACING;
+    const dy = (0.5 - row) * CARD_Y_SPACING;
     return this.planeOrigin.add(new Vector3(dx, 0, 0)).add(this.planeUp.scale(dy));
   }
 
@@ -241,7 +242,7 @@ export class CollectionScene {
 
     for (const key of Object.keys(this.filterButtons)) {
       const label = this.filterButtons[key].textBlock;
-      if (label) label.text = `${key.toUpperCase()}: ${this.filterValues[key][this.filterIndex[key]]}`;
+      if (label) label.text = `${FILTER_LABELS[key]}: ${this.filterValues[key][this.filterIndex[key]]}`;
     }
     this.countText.text = `${matches.length} CARD${matches.length === 1 ? "" : "S"}`;
     this.pageText.text = `PAGE ${this.page + 1}/${pageCount}`;

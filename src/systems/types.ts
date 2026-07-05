@@ -11,6 +11,13 @@ export const RARITY_DISPLAY: Record<Rarity, string> = {
   Legend: "Legend",
 };
 export type Stat = "power" | "contact" | "speed" | "discipline" | "defense";
+export type BattingApproach = "swing" | "small_ball" | "take";
+
+export interface BaseState {
+  first: boolean;
+  second: boolean;
+  third: boolean;
+}
 
 export interface PlayerCard {
   id: string;
@@ -86,7 +93,14 @@ export interface ScoreResult {
   flatBonus: number;
   multiplier: number;
   difficulty: number;
+  /** Contact quality before base-runner conversion; higher means harder contact. */
+  quality: number;
   runs: number;
+  outs: number;
+  bases: number;
+  outcome: string;
+  basesBefore: BaseState;
+  basesAfter: BaseState;
   /** Plays consumed by committing this hand (2 vs The Ace with a big bat). */
   playCost: number;
   combos: DetectedCombo[];

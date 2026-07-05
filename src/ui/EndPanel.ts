@@ -1,5 +1,5 @@
-import { Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
-import { UI, makeButton, makeStack, makeText } from "./kit";
+import { Control, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
+import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
 
 export interface EndCallbacks {
   onNewRun: () => void;
@@ -17,25 +17,31 @@ export class EndPanel {
     this.root = new Rectangle("endRoot");
     this.root.width = 1;
     this.root.height = 1;
-    this.root.background = "rgba(8, 10, 18, 0.85)";
+    this.root.background = UI.overlayBg;
     this.root.thickness = 0;
     adt.addControl(this.root);
 
+    const panel = makePanel("720px", "440px");
+    this.root.addControl(panel);
+
     const stack = makeStack();
     stack.width = "640px";
-    this.root.addControl(stack);
+    stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    stack.paddingTop = "36px";
+    panel.addControl(stack);
 
-    this.title = makeText("", 64, UI.gold);
-    this.title.fontFamily = UI.mono;
-    this.title.fontWeight = "bold";
+    this.title = makeTitle("", 58);
     this.title.shadowColor = "black";
     this.title.shadowOffsetX = 4;
     this.title.shadowOffsetY = 4;
     stack.addControl(this.title);
+    const rule = makeRule("420px");
+    rule.paddingTop = "8px";
+    rule.paddingBottom = "16px";
+    stack.addControl(rule);
 
     this.detail = makeText("", 24);
-    this.detail.paddingTop = "18px";
-    this.detail.paddingBottom = "34px";
+    this.detail.paddingBottom = "28px";
     stack.addControl(this.detail);
 
     const row = makeStack(false);
@@ -52,7 +58,7 @@ export class EndPanel {
     retry.onPointerUpObservable.add(() => callbacks.onRetrySeed());
     row.addControl(retry);
 
-    const menu = makeButton("endMenuButton", "BACK TO MENU", "#9a917f", "240px", "48px");
+    const menu = makeButton("endMenuButton", "BACK TO MENU", UI.muted, "240px", "48px");
     menu.paddingTop = "16px";
     menu.onPointerUpObservable.add(() => callbacks.onMenu());
     stack.addControl(menu);

@@ -1,5 +1,5 @@
 import { ComboSystem, type EffectiveCard } from "./ComboSystem";
-import type { BossCard, EquipmentCard, PitchCard, PlayerCard, Position, ScoreLine, ScoreResult, Stat, StadiumCard } from "./types";
+import type { BattingApproach, BaseState, BossCard, EquipmentCard, PitchCard, PlayerCard, Position, ScoreLine, ScoreResult, Stat, StadiumCard } from "./types";
 
 export interface ScoreContext {
   pitch: PitchCard;
@@ -8,6 +8,9 @@ export interface ScoreContext {
   /** Runs already scored this inning, for behind-the-target effects like Rally Cap. */
   runsSoFar: number;
   target: number;
+  outs: number;
+  bases: BaseState;
+  approach: BattingApproach;
   /** Boss pitcher rules (innings 3/6/9); null on regular innings. */
   boss: BossCard | null;
   umpireTarget: Position | null;
@@ -16,6 +19,22 @@ export interface ScoreContext {
 }
 
 const STATS: Stat[] = ["power", "contact", "speed", "discipline", "defense"];
+
+const EMPTY_BASES: BaseState = { first: false, second: false, third: false };
+const APPROACH_LABEL: Record<BattingApproach, string> = {
+  swing: "Swing Away",
+  small_ball: "Small Ball",
+  take: "Take Pitch",
+};
+
+interface Outcome {
+  label: string;
+  detail: string;
+  bases: number;
+  runs: number;
+  outs: number;
+  basesAfter: BaseState;
+}
 
 /**
  * Turns a played set of cards into runs, deterministically.
@@ -31,6 +50,115 @@ const STATS: Stat[] = ["power", "contact", "speed", "discipline", "defense"];
  */
 export class ScoreSystem {
   constructor(private combos: ComboSystem) {}
+
+  private cloneBases(bases: BaseState): BaseState {
+    return { first: bases.first, second: bases.second, third: bases.third };
+  }
+
+  private baseString(bases: BaseState): string {
+    const occupied = [bases.first ? "1B" : "", bases.second ? "2B" : "", bases.third ? "3B" : ""].filter(Boolean);
+    return occupied.length > 0 ? occupied.join("+") : "empty";
+  }
+
+  private advanceHit(bases: BaseState, batterBases: number): { bases: BaseState; runs: number } {
+    if (batterBases <= 0) return { bases: this.cloneBases(bases), runs: 0 };
+    const after: BaseState = { ...EMPTY_BASES };
+    let runs = 0;
+    const advanceRunner = (from: number) => {
+      const to = from + batterBases;
+      if (to >= 4) runs += 1;
+      else if (to === 1) after.first = true;
+      else if (to === 2) after.second = true;
+      else after.third = true;
+    };
+    if (bases.third) advanceRunner(3);
+    if (bases.second) advanceRunner(2);
+    if (bases.first) advanceRunner(1);
+    if (batterBases >= 4) runs += 1;
+    else if (batterBases === 1) after.first = true;
+    else if (batterBases === 2) after.second = true;
+    else after.third = true;
+    return { bases: after, runs };
+  }
+
+  private advanceWalk(bases: BaseState): { bases: BaseState; runs: number } {
+    const after = this.cloneBases(bases);
+    let runs = 0;
+    if (bases.first && bases.second && bases.third) runs += 1;
+    if (bases.first && bases.second) after.third = true;
+    if (bases.first) after.second = true;
+    after.first = true;
+    return { bases: after, runs };
+  }
+
+  private advanceRunnersOnly(bases: BaseState, steps: number): { bases: BaseState; runs: number } {
+    const after: BaseState = { ...EMPTY_BASES };
+    let runs = 0;
+    const advanceRunner = (from: number) => {
+      const to = from + steps;
+      if (to >= 4) runs += 1;
+      else if (to === 1) after.first = true;
+      else if (to === 2) after.second = true;
+      else after.third = true;
+    };
+    if (bases.third) advanceRunner(3);
+    if (bases.second) advanceRunner(2);
+    if (bases.first) advanceRunner(1);
+    return { bases: after, runs };
+  }
+
+  private buildOutcome(quality: number, discipline: number, ctx: ScoreContext): Outcome {
+    if (ctx.approach === "take") {
+      const takeQuality = quality * 0.45 + discipline * 0.55;
+      if (takeQuality >= 18) {
+        const advanced = this.advanceHit(ctx.bases, 1);
+        return { label: "Patient Single", detail: "worked the count, then lined it", bases: 1, runs: advanced.runs, outs: 0, basesAfter: advanced.bases };
+      }
+      if (takeQuality >= 9) {
+        const advanced = this.advanceWalk(ctx.bases);
+        return { label: "Walk", detail: "ball four", bases: 1, runs: advanced.runs, outs: 0, basesAfter: advanced.bases };
+      }
+      return { label: "Called Out", detail: "watched a good one", bases: 0, runs: 0, outs: 1, basesAfter: this.cloneBases(ctx.bases) };
+    }
+
+    if (ctx.approach === "small_ball") {
+      const smallQuality = quality * 0.72;
+      if (smallQuality >= 12) {
+        const advanced = this.advanceHit(ctx.bases, 2);
+        return { label: "Gap Double", detail: "small swing found grass", bases: 2, runs: advanced.runs, outs: 0, basesAfter: advanced.bases };
+      }
+      if (smallQuality >= 5) {
+        const advanced = this.advanceHit(ctx.bases, 1);
+        return { label: "Base Hit", detail: "kept the line moving", bases: 1, runs: advanced.runs, outs: 0, basesAfter: advanced.bases };
+      }
+      if (ctx.bases.first || ctx.bases.second || ctx.bases.third) {
+        if (ctx.outs >= 2) {
+          return { label: "Two-Out Groundout", detail: "no sacrifice available", bases: 0, runs: 0, outs: 1, basesAfter: this.cloneBases(ctx.bases) };
+        }
+        const advanced = this.advanceRunnersOnly(ctx.bases, 1);
+        return { label: "Productive Out", detail: "moved the runners", bases: 0, runs: advanced.runs, outs: 1, basesAfter: advanced.bases };
+      }
+      return { label: "Groundout", detail: "good idea, no traffic", bases: 0, runs: 0, outs: 1, basesAfter: this.cloneBases(ctx.bases) };
+    }
+
+    if (quality >= 18) {
+      const advanced = this.advanceHit(ctx.bases, 4);
+      return { label: "Home Run", detail: "cleared the bases", bases: 4, runs: advanced.runs, outs: 0, basesAfter: advanced.bases };
+    }
+    if (quality >= 12) {
+      const advanced = this.advanceHit(ctx.bases, 3);
+      return { label: "Triple", detail: "rattled into the corner", bases: 3, runs: advanced.runs, outs: 0, basesAfter: advanced.bases };
+    }
+    if (quality >= 7) {
+      const advanced = this.advanceHit(ctx.bases, 2);
+      return { label: "Double", detail: "into the gap", bases: 2, runs: advanced.runs, outs: 0, basesAfter: advanced.bases };
+    }
+    if (quality >= 3) {
+      const advanced = this.advanceHit(ctx.bases, 1);
+      return { label: "Single", detail: "clean contact", bases: 1, runs: advanced.runs, outs: 0, basesAfter: advanced.bases };
+    }
+    return { label: "Strikeout", detail: "swing and miss", bases: 0, runs: 0, outs: 1, basesAfter: this.cloneBases(ctx.bases) };
+  }
 
   private hasEquipment(ctx: ScoreContext, effect: string): boolean {
     return ctx.equipment.some((e) => e.effect === effect);
@@ -95,7 +223,22 @@ export class ScoreSystem {
   evaluate(cards: PlayerCard[], ctx: ScoreContext): ScoreResult {
     const lines: ScoreLine[] = [];
     if (cards.length === 0) {
-      return { base: 0, flatBonus: 0, multiplier: 1, difficulty: ctx.pitch.difficulty, runs: 0, playCost: 1, combos: [], lines };
+      return {
+        base: 0,
+        flatBonus: 0,
+        multiplier: 1,
+        difficulty: ctx.pitch.difficulty,
+        quality: 0,
+        runs: 0,
+        outs: 0,
+        bases: 0,
+        outcome: "No Swing",
+        basesBefore: this.cloneBases(ctx.bases),
+        basesAfter: this.cloneBases(ctx.bases),
+        playCost: 1,
+        combos: [],
+        lines,
+      };
     }
 
     const shielded =
@@ -113,6 +256,8 @@ export class ScoreSystem {
     const sum = (stat: Stat) => effCards.reduce((total, c) => total + c.stats[stat], 0);
     const base = sum("contact") + sum("power") + sum("speed");
     lines.push({ label: "Base (Contact + Power + Speed)", value: `${Math.round(base)}` });
+    lines.push({ label: "Approach", value: APPROACH_LABEL[ctx.approach] });
+    lines.push({ label: "Bases before", value: this.baseString(ctx.bases) });
 
     let flat = 0;
     let multiplier = 1;
@@ -231,15 +376,33 @@ export class ScoreSystem {
     }
 
     const difficulty = ctx.pitch.difficulty;
-    let runs = Math.max(1, Math.round(((base + flat) * multiplier) / difficulty));
+    let quality = Math.max(0, Math.round(((base + flat) * multiplier) / difficulty));
 
     if (this.hasEquipment(ctx, "scorekeepers_pencil") && activeCombos.length > 0) {
-      runs += activeCombos.length;
-      lines.push({ label: "Scorekeeper's Pencil", value: `+${activeCombos.length} runs` });
+      quality += activeCombos.length;
+      lines.push({ label: "Scorekeeper's Pencil", value: `+${activeCombos.length} quality` });
     }
 
     lines.push({ label: `vs ${ctx.pitch.name} (difficulty ${difficulty})`, value: `÷${difficulty}` });
+    const outcome = this.buildOutcome(quality, sum("discipline"), ctx);
+    lines.push({ label: outcome.label, value: outcome.runs > 0 ? `+${outcome.runs} run${outcome.runs === 1 ? "" : "s"}` : outcome.outs > 0 ? `${outcome.outs} out` : "safe" });
+    lines.push({ label: "Bases after", value: this.baseString(outcome.basesAfter) });
 
-    return { base, flatBonus: flat, multiplier, difficulty, runs, playCost, combos: activeCombos, lines };
+    return {
+      base,
+      flatBonus: flat,
+      multiplier,
+      difficulty,
+      quality,
+      runs: outcome.runs,
+      outs: outcome.outs,
+      bases: outcome.bases,
+      outcome: outcome.label,
+      basesBefore: this.cloneBases(ctx.bases),
+      basesAfter: outcome.basesAfter,
+      playCost,
+      combos: activeCombos,
+      lines,
+    };
   }
 }

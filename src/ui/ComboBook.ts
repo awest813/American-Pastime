@@ -1,6 +1,6 @@
 import { Control, Rectangle, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
 import type { ComboMeta } from "../systems/types";
-import { UI, makeButton, makePanel, makeStack, makeText } from "./kit";
+import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
 
 /**
  * The Combo Book: an in-game reference for the ten scoring combos, the run
@@ -14,13 +14,13 @@ export class ComboBook {
     this.root = new Rectangle("comboBookRoot");
     this.root.width = 1;
     this.root.height = 1;
-    this.root.background = "rgba(8, 10, 18, 0.8)";
+    this.root.background = UI.overlayBg;
     this.root.thickness = 0;
     this.root.isPointerBlocker = true;
     this.root.isVisible = false;
     adt.addControl(this.root);
 
-    const panel = makePanel("860px", "700px");
+    const panel = makePanel("940px", "700px");
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -28,20 +28,21 @@ export class ComboBook {
     stack.paddingTop = "20px";
     panel.addControl(stack);
 
-    const title = makeText("THE COMBO BOOK", 34, UI.gold);
-    title.fontFamily = UI.mono;
-    title.fontWeight = "bold";
+    const title = makeTitle("THE COMBO BOOK", 34);
     stack.addControl(title);
 
-    const subtitle = makeText("runs = (base + bonuses) × multipliers ÷ pitch difficulty", 18, UI.green);
+    const subtitle = makeText("quality = card math · outcome = bases, runners, and outs", 18, UI.green);
     subtitle.fontFamily = UI.mono;
     subtitle.paddingTop = "6px";
-    subtitle.paddingBottom = "16px";
+    subtitle.paddingBottom = "10px";
     stack.addControl(subtitle);
+    const rule = makeRule("680px");
+    rule.paddingBottom = "14px";
+    stack.addControl(rule);
 
     // Two synced columns: combo name + requirement on the left, reward right
     const columns = new Rectangle();
-    columns.width = "800px";
+    columns.width = "880px";
     columns.height = "420px";
     columns.thickness = 0;
     stack.addControl(columns);
@@ -52,7 +53,7 @@ export class ComboBook {
     const labels = makeText(names.join("\n\n"), 16);
     labels.textWrapping = false;
     labels.resizeToFit = false;
-    labels.width = "660px";
+    labels.width = "730px";
     labels.height = "420px";
     labels.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     labels.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
@@ -62,7 +63,7 @@ export class ComboBook {
     const values = makeText(rewards.join("\n\n"), 16, UI.gold);
     values.textWrapping = false;
     values.resizeToFit = false;
-    values.width = "130px";
+    values.width = "140px";
     values.height = "420px";
     values.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
     values.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
@@ -72,7 +73,7 @@ export class ComboBook {
     const footnote = makeText(
       "Click order matters: the pitch and your equipment hit the FIRST card hardest.\nInnings 3, 6 and 9 face a boss pitcher's rule. All-Stars add +2 base, Legends +5.",
       15,
-      "#9a917f",
+      UI.muted,
     );
     footnote.paddingTop = "10px";
     footnote.paddingBottom = "14px";

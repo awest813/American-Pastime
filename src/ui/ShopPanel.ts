@@ -1,7 +1,7 @@
 import { Control, Rectangle, StackPanel, TextBlock, type AdvancedDynamicTexture, type Button } from "@babylonjs/gui/2D";
 import type { RunSystem } from "../systems/RunSystem";
 import { RARITY_DISPLAY, type EquipmentCard, type PlayerCard } from "../systems/types";
-import { UI, makeButton, makePanel, makeStack, makeText } from "./kit";
+import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
 
 export interface ShopCallbacks {
   onBuy: (offer: EquipmentCard) => void;
@@ -31,11 +31,11 @@ export class ShopPanel {
     this.root = new Rectangle("shopRoot");
     this.root.width = 1;
     this.root.height = 1;
-    this.root.background = "rgba(8, 10, 18, 0.78)";
+    this.root.background = UI.overlayBg;
     this.root.thickness = 0;
     adt.addControl(this.root);
 
-    const panel = makePanel("880px", "740px");
+    const panel = makePanel("900px", "740px");
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -43,16 +43,18 @@ export class ShopPanel {
     stack.paddingTop = "22px";
     panel.addControl(stack);
 
-    const title = makeText("CLUBHOUSE SHOP", 40, UI.gold);
-    title.fontFamily = UI.mono;
-    title.fontWeight = "bold";
+    const title = makeTitle("CLUBHOUSE SHOP", 38);
     stack.addControl(title);
 
     this.cashText = makeText("", 24, UI.green);
     this.cashText.fontFamily = UI.mono;
     stack.addControl(this.cashText);
+    const rule = makeRule("620px");
+    rule.paddingTop = "4px";
+    rule.paddingBottom = "10px";
+    stack.addControl(rule);
 
-    this.ownedText = makeText("", 16, "#9a917f");
+    this.ownedText = makeText("", 16, UI.muted);
     this.ownedText.textWrapping = true;
     this.ownedText.resizeToFit = false;
     this.ownedText.width = "800px";
@@ -85,7 +87,7 @@ export class ShopPanel {
     gap.width = "24px";
     gap.thickness = 0;
     buttonRow.addControl(gap);
-    const next = makeButton("continueButton", "NEXT INNING ▸", UI.green, "240px");
+    const next = makeButton("continueButton", "NEXT INNING", UI.green, "240px");
     next.onPointerUpObservable.add(() => this.callbacks.onContinue());
     buttonRow.addControl(next);
   }
@@ -126,7 +128,7 @@ export class ShopPanel {
     const gains = run.upgradeStatTargets(card).map((s) => `+1 ${STAT_SHORT[s]}`).join(" · ");
 
     const panel = makePanel("266px", "160px");
-    panel.background = "#1d2418";
+    panel.background = UI.field;
     panel.paddingLeft = "8px";
     panel.paddingRight = "8px";
 
@@ -150,12 +152,12 @@ export class ShopPanel {
     );
     stack.addControl(path);
 
-    const gainText = makeText(gains || "at the stat cap", 15, "#9a917f");
+    const gainText = makeText(gains || "at the stat cap", 15, UI.muted);
     gainText.paddingBottom = "8px";
     stack.addControl(gainText);
 
     const affordable = run.cash >= cost;
-    const button = makeButton(`upgrade-${card.id}`, `UPGRADE  $${cost}`, affordable ? UI.gold : "#777264", "180px", "42px");
+    const button = makeButton(`upgrade-${card.id}`, `UPGRADE  $${cost}`, affordable ? UI.gold : UI.muted, "180px", "42px");
     button.fontSize = 18;
     button.isEnabled = affordable;
     button.onPointerUpObservable.add(() => this.callbacks.onUpgrade(card));
@@ -166,7 +168,7 @@ export class ShopPanel {
 
   private makeOfferCard(offer: EquipmentCard, run: RunSystem): Rectangle {
     const card = makePanel("260px", "290px");
-    card.background = "#241f18";
+    card.background = UI.card;
     card.color = UI.panelBorder;
     card.paddingLeft = "8px";
     card.paddingRight = "8px";
@@ -192,7 +194,7 @@ export class ShopPanel {
     stack.addControl(desc);
 
     const affordable = run.cash >= offer.price && run.equipment.length < 5;
-    const buy = makeButton(`buy-${offer.id}`, `BUY  $${offer.price}`, affordable ? UI.green : "#777264", "180px", "46px");
+    const buy = makeButton(`buy-${offer.id}`, `BUY  $${offer.price}`, affordable ? UI.green : UI.muted, "180px", "46px");
     buy.isEnabled = affordable;
     buy.onPointerUpObservable.add(() => this.callbacks.onBuy(offer));
     stack.addControl(buy);

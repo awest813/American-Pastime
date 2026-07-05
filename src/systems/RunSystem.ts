@@ -4,7 +4,7 @@ import stadiumsJson from "../content/cards.stadiums.json";
 import pitchesJson from "../content/pitches.json";
 import combosJson from "../content/combos.json";
 import bossesJson from "../content/bosses.json";
-import { RARITY_LADDER, type BossCard, type ComboMeta, type EquipmentCard, type PitchCard, type PlayerCard, type Position, type Rarity, type StadiumCard, type Stat } from "./types";
+import { RARITY_LADDER, type BaseState, type BossCard, type ComboMeta, type EquipmentCard, type PitchCard, type PlayerCard, type Position, type Rarity, type StadiumCard, type Stat } from "./types";
 import { Random, type RandomSnapshot } from "../utils/Random";
 
 /**
@@ -19,6 +19,8 @@ export interface RunState {
   inning: number;
   target: number;
   runs: number;
+  outs: number;
+  bases: BaseState;
   playsLeft: number;
   discardsLeft: number;
   cash: number;
@@ -41,11 +43,12 @@ export const RULES = {
   handSize: 8,
   maxCardsPerPlay: 5,
   playsPerInning: 4,
+  outsPerInning: 3,
   discardsPerInning: 3,
   startingCash: 4,
   rewardBase: 3,
-  firstTarget: 15,
-  targetGrowth: 1.37, // soak-tuned: optimal play wins ~40%, weak builds die around inning 8
+  firstTarget: 3,
+  targetGrowth: 1.22,
   finalInning: 9,
   maxEquipment: 5,
   bossEvery: 3, // innings 3, 6, 9 are boss innings
@@ -73,6 +76,8 @@ export class RunSystem {
   inning = 1;
   target: number = RULES.firstTarget;
   runs = 0;
+  outs = 0;
+  bases: BaseState = { first: false, second: false, third: false };
   playsLeft: number = RULES.playsPerInning;
   discardsLeft: number = RULES.discardsPerInning;
   cash: number = RULES.startingCash;
@@ -106,6 +111,8 @@ export class RunSystem {
   startInning(): void {
     this.target = Math.round(RULES.firstTarget * Math.pow(RULES.targetGrowth, this.inning - 1));
     this.runs = 0;
+    this.outs = 0;
+    this.bases = { first: false, second: false, third: false };
     this.playsLeft = RULES.playsPerInning;
     this.discardsLeft = RULES.discardsPerInning;
     this.pitch = this.rng.pick(this.pitches);
@@ -130,8 +137,10 @@ export class RunSystem {
     return boss;
   }
 
-  recordPlay(runsScored: number, playCost = 1): void {
+  recordPlay(runsScored: number, playCost = 1, outsMade = 0, bases: BaseState = this.bases): void {
     this.runs += runsScored;
+    this.outs = Math.min(RULES.outsPerInning, this.outs + outsMade);
+    this.bases = { ...bases };
     this.playsLeft = Math.max(0, this.playsLeft - playCost);
   }
 
@@ -144,7 +153,7 @@ export class RunSystem {
   }
 
   get inningLost(): boolean {
-    return this.playsLeft <= 0 && this.runs < this.target;
+    return (this.outs >= RULES.outsPerInning || this.playsLeft <= 0) && this.runs < this.target;
   }
 
   /** Called after winning an inning; pays out (boss innings pay a bounty) and rolls the shop. */
@@ -230,6 +239,8 @@ export class RunSystem {
       inning: this.inning,
       target: this.target,
       runs: this.runs,
+      outs: this.outs,
+      bases: { ...this.bases },
       playsLeft: this.playsLeft,
       discardsLeft: this.discardsLeft,
       cash: this.cash,
@@ -286,6 +297,12 @@ export class RunSystem {
     this.inning = state.inning;
     this.target = state.target;
     this.runs = state.runs;
+    this.outs = typeof state.outs === "number" ? state.outs : 0;
+    this.bases = {
+      first: Boolean(state.bases?.first),
+      second: Boolean(state.bases?.second),
+      third: Boolean(state.bases?.third),
+    };
     this.playsLeft = state.playsLeft;
     this.discardsLeft = state.discardsLeft;
     this.cash = state.cash;

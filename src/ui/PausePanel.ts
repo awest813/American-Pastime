@@ -1,5 +1,5 @@
-import { InputText, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
-import { UI, makeButton, makeStack, makeText } from "./kit";
+import { Control, InputText, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
+import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
 
 export interface PauseCallbacks {
   onResume: () => void;
@@ -20,29 +20,32 @@ export class PausePanel {
     this.root = new Rectangle("pauseRoot");
     this.root.width = 1;
     this.root.height = 1;
-    this.root.background = "rgba(8, 10, 18, 0.82)";
+    this.root.background = UI.overlayBg;
     this.root.thickness = 0;
     this.root.isPointerBlocker = true;
     this.root.isVisible = false;
     adt.addControl(this.root);
 
-    const stack = makeStack();
-    stack.width = "760px";
-    this.root.addControl(stack);
+    const panel = makePanel("760px", "640px");
+    this.root.addControl(panel);
 
-    const title = makeText("SEVENTH-INNING STRETCH", 42, UI.gold);
-    title.fontFamily = UI.mono;
-    title.fontWeight = "bold";
-    title.shadowColor = "black";
-    title.shadowOffsetX = 3;
-    title.shadowOffsetY = 3;
+    const stack = makeStack();
+    stack.width = "680px";
+    stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    stack.paddingTop = "30px";
+    panel.addControl(stack);
+
+    const title = makeTitle("SEVENTH-INNING STRETCH", 38);
     stack.addControl(title);
 
-    this.seedText = makeText("", 18, "#9a917f");
+    this.seedText = makeText("", 18, UI.muted);
     this.seedText.fontFamily = UI.mono;
     this.seedText.paddingTop = "10px";
-    this.seedText.paddingBottom = "30px";
+    this.seedText.paddingBottom = "14px";
     stack.addControl(this.seedText);
+    const rule = makeRule("460px");
+    rule.paddingBottom = "22px";
+    stack.addControl(rule);
 
     const resume = makeButton("pauseResume", "RESUME (ESC)", UI.green, "300px", "58px");
     resume.onPointerUpObservable.add(() => callbacks.onResume());
@@ -81,7 +84,7 @@ export class PausePanel {
     this.codeStatus.paddingTop = "6px";
     stack.addControl(this.codeStatus);
 
-    const hint = makeText("H combo book · M mute · seed replays the same season", 15, "#9a917f");
+    const hint = makeText("seed replays the same season", 15, UI.muted);
     hint.paddingTop = "18px";
     stack.addControl(hint);
   }

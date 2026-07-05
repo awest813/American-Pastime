@@ -1,5 +1,6 @@
 import type { DeckSnapshot } from "./DeckSystem";
 import type { RunPhase, RunState } from "./RunSystem";
+import type { BattingApproach } from "./types";
 
 /** The complete on-disk shape of a saved run. */
 export interface SaveData {
@@ -10,6 +11,8 @@ export interface SaveData {
   hand: string[];
   /** Card ids currently selected, in click order (subset of hand). */
   selection: string[];
+  /** Current batting approach; optional so older v1 saves resume as Swing. */
+  approach?: BattingApproach;
   lastSeed: string;
   savedAt: number;
 }
@@ -32,6 +35,10 @@ function isResumablePhase(phase: RunPhase): boolean {
   return phase === "inning" || phase === "shop";
 }
 
+function isBattingApproach(value: unknown): value is BattingApproach {
+  return value === "swing" || value === "small_ball" || value === "take";
+}
+
 /** Lightweight structural check so a corrupt or foreign blob never reaches the
  *  game restore path. Deep content-id validation happens later in RunSystem. */
 function looksValid(data: unknown): data is SaveData {
@@ -41,6 +48,7 @@ function looksValid(data: unknown): data is SaveData {
   if (typeof save.run !== "object" || save.run === null) return false;
   if (typeof save.deck !== "object" || save.deck === null) return false;
   if (!Array.isArray(save.hand) || !Array.isArray(save.selection)) return false;
+  if (save.approach !== undefined && !isBattingApproach(save.approach)) return false;
   if (!Array.isArray(save.run.deckCards) || save.run.deckCards.length === 0) return false;
   if (!isResumablePhase(save.run.phase)) return false;
   return true;

@@ -1,5 +1,7 @@
 import { saveSettings, settings } from "./Settings";
 
+type AudioWindow = Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
+
 export type Stinger =
   | "click"
   | "deal"
@@ -120,7 +122,9 @@ export class AudioSystem {
   private ensure(): AudioContext | null {
     if (!this.ctx) {
       try {
-        this.ctx = new AudioContext();
+        const AudioCtor = window.AudioContext ?? (window as AudioWindow).webkitAudioContext;
+        if (!AudioCtor) return null;
+        this.ctx = new AudioCtor();
         this.master = this.ctx.createGain();
         this.master.gain.value = this.currentGain();
         this.master.connect(this.ctx.destination);

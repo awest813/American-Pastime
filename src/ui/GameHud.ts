@@ -1,18 +1,38 @@
-import { Control, Ellipse, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
+import { Control, Ellipse, Rectangle, TextBlock, type AdvancedDynamicTexture, type StackPanel } from "@babylonjs/gui/2D";
 import type { Button } from "@babylonjs/gui/2D";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { RULES, type RunSystem } from "../systems/RunSystem";
-import type { ScoreResult } from "../systems/types";
-import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeText, topLeft, topRight } from "./kit";
+import type { BattingApproach, ScoreResult } from "../systems/types";
+import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeText, setButtonBackground, topLeft, topRight } from "./kit";
 import { Tweens } from "../utils/Tweens";
 
 export interface HudCallbacks {
   onPlay: () => void;
   onDiscard: () => void;
   onComboBook: () => void;
+  onApproach: (approach: BattingApproach) => void;
 }
 
 const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+const APPROACH_LABEL: Record<BattingApproach, string> = {
+  swing: "Q: SWING",
+  small_ball: "W: SMALL BALL",
+  take: "E: TAKE",
+};
+const PITCH_HINT: Record<string, string> = {
+  fastball: "Power up. Contact down.",
+  curveball: "Contact up. Power down.",
+  changeup: "First card scores half.",
+  knuckleball: "Discipline adds to base.",
+  sinker: "Speed down. Defense adds.",
+};
+const STADIUM_HINT: Record<string, string> = {
+  short_porch: "Power Swing needs 16 Power.",
+  windy_field: "+1 Power to played cards.",
+  dome_stadium: "Pitch penalties ignored.",
+  muddy_diamond: "+2 Power, -1 Speed.",
+  friendly_confines: "+3 base score every play.",
+};
 
 /**
  * The in-inning HUD. The 3D scoreboard owns the score itself; the HUD covers
@@ -34,6 +54,9 @@ export class GameHud {
   private previewLabels: TextBlock;
   private previewValues: TextBlock;
   private previewTotal: TextBlock;
+  private approachButtons: Record<BattingApproach, Button>;
+  private approachStack: StackPanel;
+  private actionStack: StackPanel;
   private playButton: Button;
   private discardButton: Button;
   private popupText: TextBlock;
@@ -49,50 +72,51 @@ export class GameHud {
     this.root.isPointerBlocker = false;
     adt.addControl(this.root);
 
+    const pinPanelText = (block: TextBlock, width: string, height: string, top = "10px") => {
+      block.textWrapping = true;
+      block.resizeToFit = false;
+      block.width = width;
+      block.height = height;
+      block.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      block.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      block.left = "14px";
+      block.top = top;
+      block.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      block.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    };
+
     // Top-left pitch card
     const pitchPanel = makePanel("300px", "132px");
     topLeft(pitchPanel);
-    pitchPanel.left = "14px";
+    pitchPanel.left = "32px";
     pitchPanel.top = "14px";
     this.root.addControl(pitchPanel);
     this.pitchText = makeText("", 17);
-    this.pitchText.textWrapping = true;
-    this.pitchText.resizeToFit = false;
-    this.pitchText.width = "280px";
-    this.pitchText.height = "120px";
-    this.pitchText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    pinPanelText(this.pitchText, "270px", "112px");
     pitchPanel.addControl(this.pitchText);
 
     // Boss pitcher rule, styled like a warning card (only on boss innings)
     this.bossPanel = makePanel("300px", "110px");
     topLeft(this.bossPanel);
-    this.bossPanel.left = "14px";
+    this.bossPanel.left = "32px";
     this.bossPanel.top = "158px";
     this.bossPanel.background = "rgba(52, 14, 14, 0.92)";
     this.bossPanel.color = "#8c2f39";
     this.bossPanel.isVisible = false;
     this.root.addControl(this.bossPanel);
     this.bossText = makeText("", 16, UI.red);
-    this.bossText.textWrapping = true;
-    this.bossText.resizeToFit = false;
-    this.bossText.width = "280px";
-    this.bossText.height = "98px";
-    this.bossText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    pinPanelText(this.bossText, "270px", "90px");
     this.bossPanel.addControl(this.bossText);
 
     // Stadium + equipment, under the pitch card (drops below the boss card when one is up)
     const gearPanel = makePanel("300px", "170px");
     topLeft(gearPanel);
-    gearPanel.left = "14px";
+    gearPanel.left = "32px";
     gearPanel.top = "158px";
     this.root.addControl(gearPanel);
     this.gearPanel = gearPanel;
     this.equipmentText = makeText("", 16);
-    this.equipmentText.textWrapping = true;
-    this.equipmentText.resizeToFit = false;
-    this.equipmentText.width = "280px";
-    this.equipmentText.height = "156px";
-    this.equipmentText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    pinPanelText(this.equipmentText, "270px", "150px");
     gearPanel.addControl(this.equipmentText);
 
     // Right-side score preview
@@ -121,7 +145,7 @@ export class GameHud {
     this.previewLabels = makeText("", 16);
     this.previewLabels.textWrapping = false;
     this.previewLabels.resizeToFit = false;
-    this.previewLabels.width = "262px";
+    this.previewLabels.width = "224px";
     this.previewLabels.height = "290px";
     this.previewLabels.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     this.previewLabels.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
@@ -130,7 +154,7 @@ export class GameHud {
     this.previewValues = makeText("", 16, UI.gold);
     this.previewValues.textWrapping = false;
     this.previewValues.resizeToFit = false;
-    this.previewValues.width = "70px";
+    this.previewValues.width = "108px";
     this.previewValues.height = "290px";
     this.previewValues.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
     this.previewValues.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
@@ -151,22 +175,39 @@ export class GameHud {
     comboBookButton.onPointerUpObservable.add(() => callbacks.onComboBook());
     this.root.addControl(comboBookButton);
 
+    this.approachStack = makeStack(false);
+    bottomCenter(this.approachStack);
+    this.approachStack.top = "-78px";
+    this.approachStack.height = "44px";
+    this.root.addControl(this.approachStack);
+    this.approachButtons = {
+      swing: makeButton("approachSwing", APPROACH_LABEL.swing, UI.gold, "142px", "38px"),
+      small_ball: makeButton("approachSmallBall", APPROACH_LABEL.small_ball, UI.cream, "184px", "38px"),
+      take: makeButton("approachTake", APPROACH_LABEL.take, UI.cream, "128px", "38px"),
+    };
+    for (const approach of ["swing", "small_ball", "take"] as const) {
+      const button = this.approachButtons[approach];
+      button.fontSize = 15;
+      button.onPointerUpObservable.add(() => callbacks.onApproach(approach));
+      this.approachStack.addControl(button);
+    }
+
     // Bottom action bar
-    const actionStack = makeStack(false);
-    bottomCenter(actionStack);
-    actionStack.top = "-10px";
-    actionStack.height = "64px";
-    this.root.addControl(actionStack);
-    this.playButton = makeButton("playButton", "PLAY HAND", UI.green, "230px");
+    this.actionStack = makeStack(false);
+    bottomCenter(this.actionStack);
+    this.actionStack.top = "-10px";
+    this.actionStack.height = "64px";
+    this.root.addControl(this.actionStack);
+    this.playButton = makeButton("playButton", "AT-BAT", UI.green, "230px");
     this.playButton.onPointerUpObservable.add(() => callbacks.onPlay());
-    actionStack.addControl(this.playButton);
+    this.actionStack.addControl(this.playButton);
     const spacer = new Rectangle();
     spacer.width = "20px";
     spacer.thickness = 0;
-    actionStack.addControl(spacer);
+    this.actionStack.addControl(spacer);
     this.discardButton = makeButton("discardButton", "DISCARD", UI.red, "230px");
     this.discardButton.onPointerUpObservable.add(() => callbacks.onDiscard());
-    actionStack.addControl(this.discardButton);
+    this.actionStack.addControl(this.discardButton);
 
     this.statusLine = makeText("", 17);
     this.statusLine.fontFamily = UI.mono;
@@ -227,9 +268,9 @@ export class GameHud {
     });
   }
 
-  update(run: RunSystem, deckCount: number, selectionCount: number): void {
+  update(run: RunSystem, deckCount: number, selectionCount: number, approach: BattingApproach): void {
     const hand = run.pitch.hand === "L" ? "LHP" : "RHP";
-    this.pitchText.text = `NOW PITCHING: ${run.pitch.name.toUpperCase()} (${hand})\nDifficulty ${run.pitch.difficulty}\n\n${run.pitch.description}`;
+    this.pitchText.text = `PITCH: ${run.pitch.name.toUpperCase()} (${hand})\nDifficulty ${run.pitch.difficulty}\n\n${PITCH_HINT[run.pitch.id] ?? run.pitch.description}`;
 
     if (run.boss) {
       const detail = run.boss.id === "umpire" && run.umpireTarget ? ` Today: ${run.umpireTarget}.` : "";
@@ -241,18 +282,27 @@ export class GameHud {
       this.gearPanel.top = "158px";
     }
 
-    const gearLines = [`STADIUM: ${run.stadium?.name ?? "—"}`, run.stadium?.description ?? "", "", "EQUIPMENT:"];
+    const gearLines = [`STADIUM: ${run.stadium?.name ?? "-"}`, run.stadium ? (STADIUM_HINT[run.stadium.id] ?? run.stadium.description) : "", "", "EQUIPMENT:"];
     if (run.equipment.length === 0) {
-      gearLines.push("  (none yet — win an inning, hit the shop)");
+      gearLines.push("  (none yet)");
     } else {
       for (const e of run.equipment) gearLines.push(`  · ${e.name}`);
     }
     this.equipmentText.text = gearLines.join("\n");
-    this.statusLine.text = `Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
+    const bases = [run.bases.first ? "1B" : "", run.bases.second ? "2B" : "", run.bases.third ? "3B" : ""].filter(Boolean).join("+") || "empty";
+    this.statusLine.text = `Outs ${run.outs}/${RULES.outsPerInning} · Bases ${bases} · Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
 
-    this.previewPanel.isVisible = run.phase === "inning";
+    const inningActive = run.phase === "inning";
+    this.previewPanel.isVisible = inningActive;
+    this.approachStack.isVisible = inningActive;
+    this.actionStack.isVisible = inningActive;
+    for (const key of Object.keys(this.approachButtons) as BattingApproach[]) {
+      const button = this.approachButtons[key];
+      setButtonBackground(button, key === approach ? UI.gold : UI.cream);
+      if (button.textBlock) button.textBlock.text = APPROACH_LABEL[key];
+    }
     const playLabel = this.playButton.textBlock;
-    if (playLabel) playLabel.text = `PLAY HAND · ${run.playsLeft}`;
+    if (playLabel) playLabel.text = `AT-BAT · ${run.playsLeft}`;
     const discardLabel = this.discardButton.textBlock;
     if (discardLabel) discardLabel.text = `DISCARD · ${run.discardsLeft}`;
     this.setButtonsEnabled(
@@ -265,16 +315,20 @@ export class GameHud {
     this.previewTitle.text = `SCORE PREVIEW · ${selectedCount}/5`;
     if (!result || selectedCount === 0) {
       this.leadoffText.text = "";
-      this.previewLabels.text = "Click cards to build an at-bat.\n\nOrder matters: the pitch and\nyour equipment hit the FIRST\ncard hardest.";
+      this.previewLabels.width = "316px";
+      this.previewLabels.textWrapping = true;
+      this.previewLabels.text = "Pick cards to preview.\n\nQ Swing: bases\nW Small Ball: runners\nE Take: walks";
       this.previewValues.text = "";
       this.previewTotal.text = "";
       return;
     }
+    this.previewLabels.width = "224px";
+    this.previewLabels.textWrapping = false;
     this.leadoffText.text = `Leadoff: ${truncate(leadoffName ?? "", 30)}`;
     const labels: string[] = [];
     const values: string[] = [];
     for (const line of result.lines) {
-      labels.push(truncate(line.label, 30));
+      labels.push(truncate(line.label, 26));
       values.push(line.value);
     }
     if (result.combos.length === 0) {
@@ -283,7 +337,9 @@ export class GameHud {
     }
     this.previewLabels.text = labels.join("\n");
     this.previewValues.text = values.join("\n");
-    this.previewTotal.text = `≈ ${result.runs} RUNS`;
+    const runText = result.runs > 0 ? `+${result.runs} RUN${result.runs === 1 ? "" : "S"}` : result.outs > 0 ? `${result.outs} OUT` : "SAFE";
+    this.previewTotal.color = result.runs > 0 ? UI.gold : result.outs > 0 ? UI.red : UI.green;
+    this.previewTotal.text = `${result.outcome.toUpperCase()} · ${runText}`;
   }
 
   setButtonsEnabled(play: boolean, discard: boolean): void {
