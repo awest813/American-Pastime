@@ -1,0 +1,238 @@
+import { attachWorldMatrixState, createWorldMatrixState } from '../scene/world-matrix-state.js';
+import { allocateMat4 } from '../math/_matrix-allocator.js';
+import { mat4LookAtLH } from '../math/mat4-look-at-lh.js';
+import { GEO_EPSILON, createGeospatialLimits, getEffectivePitchMax } from './geospatial-limits.js';
+
+const TWO_PI = Math.PI * 2;
+const WORLD_NORTH = { x: 0, y: 0, z: 1 };
+const WORLD_RIGHT = { x: 1, y: 0, z: 0 };
+const POLE_SINE_LIMIT = 0.998749218;
+function normalizeRadians(angle) {
+  return angle - TWO_PI * Math.floor((angle + Math.PI) / TWO_PI);
+}
+function clamp(v, min, max) {
+  return v < min ? min : v > max ? max : v;
+}
+function computeLocalBasis(worldPos, refEast, refNorth, refUp) {
+  const upLen = Math.hypot(worldPos.x, worldPos.y, worldPos.z) || 1;
+  refUp.x = worldPos.x / upLen;
+  refUp.y = worldPos.y / upLen;
+  refUp.z = worldPos.z / upLen;
+  cross(refUp, WORLD_NORTH, refEast);
+  if (lengthSq(refEast) < GEO_EPSILON) {
+    cross(refUp, WORLD_RIGHT, refEast);
+  }
+  normalizeInPlace(refEast);
+  cross(refEast, refUp, refNorth);
+  normalizeInPlace(refNorth);
+}
+function computeLookAtFromYawPitch(yaw, pitch, center, result) {
+  const east = { x: 0, y: 0, z: 0 };
+  const north = { x: 0, y: 0, z: 0 };
+  const up = { x: 0, y: 0, z: 0 };
+  computeLocalBasis(center, east, north, up);
+  const sinPitch = Math.sin(pitch);
+  const cosPitch = Math.cos(pitch);
+  const cosYaw = Math.cos(yaw);
+  const sinYaw = Math.sin(yaw);
+  const hx = north.x * cosYaw + east.x * sinYaw;
+  const hy = north.y * cosYaw + east.y * sinYaw;
+  const hz = north.z * cosYaw + east.z * sinYaw;
+  result.x = hx * sinPitch - up.x * cosPitch;
+  result.y = hy * sinPitch - up.y * cosPitch;
+  result.z = hz * sinPitch - up.z * cosPitch;
+  return normalizeInPlace(result);
+}
+function computeYawPitchFromLookAt(lookAt, center, currentYaw, result) {
+  const east = { x: 0, y: 0, z: 0 };
+  const north = { x: 0, y: 0, z: 0 };
+  const up = { x: 0, y: 0, z: 0 };
+  computeLocalBasis(center, east, north, up);
+  const lookDotUp = lookAt.x * up.x + lookAt.y * up.y + lookAt.z * up.z;
+  const cosPitch = -lookDotUp;
+  const pitch = Math.acos(clamp(cosPitch, -1, 1));
+  const lhx = lookAt.x + up.x * cosPitch;
+  const lhy = lookAt.y + up.y * cosPitch;
+  const lhz = lookAt.z + up.z * cosPitch;
+  const sinPitch = Math.sin(pitch);
+  if (Math.abs(sinPitch) < GEO_EPSILON) {
+    result.x = currentYaw;
+    result.y = pitch;
+    return result;
+  }
+  const inv = 1 / sinPitch;
+  const hx = lhx * inv;
+  const hy = lhy * inv;
+  const hz = lhz * inv;
+  const cosYaw = hx * north.x + hy * north.y + hz * north.z;
+  const sinYaw = hx * east.x + hy * east.y + hz * east.z;
+  result.x = Math.atan2(sinYaw, cosYaw);
+  result.y = pitch;
+  return result;
+}
+function clampCenterFromPoles(center) {
+  const mag = Math.hypot(center.x, center.y, center.z);
+  if (mag > GEO_EPSILON) {
+    const sinLat = center.z / mag;
+    if (Math.abs(sinLat) > POLE_SINE_LIMIT) {
+      const sinClamped = clamp(sinLat, -POLE_SINE_LIMIT, POLE_SINE_LIMIT);
+      const cosClamped = Math.sqrt(1 - sinClamped * sinClamped);
+      const lon = Math.atan2(center.y, center.x);
+      center.x = mag * Math.cos(lon) * cosClamped;
+      center.y = mag * Math.sin(lon) * cosClamped;
+      center.z = mag * sinClamped;
+    }
+  }
+  return center;
+}
+function setGeospatialOrientation(camera, orientation) {
+  camera._setOrientation(orientation.yaw ?? camera.yaw, orientation.pitch ?? camera.pitch, orientation.radius ?? camera.radius, orientation.center ?? camera.center);
+}
+function createGeospatialCamera(options) {
+  const limits = createGeospatialLimits(options.planetRadius);
+  const center = { x: options.planetRadius, y: 0, z: 0 };
+  const position = { x: 0, y: 0, z: 0 };
+  const upVector = { x: 0, y: 1, z: 0 };
+  const lookAt = { x: 0, y: 0, z: 0 };
+  const scalars = { yaw: 0, pitch: 0, radius: 0 };
+  const _localMat = allocateMat4();
+  function cameraLocalWorldMatrix() {
+    const center3 = { x: position.x + lookAt.x, y: position.y + lookAt.y, z: position.z + lookAt.z };
+    const view = mat4LookAtLH(position, center3, upVector);
+    const m = _localMat;
+    m[0] = view[0];
+    m[1] = view[4];
+    m[2] = view[8];
+    m[3] = 0;
+    m[4] = view[1];
+    m[5] = view[5];
+    m[6] = view[9];
+    m[7] = 0;
+    m[8] = view[2];
+    m[9] = view[6];
+    m[10] = view[10];
+    m[11] = 0;
+    m[12] = position.x;
+    m[13] = position.y;
+    m[14] = position.z;
+    m[15] = 1;
+    return _localMat;
+  }
+  const wm = createWorldMatrixState(cameraLocalWorldMatrix);
+  function applyOrientation(yaw, pitch, radius, newCenter) {
+    scalars.yaw = normalizeRadians(yaw);
+    scalars.pitch = normalizeRadians(pitch);
+    scalars.radius = radius;
+    center.x = newCenter.x;
+    center.y = newCenter.y;
+    center.z = newCenter.z;
+    scalars.yaw = clamp(scalars.yaw, limits.yawMin, limits.yawMax);
+    scalars.pitch = clamp(scalars.pitch, limits.pitchMin, getEffectivePitchMax(limits, scalars.radius));
+    scalars.radius = clamp(scalars.radius, limits.radiusMin, limits.radiusMax);
+    clampCenterFromPoles(center);
+    const east = { x: 0, y: 0, z: 0 };
+    const north = { x: 0, y: 0, z: 0 };
+    const up = { x: 0, y: 0, z: 0 };
+    computeLocalBasis(center, east, north, up);
+    computeLookAtFromYawPitch(scalars.yaw, scalars.pitch, center, lookAt);
+    const right = { x: 0, y: 0, z: 0 };
+    cross(up, lookAt, right);
+    if (lengthSq(right) < GEO_EPSILON) {
+      const cy = Math.cos(scalars.yaw);
+      const sy = Math.sin(scalars.yaw);
+      const horiz = { x: north.x * cy + east.x * sy, y: north.y * cy + east.y * sy, z: north.z * cy + east.z * sy };
+      cross(horiz, lookAt, right);
+    }
+    normalizeInPlace(right);
+    cross(lookAt, right, upVector);
+    normalizeInPlace(upVector);
+    position.x = center.x - lookAt.x * scalars.radius;
+    position.y = center.y - lookAt.y * scalars.radius;
+    position.z = center.z - lookAt.z * scalars.radius;
+    wm.markLocalDirty();
+  }
+  const cam = {
+    fov: 0.8,
+    nearPlane: 1,
+    farPlane: options.planetRadius * 16,
+    children: [],
+    limits,
+    position,
+    upVector,
+    _lookAt: lookAt,
+    _setOrientation: applyOrientation,
+    _viewCache: allocateMat4(),
+    _projCache: allocateMat4(),
+    _vpCache: allocateMat4(),
+    get parent() {
+      return wm.parent;
+    },
+    set parent(v) {
+      wm.parent = v;
+    },
+    get worldMatrix() {
+      return wm.getWorldMatrix();
+    },
+    get worldMatrixVersion() {
+      return wm.getWorldMatrixVersion();
+    },
+    get center() {
+      return center;
+    },
+    set center(v) {
+      applyOrientation(scalars.yaw, scalars.pitch, scalars.radius, v);
+    },
+    get yaw() {
+      return scalars.yaw;
+    },
+    set yaw(v) {
+      if (v !== scalars.yaw) {
+        applyOrientation(v, scalars.pitch, scalars.radius, center);
+      }
+    },
+    get pitch() {
+      return scalars.pitch;
+    },
+    set pitch(v) {
+      if (v !== scalars.pitch) {
+        applyOrientation(scalars.yaw, v, scalars.radius, center);
+      }
+    },
+    get radius() {
+      return scalars.radius;
+    },
+    set radius(v) {
+      if (v !== scalars.radius) {
+        applyOrientation(scalars.yaw, scalars.pitch, v, center);
+      }
+    }
+  };
+  attachWorldMatrixState(cam, wm);
+  const restingRadius = limits.radiusMax !== Infinity ? limits.radiusMax : options.planetRadius * 4;
+  applyOrientation(0, 0, restingRadius, center);
+  return cam;
+}
+function cross(a, b, out) {
+  const x = a.y * b.z - a.z * b.y;
+  const y = a.z * b.x - a.x * b.z;
+  const z = a.x * b.y - a.y * b.x;
+  out.x = x;
+  out.y = y;
+  out.z = z;
+}
+function lengthSq(v) {
+  return v.x * v.x + v.y * v.y + v.z * v.z;
+}
+function normalizeInPlace(v) {
+  const len = Math.hypot(v.x, v.y, v.z);
+  if (len > 1e-10) {
+    const inv = 1 / len;
+    v.x *= inv;
+    v.y *= inv;
+    v.z *= inv;
+  }
+  return v;
+}
+
+export { clampCenterFromPoles, computeLocalBasis, computeLookAtFromYawPitch, computeYawPitchFromLookAt, createGeospatialCamera, normalizeRadians, setGeospatialOrientation };
+//# sourceMappingURL=geospatial-camera.js.map

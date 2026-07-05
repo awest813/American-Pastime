@@ -1,0 +1,8 @@
+import { type FunctionComponent } from "react";
+import { type LensRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/lensRenderingPipeline.js";
+export declare const LensRenderingPipelineOptionsProperties: FunctionComponent<{
+    pipeline: LensRenderingPipeline;
+}>;
+export declare const LensRenderingPipelineDepthOfFieldProperties: FunctionComponent<{
+    pipeline: LensRenderingPipeline;
+}>;

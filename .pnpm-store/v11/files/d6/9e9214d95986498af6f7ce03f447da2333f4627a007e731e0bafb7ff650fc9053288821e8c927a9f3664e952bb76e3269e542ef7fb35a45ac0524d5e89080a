@@ -1,0 +1,7 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IPropertiesService } from "./propertiesService";
+export declare const ControlPropertiesSectionIdentity: unique symbol;
+export declare const CollisionPropertiesSectionIdentity: unique symbol;
+export declare const LimitsPropertiesSectionIdentity: unique symbol;
+export declare const BehaviorsPropertiesSectionIdentity: unique symbol;
+export declare const CameraPropertiesServiceDefinition: ServiceDefinition<[], [IPropertiesService]>;

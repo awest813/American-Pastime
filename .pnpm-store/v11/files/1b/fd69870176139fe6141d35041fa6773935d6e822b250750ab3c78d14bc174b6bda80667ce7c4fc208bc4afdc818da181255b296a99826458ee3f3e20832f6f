@@ -1,0 +1,2 @@
+import { ExtensibleAccordion } from "@babylonjs/shared-ui-components/modularTool/components/extensibleAccordion.js";
+export declare const PropertiesPane: typeof ExtensibleAccordion<unknown>;

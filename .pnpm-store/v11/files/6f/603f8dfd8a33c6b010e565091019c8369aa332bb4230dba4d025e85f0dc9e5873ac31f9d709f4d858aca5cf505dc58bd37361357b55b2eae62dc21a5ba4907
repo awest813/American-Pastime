@@ -1,0 +1,8 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../sceneContext";
+import { type IBridgeCommandRegistry } from "@babylonjs/shared-ui-components/modularTool/services/cli/bridgeCommandRegistry.js";
+/**
+ * Service that registers a CLI command for capturing a screenshot of the scene.
+ * Returns the image as a base64 data string, suitable for consumption by AI agents.
+ */
+export declare const ScreenshotCommandServiceDefinition: ServiceDefinition<[], [IBridgeCommandRegistry, ISceneContext]>;

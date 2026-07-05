@@ -1,0 +1,1 @@
+{"version":3,"file":"oneminus-block.js","sources":["../../../../../src/material/node/blocks/oneminus-block.ts"],"sourcesContent":["import { unaryEmitter } from \"./_math-factory.js\";\nexport const emitter = unaryEmitter(\"OneMinusBlock\", (v) => `1.0 - ${v}`);\n"],"names":[],"mappings":";;AACO,MAAM,UAAU,YAAA,CAAa,eAAA,EAAiB,CAAC,CAAA,KAAM,CAAA,MAAA,EAAS,CAAC,CAAA,CAAE;;;;"}

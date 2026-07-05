@@ -1,0 +1,27 @@
+async function parseGltfJsonAsset(buffer, baseUrl) {
+  const json = JSON.parse(new TextDecoder().decode(buffer));
+  const buffers = json.buffers ?? [];
+  let binChunk;
+  if (buffers.length > 1) {
+    const multiBuffer = await import('./gltf-multi-buffer.js');
+    binChunk = await multiBuffer.loadMultiBuffer(json, baseUrl);
+  } else if (buffers[0]?.uri) {
+    binChunk = new DataView(await fetch(resolveBufferUri(buffers[0].uri, baseUrl)).then((r) => r.arrayBuffer()));
+  } else {
+    binChunk = new DataView(new ArrayBuffer(0));
+  }
+  return { json, binChunk, baseUrl };
+}
+function resolveBufferUri(uri, baseUrl) {
+  if (baseUrl) {
+    return new URL(uri, baseUrl + "x").href;
+  }
+  try {
+    return new URL(uri).href;
+  } catch {
+    throw new Error("loadGltf: relative buffer URI needs a base URL.");
+  }
+}
+
+export { parseGltfJsonAsset };
+//# sourceMappingURL=gltf-json-asset.js.map

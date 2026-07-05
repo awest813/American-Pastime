@@ -1,0 +1,113 @@
+import { MAX_LIGHTS, setMaxLights } from '../light/types.js';
+import { computeNodeWorldMatrix } from './gltf-parser.js';
+import { setGltfPunctualLight } from './gltf-light-pointer-state.js';
+
+function bindAnimatedLightVersion(light) {
+  const baseGet = Object.getOwnPropertyDescriptor(light, "_lightVersion")?.get;
+  let extra = 0;
+  Object.defineProperty(light, "_lightVersion", {
+    get() {
+      return (baseGet ? baseGet.call(light) : 0) + (light.worldMatrixVersion ?? 0) + extra;
+    },
+    enumerable: false,
+    configurable: true
+  });
+  Object.defineProperty(light, "_bumpLightVersion", {
+    value: () => {
+      extra++;
+    },
+    enumerable: false,
+    configurable: true
+  });
+}
+const feature = {
+  id: "KHR_lights_punctual",
+  async applyAsset(_meshes, _root, ctx) {
+    const defs = ctx._json.extensions?.KHR_lights_punctual?.lights;
+    if (!defs?.length) {
+      return {};
+    }
+    const lights = [];
+    const nodes = ctx._json.nodes ?? [];
+    let lightNodeCount = 0;
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i]?.extensions?.KHR_lights_punctual?.light !== void 0) {
+        lightNodeCount++;
+      }
+    }
+    if (lightNodeCount > MAX_LIGHTS) {
+      setMaxLights(lightNodeCount);
+    }
+    for (let nodeIdx = 0; nodeIdx < nodes.length; nodeIdx++) {
+      const lightIdx = nodes[nodeIdx]?.extensions?.KHR_lights_punctual?.light;
+      if (lightIdx === void 0) {
+        continue;
+      }
+      const def = defs[lightIdx];
+      if (!def) {
+        continue;
+      }
+      const sourceNode = ctx._nodeMap?.[nodeIdx];
+      let px, py, pz;
+      let dir;
+      if (sourceNode) {
+        px = py = pz = 0;
+        dir = [0, 0, -1];
+      } else {
+        const world = computeNodeWorldMatrix(ctx._json, nodeIdx, ctx._parentMap, ctx._worldMatrixCache);
+        px = world[12];
+        py = world[13];
+        pz = world[14];
+        const fx = -world[8];
+        const fy = -world[9];
+        const fz = -world[10];
+        const flen = Math.hypot(fx, fy, fz) || 1;
+        dir = [fx / flen, fy / flen, fz / flen];
+      }
+      const color = def.color ? [def.color[0], def.color[1], def.color[2]] : [1, 1, 1];
+      const intensity = def.intensity ?? 1;
+      const range = def.range !== void 0 ? def.range : Number.MAX_VALUE;
+      if (def.type === "point") {
+        const { createPointLight } = await import('../light/point-light.js');
+        const pl = createPointLight([px, py, pz], intensity);
+        pl.diffuse = color;
+        pl.specular = color;
+        pl.range = range;
+        if (sourceNode) {
+          pl.parent = sourceNode;
+        }
+        bindAnimatedLightVersion(pl);
+        lights.push(pl);
+        setGltfPunctualLight(ctx._json, lightIdx, pl);
+      } else if (def.type === "directional") {
+        const { createDirectionalLight } = await import('../light/directional-light.js');
+        const dl = createDirectionalLight(dir, intensity);
+        dl.diffuse = color;
+        dl.specular = color;
+        if (sourceNode) {
+          dl.parent = sourceNode;
+        }
+        bindAnimatedLightVersion(dl);
+        lights.push(dl);
+        setGltfPunctualLight(ctx._json, lightIdx, dl);
+      } else if (def.type === "spot") {
+        const { createSpotLight } = await import('../light/spot-light.js');
+        const outer = def.spot?.outerConeAngle ?? Math.PI / 4;
+        const sl = createSpotLight([px, py, pz], dir, outer * 2, 1, intensity);
+        sl.diffuse = color;
+        sl.specular = color;
+        sl.range = range;
+        if (sourceNode) {
+          sl.parent = sourceNode;
+        }
+        bindAnimatedLightVersion(sl);
+        lights.push(sl);
+        setGltfPunctualLight(ctx._json, lightIdx, sl);
+      }
+    }
+    return { entities: lights };
+  }
+};
+
+export { feature as default };
+//# sourceMappingURL=gltf-feature-lights-punctual.js.map

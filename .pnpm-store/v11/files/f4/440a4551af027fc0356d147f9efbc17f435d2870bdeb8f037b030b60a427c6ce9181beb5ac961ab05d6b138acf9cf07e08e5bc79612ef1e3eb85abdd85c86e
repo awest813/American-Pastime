@@ -1,0 +1,6 @@
+import { type FunctionComponent } from "react";
+/**
+ * Range selector component - a draggable scrollbar for selecting frame range
+ * @returns The range selector component
+ */
+export declare const RangeSelector: FunctionComponent;

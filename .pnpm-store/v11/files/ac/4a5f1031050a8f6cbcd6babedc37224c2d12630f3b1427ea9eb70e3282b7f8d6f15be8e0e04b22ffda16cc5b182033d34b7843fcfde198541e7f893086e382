@@ -1,0 +1,10 @@
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../services/selectionService";
+/**
+ * @internal
+ */
+export declare const MeshesContent: FunctionComponent<{
+    scene: Scene;
+    selectionService: ISelectionService;
+}>;

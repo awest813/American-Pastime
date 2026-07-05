@@ -1,0 +1,4 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IPropertiesService } from "./propertiesService";
+import { type ISelectionService } from "../../selectionService";
+export declare const AnimationGroupPropertiesServiceDefinition: ServiceDefinition<[], [IPropertiesService, ISelectionService]>;

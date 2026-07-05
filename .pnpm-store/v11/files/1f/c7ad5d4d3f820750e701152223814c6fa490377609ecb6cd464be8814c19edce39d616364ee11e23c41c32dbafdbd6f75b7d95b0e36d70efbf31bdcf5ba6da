@@ -1,0 +1,72 @@
+import { type FunctionComponent } from "react";
+import { type OpenPBRMaterial } from "@babylonjs/core/Materials/PBR/openpbrMaterial.js";
+/**
+ * Displays the base layer properties of an OpenPBR material.
+ * @param props - The required properties
+ * @returns A JSX element representing the base layer properties.
+ */
+export declare const OpenPBRMaterialBaseProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;
+/**
+ * Displays the specular layer properties of an OpenPBR material.
+ * @param props - The required properties
+ * @returns A JSX element representing the specular layer properties.
+ */
+export declare const OpenPBRMaterialSpecularProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;
+export declare const OpenPBRMaterialTransmissionProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;
+export declare const OpenPBRMaterialSubsurfaceProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;
+/**
+ * Displays the coat layer properties of an OpenPBR material.
+ * @param props - The required properties
+ * @returns A JSX element representing the coat layer properties.
+ */
+export declare const OpenPBRMaterialCoatProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;
+/**
+ * Displays the fuzz layer properties of an OpenPBR material.
+ * @param props - The required properties
+ * @returns A JSX element representing the fuzz layer properties.
+ */
+export declare const OpenPBRMaterialFuzzProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;
+/**
+ * Displays the emission properties of an OpenPBR material.
+ * @param props - The required properties
+ * @returns A JSX element representing the emission properties.
+ */
+export declare const OpenPBRMaterialEmissionProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;
+/**
+ * Displays the thin film properties of an OpenPBR material.
+ * @param props - The required properties
+ * @returns A JSX element representing the thin film properties.
+ */
+export declare const OpenPBRMaterialThinFilmProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;
+/**
+ * Displays the geometry properties of an OpenPBR material.
+ * @param props - The required properties
+ * @returns A JSX element representing the geometry properties.
+ */
+export declare const OpenPBRMaterialGeometryProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;
+/**
+ * Displays the rendering quality properties of an OpenPBR material.
+ * @param props - The required properties
+ * @returns A JSX element representing the quality properties.
+ */
+export declare const OpenPBRMaterialQualityProperties: FunctionComponent<{
+    material: OpenPBRMaterial;
+}>;

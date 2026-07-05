@@ -1,0 +1,5 @@
+import { type TextureEditorToolProvider } from "../../../components/textureEditor/textureEditor";
+/**
+ * Eyedropper tool for picking colors from the texture
+ */
+export declare const Eyedropper: TextureEditorToolProvider;

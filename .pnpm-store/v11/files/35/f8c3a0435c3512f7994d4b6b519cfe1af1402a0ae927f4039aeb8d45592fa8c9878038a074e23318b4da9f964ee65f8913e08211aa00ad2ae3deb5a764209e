@@ -1,0 +1,28 @@
+{
+  "name": "@babylonjs/lite",
+  "version": "1.7.0",
+  "description": "A lightweight, tree-shakable, WebGPU-first rendering library derived from Babylon.js.",
+  "license": "Apache-2.0",
+  "homepage": "https://doc.babylonjs.com/lite/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BabylonJS/Babylon-Lite.git"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "module": "./lib/index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./lib/index.js"
+    }
+  },
+  "jsdelivr": "./dist/index.js",
+  "unpkg": "./dist/index.js",
+  "sideEffects": false,
+  "babylonLiteRelease": {
+    "azureBuildId": "55470",
+    "sourceVersion": "de70048c4d652302d4eb5f5b74c158a20b2015af"
+  }
+}

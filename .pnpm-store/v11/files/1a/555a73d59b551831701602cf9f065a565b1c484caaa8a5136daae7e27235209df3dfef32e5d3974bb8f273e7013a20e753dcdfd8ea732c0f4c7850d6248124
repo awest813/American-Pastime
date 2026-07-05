@@ -1,0 +1,10 @@
+function normalizeVec3(x, y, z, epsilon = 1e-10) {
+  const len = Math.hypot(x, y, z);
+  if (len <= epsilon) {
+    return [0, 1, 0];
+  }
+  return [x / len, y / len, z / len];
+}
+
+export { normalizeVec3 };
+//# sourceMappingURL=normalize-vec3.js.map

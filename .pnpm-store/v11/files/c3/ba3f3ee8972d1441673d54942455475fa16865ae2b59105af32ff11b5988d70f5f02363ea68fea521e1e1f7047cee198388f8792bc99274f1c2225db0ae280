@@ -1,0 +1,65 @@
+const Defaults = {
+  fftSize: 2048,
+  minDecibels: -100,
+  maxDecibels: -30,
+  smoothing: 0.8
+};
+function applyAnalyzerOptions(node, options) {
+  if (options.fftSize !== void 0) {
+    node.fftSize = options.fftSize;
+  }
+  if (options.minDecibels !== void 0) {
+    node.minDecibels = options.minDecibels;
+  }
+  if (options.maxDecibels !== void 0) {
+    node.maxDecibels = options.maxDecibels;
+  }
+  if (options.smoothing !== void 0) {
+    node.smoothingTimeConstant = options.smoothing;
+  }
+}
+function createAnalyzerSubNode(engine, options) {
+  const node = new AnalyserNode(engine._ctx);
+  node.fftSize = Defaults.fftSize;
+  node.minDecibels = Defaults.minDecibels;
+  node.maxDecibels = Defaults.maxDecibels;
+  node.smoothingTimeConstant = Defaults.smoothing;
+  applyAnalyzerOptions(node, options);
+  return {
+    _engine: engine,
+    _node: node,
+    _dispose: () => {
+      node.disconnect();
+    }
+  };
+}
+function ensureAnalyzerSubNode(host, options = {}) {
+  const graph = host._graph;
+  if (graph._analyzer) {
+    const existing = graph._analyzer;
+    applyAnalyzerOptions(existing._node, options);
+    return existing;
+  }
+  const node = createAnalyzerSubNode(host._engine, options);
+  graph._volume.connect(node._node);
+  graph._analyzer = node;
+  return node;
+}
+function enableAnalyzer(host, options = {}) {
+  ensureAnalyzerSubNode(host, options);
+}
+function getByteFrequencyData(host, out) {
+  ensureAnalyzerSubNode(host)._node.getByteFrequencyData(out);
+}
+function getFloatFrequencyData(host, out) {
+  ensureAnalyzerSubNode(host)._node.getFloatFrequencyData(out);
+}
+function getByteTimeDomainData(host, out) {
+  ensureAnalyzerSubNode(host)._node.getByteTimeDomainData(out);
+}
+function getFloatTimeDomainData(host, out) {
+  ensureAnalyzerSubNode(host)._node.getFloatTimeDomainData(out);
+}
+
+export { enableAnalyzer, getByteFrequencyData, getByteTimeDomainData, getFloatFrequencyData, getFloatTimeDomainData };
+//# sourceMappingURL=analyzer.js.map

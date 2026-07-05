@@ -1,0 +1,10 @@
+import { Plugin as Plugin_2 } from 'vite';
+
+/**
+ * Create the Babylon Lite compat Vite plugin. Add it to your config's `plugins`
+ * array and keep your Babylon.js imports exactly as they are — they resolve to
+ * the compat layer instead of Babylon.js.
+ */
+export declare function liteCompat(): Plugin_2;
+
+export { }

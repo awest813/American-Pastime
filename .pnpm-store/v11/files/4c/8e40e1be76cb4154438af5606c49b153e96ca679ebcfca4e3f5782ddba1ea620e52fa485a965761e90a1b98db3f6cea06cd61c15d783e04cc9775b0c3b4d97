@@ -1,0 +1,6 @@
+import { type FunctionComponent } from "react";
+/**
+ * Top toolbar for the curve editor with frame/value inputs and action buttons
+ * @returns The top bar component
+ */
+export declare const TopBar: FunctionComponent;

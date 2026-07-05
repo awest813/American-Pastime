@@ -1,0 +1,53 @@
+import { U8, DV } from '../engine/typed-arrays.js';
+import { getMeshoptDecoder } from './meshopt-decode.js';
+
+function align4(n) {
+  return n + 3 & -4;
+}
+const feature = {
+  id: "EXT_meshopt_compression",
+  async preParse(json, binChunk) {
+    const bufferViews = json.bufferViews ?? [];
+    const decoder = await getMeshoptDecoder();
+    const materialized = new Array(bufferViews.length);
+    const newOffsets = new Array(bufferViews.length);
+    let total = 0;
+    for (let i = 0; i < bufferViews.length; i++) {
+      const bv = bufferViews[i];
+      const ext = bv.extensions?.EXT_meshopt_compression;
+      let bytes;
+      if (ext) {
+        if ((ext.buffer ?? 0) !== 0) {
+          throw new Error(`EXT_meshopt_compression: compressed source buffer ${ext.buffer} is not buffer 0 (unsupported)`);
+        }
+        const source = new U8(binChunk.buffer, binChunk.byteOffset + (ext.byteOffset ?? 0), ext.byteLength);
+        const target = new U8(ext.count * ext.byteStride);
+        decoder.decodeGltfBuffer(target, ext.count, ext.byteStride, source, ext.mode, ext.filter ?? "NONE");
+        bytes = target;
+      } else {
+        if ((bv.buffer ?? 0) !== 0) {
+          throw new Error(`EXT_meshopt_compression: uncompressed bufferView in buffer ${bv.buffer} is not buffer 0 (unsupported)`);
+        }
+        bytes = new U8(binChunk.buffer.slice(binChunk.byteOffset + (bv.byteOffset ?? 0), binChunk.byteOffset + (bv.byteOffset ?? 0) + bv.byteLength));
+      }
+      materialized[i] = bytes;
+      newOffsets[i] = total;
+      total = align4(total + bytes.length);
+    }
+    const packed = new U8(total);
+    for (let i = 0; i < bufferViews.length; i++) {
+      const bv = bufferViews[i];
+      packed.set(materialized[i], newOffsets[i]);
+      bv.buffer = 0;
+      bv.byteOffset = newOffsets[i];
+      bv.byteLength = materialized[i].length;
+      if (bv.extensions) {
+        delete bv.extensions.EXT_meshopt_compression;
+      }
+    }
+    return new DV(packed.buffer);
+  }
+};
+
+export { feature as default };
+//# sourceMappingURL=gltf-feature-meshopt.js.map

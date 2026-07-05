@@ -1,0 +1,247 @@
+import { unregisterRenderingContext, isRenderingContextRegistered, registerRenderingContext } from '../engine/engine.js';
+import { disposeMeshGpu } from '../mesh/mesh-dispose.js';
+import { registerMeshScene, enqueueMaterialSwap, unregisterMeshScene } from './mesh-scene-registry.js';
+import { processMaterialSwaps } from './scene-material-swap.js';
+import { _appendTask, createFrameGraph } from '../frame-graph/frame-graph.js';
+import { createRenderTask } from '../frame-graph/render-task.js';
+import { createRenderTarget } from '../engine/render-target.js';
+
+function createSceneContext(surface, options) {
+  const eng = surface.engine;
+  const ctxLocal = {
+    surface,
+    clearColor: { r: 0.2, g: 0.2, b: 0.3, a: 1 },
+    camera: null,
+    lights: [],
+    meshes: [],
+    animationGroups: [],
+    fog: null,
+    clipPlane: null,
+    shadowGenerators: [],
+    imageProcessing: { exposure: 1, contrast: 1, toneMappingEnabled: false },
+    _renderables: [],
+    _prePasses: [],
+    _gsMeshes: [],
+    _uniformUpdaters: [],
+    fixedDeltaMs: 0,
+    _beforeRender: [],
+    _deferredBuilders: [],
+    _groups: /* @__PURE__ */ new Map(),
+    _disposables: [],
+    _meshDisposables: /* @__PURE__ */ new Map(),
+    _materialSwapQueue: [],
+    _renderableVersion: 0,
+    _materialEpoch: 0,
+    _built: false,
+    _builtGroups: /* @__PURE__ */ new Set(),
+    _drawCallsPre: 0,
+    _update() {
+      if (eng.useFloatingOrigin && ctx.camera && !ctx.camera._useFloatingOrigin) {
+        ctx.camera._useFloatingOrigin = true;
+        ctx.camera._viewVer = -1;
+        ctx.camera._vpVer = -1;
+      }
+      const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
+      const encoder = eng._currentEncoder;
+      let draws = 0;
+      for (const cb of ctx._beforeRender) {
+        cb(d);
+      }
+      if (ctx._materialSwapQueue.length > 0) {
+        processMaterialSwaps(ctx);
+      }
+      for (const pp of ctx._prePasses) {
+        draws += pp.execute(encoder, eng);
+      }
+      for (const u of ctx._uniformUpdaters) {
+        u.update(eng);
+      }
+      ctx._drawCallsPre = draws;
+    },
+    _record() {
+      return ctx._frameGraph.execute();
+    },
+    _resize() {
+      ctx._frameGraph.build();
+    }
+  };
+  const ctx = ctxLocal;
+  const fg = createFrameGraph();
+  ctx._frameGraph = fg;
+  if (options?.defaultRenderTask !== false) {
+    const msaa = surface.msaaSamples > 1;
+    const rt = msaa ? createRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface }) : surface.scRT;
+    const depth = msaa ? void 0 : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
+    _appendTask(fg, createRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : void 0, depth, clrColor: ctx.clearColor }, eng, ctx));
+  }
+  ctx._disposables.push(() => fg.dispose());
+  return ctx;
+}
+function onBeforeRender(scene, cb) {
+  scene._beforeRender.unshift(cb);
+}
+function onSceneDispose(scene, cb) {
+  scene._disposables.push(cb);
+}
+function getFrameGraph(scene) {
+  return scene._frameGraph;
+}
+function addDeferredSceneRenderables(scene, build) {
+  const ctx = scene;
+  ctx._deferredBuilders.push(async () => {
+    const built = await build(ctx.surface.engine, ctx);
+    ctx._renderables.push(...built.renderables);
+    if (built.dispose) {
+      ctx._disposables.push(built.dispose);
+    }
+  });
+}
+function addToScene(scene, entity) {
+  const ctx = scene;
+  if ("entities" in entity) {
+    const result = entity;
+    for (const e of result.entities) {
+      addToScene(scene, e);
+    }
+    if (result.clearColor) {
+      ctx.clearColor = result.clearColor;
+    }
+    if (result.camera && !ctx.camera) {
+      ctx.camera = result.camera;
+    }
+    if (result.animationGroups?.length) {
+      const engine = ctx.surface.engine;
+      const groups = result.animationGroups;
+      ctx.animationGroups.push(...groups);
+      ctx._beforeRender.push((deltaMs) => {
+        for (const g of groups) {
+          if (!g._stopped && g._ctrl) {
+            g._ctrl.tick(deltaMs, engine);
+          }
+        }
+      });
+    }
+    return;
+  }
+  if ("_gpu" in entity && "material" in entity) {
+    const mesh = entity;
+    ctx.meshes.push(mesh);
+    registerMeshScene(ctx, mesh);
+    const build = mesh.material ? mesh.material._buildGroup : void 0;
+    if (build) {
+      let group = ctx._groups.get(build);
+      if (!group) {
+        group = [];
+        ctx._groups.set(build, group);
+        ctx._deferredBuilders.push(async () => {
+          const result = await build(ctx, group);
+          ctx._renderables.push(...result.renderables);
+          if (result.updater) {
+            ctx._uniformUpdaters.push(result.updater);
+          }
+          ctx._builtGroups.add(build);
+        });
+      }
+      group.push(mesh);
+      if (ctx._built || ctx._builtGroups.has(build)) {
+        enqueueMaterialSwap(ctx, mesh);
+      }
+    }
+  } else if ("lightType" in entity) {
+    ctx.lights.push(entity);
+  }
+  const kids = entity.children;
+  if (kids?.length) {
+    for (const child of kids) {
+      child.parent = entity;
+      addToScene(scene, child);
+    }
+  }
+}
+function disposeScene(scene) {
+  const ctx = scene;
+  unregisterRenderingContext(ctx.surface, ctx);
+  for (const fn of ctx._disposables) {
+    fn();
+  }
+  for (const fns of ctx._meshDisposables.values()) {
+    for (const fn of fns) {
+      fn();
+    }
+  }
+  ctx._meshDisposables.clear();
+  for (const mesh of ctx.meshes) {
+    if (unregisterMeshScene(ctx, mesh)) {
+      disposeMeshGpu(mesh);
+    }
+  }
+  ctx.meshes.length = 0;
+  ctx._renderables.length = 0;
+  ctx._prePasses.length = 0;
+  ctx._gsMeshes.length = 0;
+  ctx._uniformUpdaters.length = 0;
+  ctx._beforeRender.length = 0;
+  ctx._deferredBuilders.length = 0;
+  ctx._disposables.length = 0;
+  ctx._materialSwapQueue.length = 0;
+  ctx.lights.length = 0;
+  ctx.animationGroups.length = 0;
+  ctx.shadowGenerators.length = 0;
+  ctx.camera = null;
+}
+async function buildScene(scene) {
+  const ctx = scene;
+  ctx._materialSwapQueue.length = 0;
+  while (ctx._deferredBuilders.length > 0) {
+    const builders = [...ctx._deferredBuilders];
+    ctx._deferredBuilders = [];
+    await Promise.all(builders.map(async (b) => b()));
+  }
+  processMaterialSwaps(ctx);
+  ctx._renderableVersion++;
+  ctx._built = true;
+}
+async function registerScene(scene) {
+  const ctx = scene;
+  const surface = ctx.surface;
+  if (isRenderingContextRegistered(surface, ctx)) {
+    return;
+  }
+  await buildScene(scene);
+  ctx._renderables.sort(byOrder);
+  await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload) => preload !== void 0));
+  ctx._frameGraph.build();
+  if (surface._renderingContexts.length > 0) {
+    const overlay = await import('./swapchain-overlay.js');
+    overlay.configureSwapchainOverlayScene(surface, ctx);
+  }
+  registerRenderingContext(surface, ctx);
+}
+async function registerSceneWithShadowSupport(scene) {
+  const ctx = scene;
+  const surface = ctx.surface;
+  if (isRenderingContextRegistered(surface, ctx)) {
+    return;
+  }
+  await buildScene(scene);
+  ctx._renderables.sort(byOrder);
+  await ensureShadowTask(surface.engine, ctx);
+  await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload) => preload !== void 0));
+  ctx._frameGraph.build();
+  if (surface._renderingContexts.length > 0) {
+    const overlay = await import('./swapchain-overlay.js');
+    overlay.configureSwapchainOverlayScene(surface, ctx);
+  }
+  registerRenderingContext(surface, ctx);
+}
+const byOrder = (a, b) => a.order - b.order;
+async function ensureShadowTask(engine, scene) {
+  const { createShadowTask } = await import('../frame-graph/shadow-task.js');
+  scene._frameGraph._tasks.unshift(createShadowTask(engine, scene));
+}
+function unregisterScene(scene) {
+  unregisterRenderingContext(scene.surface, scene);
+}
+
+export { addDeferredSceneRenderables, addToScene, buildScene, createSceneContext, disposeScene, getFrameGraph, onBeforeRender, onSceneDispose, registerScene, registerSceneWithShadowSupport, unregisterScene };
+//# sourceMappingURL=scene-core.js.map

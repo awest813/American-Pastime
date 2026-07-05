@@ -1,0 +1,21 @@
+import { U8 } from '../engine/typed-arrays.js';
+import { TU } from '../engine/gpu-flags.js';
+import { getBilinearSampler } from '../resource/samplers.js';
+
+function createSolidTexture2D(engine, r, g, b, a = 1) {
+  const device = engine._device;
+  const texture = device.createTexture({
+    size: { width: 1, height: 1 },
+    format: "rgba8unorm",
+    usage: TU.TEXTURE_BINDING | TU.COPY_DST
+  });
+  const data = new U8([Math.round(r * 255), Math.round(g * 255), Math.round(b * 255), Math.round(a * 255)]);
+  device.queue.writeTexture({ texture }, data, { bytesPerRow: 4, rowsPerImage: 1 }, { width: 1, height: 1 });
+  const sampler = getBilinearSampler(engine);
+  const tex = { texture, view: texture.createView(), sampler, width: 1, height: 1 };
+  engine._dlr?.s(tex, r, g, b, a);
+  return tex;
+}
+
+export { createSolidTexture2D };
+//# sourceMappingURL=solid-texture.js.map

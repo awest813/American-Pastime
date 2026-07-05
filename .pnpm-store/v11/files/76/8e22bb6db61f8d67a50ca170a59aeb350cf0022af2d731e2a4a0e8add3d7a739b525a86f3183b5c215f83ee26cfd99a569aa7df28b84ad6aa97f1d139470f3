@@ -1,0 +1,26 @@
+import { type IGLTFExporterExtensionV2 } from "../glTFExporterExtension.js";
+import { GLTFExporter } from "../glTFExporter.js";
+/**
+ * [Specification](https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Vendor/EXT_texture_webp/README.md)
+ */
+export declare class EXT_texture_webp implements IGLTFExporterExtensionV2 {
+    readonly name = "EXT_texture_webp";
+    enabled: boolean;
+    required: boolean;
+    private _wasUsed;
+    get wasUsed(): boolean;
+    private _exporter;
+    constructor(exporter: GLTFExporter);
+    dispose(): void;
+    /**
+     * Called after a texture is exported to register the encoded image MIME type.
+     * @param _ - the name of the exported babylon texture (unused)
+     * @param textureInfo - the glTF texture info for the exported texture
+     */
+    postExportTexture(_: string, textureInfo: BABYLON.GLTF2.ITextureInfo): void;
+}
+/**
+ * Registers the EXT_texture_webp glTF serializer extension with the {@link GLTFExporter}.
+ * Safe to call multiple times; only the first call has an effect.
+ */
+export declare function RegisterEXT_texture_webp(): void;

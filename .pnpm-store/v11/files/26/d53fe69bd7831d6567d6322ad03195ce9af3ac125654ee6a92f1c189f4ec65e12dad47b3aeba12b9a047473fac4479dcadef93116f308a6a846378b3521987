@@ -1,0 +1,18 @@
+import { r as resolveCompatSpecifier } from "./bundler-resolve-0pEkTP9X.js";
+function liteCompat() {
+  return {
+    name: "babylonjs-lite-compat",
+    async resolveId(source, importer) {
+      const specifier = resolveCompatSpecifier(source);
+      if (!specifier) {
+        return null;
+      }
+      const resolved = await this.resolve(specifier, importer, { skipSelf: true });
+      return (resolved == null ? void 0 : resolved.id) ?? null;
+    }
+  };
+}
+export {
+  liteCompat
+};
+//# sourceMappingURL=rollup.js.map

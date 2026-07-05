@@ -1,0 +1,11 @@
+import { type ParticleSystem } from "@babylonjs/core/Particles/particleSystem.js";
+import { type GPUParticleSystem } from "@babylonjs/core/Particles/gpuParticleSystem.js";
+import { type FunctionComponent } from "react";
+/**
+ * Display spritesheet-related properties for a particle system.
+ * @param props Component props.
+ * @returns Render property lines.
+ */
+export declare const ParticleSystemSpritesheetProperties: FunctionComponent<{
+    particleSystem: ParticleSystem | GPUParticleSystem;
+}>;

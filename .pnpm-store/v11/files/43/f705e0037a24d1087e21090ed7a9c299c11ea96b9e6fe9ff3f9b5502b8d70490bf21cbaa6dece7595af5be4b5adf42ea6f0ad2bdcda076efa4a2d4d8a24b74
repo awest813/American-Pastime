@@ -1,0 +1,7 @@
+import { type FunctionComponent } from "react";
+import { type MultiMaterial } from "@babylonjs/core/Materials/multiMaterial.js";
+import { type ISelectionService } from "../../../services/selectionService";
+export declare const MultiMaterialChildrenProperties: FunctionComponent<{
+    multiMaterial: MultiMaterial;
+    selectionService: ISelectionService;
+}>;

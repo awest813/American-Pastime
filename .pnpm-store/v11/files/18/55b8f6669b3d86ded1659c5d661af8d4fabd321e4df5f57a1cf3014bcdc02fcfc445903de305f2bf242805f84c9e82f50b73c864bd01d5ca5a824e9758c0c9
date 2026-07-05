@@ -1,0 +1,52 @@
+import { U32, F32 } from '../engine/typed-arrays.js';
+
+function createPlaneData(options = {}) {
+  const size = options.size ?? 1;
+  const width = options.width ?? size;
+  const height = options.height ?? size;
+  const hw = width / 2;
+  const hh = height / 2;
+  const positions = new F32([
+    -hw,
+    -hh,
+    0,
+    hw,
+    -hh,
+    0,
+    hw,
+    hh,
+    0,
+    -hw,
+    hh,
+    0
+  ]);
+  const normals = new F32([
+    0,
+    0,
+    -1,
+    0,
+    0,
+    -1,
+    0,
+    0,
+    -1,
+    0,
+    0,
+    -1
+  ]);
+  const uvs = new F32([
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1
+  ]);
+  const indices = new U32([0, 1, 2, 0, 2, 3]);
+  return { positions, normals, uvs, indices };
+}
+
+export { createPlaneData };
+//# sourceMappingURL=create-plane.js.map

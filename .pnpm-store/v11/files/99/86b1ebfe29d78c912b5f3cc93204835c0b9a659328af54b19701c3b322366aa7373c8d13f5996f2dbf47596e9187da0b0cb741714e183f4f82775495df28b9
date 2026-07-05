@@ -1,0 +1,10 @@
+import { type FunctionComponent } from "react";
+type LoadAnimationPanelProps = {
+    onClose: () => void;
+};
+/**
+ * Panel for loading animations from file or snippet server
+ * @returns The load animation panel component
+ */
+export declare const LoadAnimationPanel: FunctionComponent<LoadAnimationPanelProps>;
+export {};

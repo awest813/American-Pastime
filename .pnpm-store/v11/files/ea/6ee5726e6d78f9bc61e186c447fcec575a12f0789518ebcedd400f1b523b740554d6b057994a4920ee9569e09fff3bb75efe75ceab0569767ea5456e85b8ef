@@ -1,0 +1,57 @@
+import { getBusInputNode } from './audio-bus.js';
+import { createSoundSubGraph, connectSoundSubGraph, disposeSoundSubGraph, setSoundSubGraphVolume } from './sound-sub-graph.js';
+
+async function createSoundSourceAsync(engine, node, options = {}) {
+  const graph = createSoundSubGraph(engine._ctx, engine, options.volume ?? 1);
+  let outBus = null;
+  if (options.outBus) {
+    outBus = options.outBus;
+  } else if (options.outBusAutoDefault !== false) {
+    outBus = engine._mainBus;
+  }
+  if (outBus) {
+    connectSoundSubGraph(graph, getBusInputNode(outBus));
+  }
+  node.connect(graph._in);
+  const source = {
+    name: options.name ?? "",
+    _engine: engine,
+    _node: node,
+    _graph: graph,
+    _outBus: outBus,
+    _instances: /* @__PURE__ */ new Set([{ _volumeNode: node }]),
+    _dispose: () => disposeSoundSource(source)
+  };
+  engine._sounds.add(source);
+  return source;
+}
+async function createMicrophoneSoundSourceAsync(engine, options = {}) {
+  let mediaStream;
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    throw new Error("Unable to access microphone: " + String(e), { cause: e });
+  }
+  const node = new MediaStreamAudioSourceNode(engine._ctx, { mediaStream });
+  return createSoundSourceAsync(engine, node, { outBusAutoDefault: false, ...options });
+}
+function setSoundSourceVolume(source, value, options) {
+  setSoundSubGraphVolume(source._graph, value, options);
+}
+function disposeSoundSource(source) {
+  const node = source._node;
+  if (node) {
+    if (typeof MediaStreamAudioSourceNode !== "undefined" && node instanceof MediaStreamAudioSourceNode) {
+      for (const track of node.mediaStream.getTracks()) {
+        track.stop();
+      }
+    }
+    node.disconnect();
+    source._node = null;
+  }
+  disposeSoundSubGraph(source._graph);
+  source._engine._sounds.delete(source);
+}
+
+export { createMicrophoneSoundSourceAsync, createSoundSourceAsync, disposeSoundSource, setSoundSourceVolume };
+//# sourceMappingURL=sound-source.js.map

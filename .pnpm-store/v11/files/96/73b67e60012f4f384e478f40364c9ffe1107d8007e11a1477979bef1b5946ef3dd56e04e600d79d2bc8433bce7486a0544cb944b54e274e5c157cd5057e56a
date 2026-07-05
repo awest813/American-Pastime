@@ -1,0 +1,160 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { createRenderTask } from '../frame-graph/render-task.js';
+import { createShadowCamera, createShadowRenderTarget, casterVersionSum, writeShadowUboFields, updateShadowCameraBase } from './shadow-base.js';
+import { packMat4IntoF32 } from '../math/pack-mat4-into-f32.js';
+
+let createStandardNoColorMaterialView;
+let createPbrNoColorMaterialView;
+let createNodeNoColorMaterialView;
+let createShaderNoColorMaterialView;
+async function preloadPcfShadowTaskState(casterMeshes) {
+  const loads = [];
+  let needsStandard = false;
+  let needsPbr = false;
+  let needsNode = false;
+  let needsShader = false;
+  for (const mesh of casterMeshes) {
+    const family = mesh.material?._buildGroup._materialFamily;
+    needsStandard ||= family === "standard";
+    needsPbr ||= family === "pbr";
+    needsNode ||= family === "node";
+    needsShader ||= family === "shader";
+  }
+  if (needsStandard && !createStandardNoColorMaterialView) {
+    loads.push(
+      import('../material/standard/no-color-view.js').then((module) => {
+        createStandardNoColorMaterialView = module.createStandardNoColorMaterialView;
+      })
+    );
+  }
+  if (needsPbr && !createPbrNoColorMaterialView) {
+    loads.push(
+      import('../material/pbr/no-color-view.js').then((module) => {
+        createPbrNoColorMaterialView = module.createPbrNoColorMaterialView;
+      })
+    );
+  }
+  if (needsNode && !createNodeNoColorMaterialView) {
+    loads.push(
+      import('../material/node/no-color-view.js').then((module) => {
+        createNodeNoColorMaterialView = module.createNodeNoColorMaterialView;
+      })
+    );
+  }
+  if (needsShader && !createShaderNoColorMaterialView) {
+    loads.push(
+      import('../material/shader/no-color-view.js').then((module) => {
+        createShaderNoColorMaterialView = module.createShaderNoColorMaterialView;
+      })
+    );
+  }
+  await Promise.all(loads);
+}
+function ensurePcfShadowTaskState(engine, scene, sg, casterMeshes, existingState) {
+  const existing = existingState;
+  if (existing) {
+    if (existing._casterMeshes === casterMeshes) {
+      return existing;
+    }
+    existing._task.dispose();
+  }
+  const materialViews = /* @__PURE__ */ new Map();
+  const camera = createShadowCamera(sg);
+  const rt = createShadowRenderTarget(sg);
+  const state = {
+    _task: createRenderTask(
+      {
+        name: "pcf",
+        rt,
+        clr: true,
+        cam: camera
+      },
+      engine,
+      scene
+    ),
+    _camera: camera,
+    _cameraVersion: 0,
+    _lastCasterVersion: -1,
+    _lastLightVersion: -1,
+    _lastFoVersion: -1,
+    _shadowUboData: new F32(24),
+    _casterMeshes: casterMeshes,
+    _scene: scene
+  };
+  for (const mesh of casterMeshes) {
+    const material = mesh.material;
+    if (material) {
+      state._task.addMesh(mesh, { material: getNoColorView(material, materialViews) });
+    }
+  }
+  return state;
+}
+function renderPcfShadowMap(engine, sg, state, computeLightMatrix) {
+  const casterMeshes = state._casterMeshes;
+  const casterVersion = casterVersionSum(casterMeshes);
+  const lightVersion = sg._light.worldMatrixVersion;
+  const foCam = engine.useFloatingOrigin ? state._scene.camera : null;
+  const foVersion = foCam ? foCam.worldMatrixVersion : 0;
+  const offX = foCam ? foCam.worldMatrix[12] : 0;
+  const offY = foCam ? foCam.worldMatrix[13] : 0;
+  const offZ = foCam ? foCam.worldMatrix[14] : 0;
+  if (!sg._config._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion && foVersion === state._lastFoVersion) {
+    return 0;
+  }
+  const matrix = computeLightMatrix(casterMeshes, offX, offY, offZ);
+  const matrixChanged = sg._light.lightType === "directional" || lightVersion !== state._lastLightVersion || foVersion !== state._lastFoVersion;
+  if (matrixChanged) {
+    packMat4IntoF32(sg._lightMatrix, matrix._viewProj, 0);
+    sg._version++;
+    writeShadowUboFields(state._shadowUboData, sg);
+    engine._device.queue.writeBuffer(sg._shadowUBO, 0, state._shadowUboData);
+  }
+  updateShadowCamera(state, sg, matrix);
+  state._lastCasterVersion = casterVersion;
+  state._lastLightVersion = lightVersion;
+  state._lastFoVersion = foVersion;
+  return state._task.execute?.() ?? 0;
+}
+function updateShadowCamera(state, sg, matrix) {
+  state._cameraVersion++;
+  state._camera.fov = sg._light.lightType === "spot" ? sg._light.angle : 1;
+  updateShadowCameraBase(state._camera, state._cameraVersion, matrix._near, matrix._far, matrix._view, biasViewProjection(matrix._viewProj, sg._config._bias));
+}
+function biasViewProjection(viewProj, bias) {
+  const biased = new F32(viewProj);
+  const b = bias * 0.5;
+  for (let col = 0; col < 4; col++) {
+    const z = 2 + col * 4;
+    const w = 3 + col * 4;
+    biased[z] = biased[z] + b * biased[w];
+  }
+  return biased;
+}
+function getNoColorView(material, cache) {
+  const cached = cache.get(material);
+  if (cached) {
+    return cached;
+  }
+  const override = material._shadowCasterMaterial;
+  if (override) {
+    const overrideView = getNoColorView(override, cache);
+    cache.set(material, overrideView);
+    return overrideView;
+  }
+  const family = material._buildGroup._materialFamily;
+  let view;
+  if (family === "standard") {
+    view = createStandardNoColorMaterialView(material);
+  } else if (family === "pbr") {
+    view = createPbrNoColorMaterialView(material);
+  } else if (family === "node") {
+    view = createNodeNoColorMaterialView(material);
+  } else if (family === "shader") {
+    view = createShaderNoColorMaterialView(material);
+  }
+  cache.set(material, view);
+  return view;
+}
+
+export { ensurePcfShadowTaskState, getNoColorView, preloadPcfShadowTaskState, renderPcfShadowMap };
+//# sourceMappingURL=pcf-shadow-task-hooks.js.map

@@ -1,0 +1,17 @@
+let _shaderGroupBuilder = null;
+function getShaderGroupBuilder() {
+  if (_shaderGroupBuilder) {
+    return _shaderGroupBuilder;
+  }
+  const builder = async (scene, meshes) => {
+    const { buildShaderGroup } = await import('./shader-renderable.js');
+    const result = await buildShaderGroup(scene, meshes);
+    builder._rebuildSingle = result.rebuildSingle;
+    return result;
+  };
+  builder._materialFamily = "shader";
+  return _shaderGroupBuilder = builder;
+}
+
+export { getShaderGroupBuilder };
+//# sourceMappingURL=shader-group-builder.js.map

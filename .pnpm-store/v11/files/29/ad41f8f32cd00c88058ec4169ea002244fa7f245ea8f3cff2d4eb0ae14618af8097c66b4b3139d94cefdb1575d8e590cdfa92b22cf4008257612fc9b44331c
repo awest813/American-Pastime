@@ -1,0 +1,4 @@
+const SCENE_UBO_BYTES = 368;
+
+export { SCENE_UBO_BYTES };
+//# sourceMappingURL=scene-uniforms-size.js.map

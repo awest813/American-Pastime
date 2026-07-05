@@ -1,0 +1,6 @@
+function lengthVec3(v) {
+  return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+export { lengthVec3 };
+//# sourceMappingURL=length-vec3.js.map

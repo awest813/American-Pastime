@@ -1,0 +1,173 @@
+import { addToScene } from '../scene/scene-core.js';
+import { removeFromScene } from '../scene/scene-remove.js';
+import { createCylinder, createPolyhedron, createBox } from '../mesh/mesh-factories.js';
+import { createGizmoMaterials, GizmoObservable, setMeshesMaterial, attachFollowTarget } from './gizmo-core.js';
+import { normalizeVec3Obj, directionToQuat, transformDirectionByWorld, rotationQuatFromMatrix, quatMul } from './gizmo-math.js';
+import { createPointerDrag, registerPointerDrag } from './pointer-drag.js';
+
+const UNIFORM_OCTAHEDRON_SIZE = 0.028;
+function buildScaleArrow(engine, utilityScene, material, root, thickness, isCollider, centered) {
+  if (centered) {
+    const head2 = createPolyhedron(engine, { type: 1, size: UNIFORM_OCTAHEDRON_SIZE * (1 + (thickness - 1) / 4) });
+    head2.material = material;
+    head2.position.set(0, 0, 0);
+    head2.parent = root;
+    addToScene(utilityScene, head2);
+    if (isCollider) {
+      head2.visible = false;
+    }
+    return [head2];
+  }
+  const head = createBox(engine, 0.4 * (1 + (thickness - 1) / 4));
+  head.scaling.set(0.1, 0.1, 0.1);
+  head.material = material;
+  head.rotation.set(Math.PI / 2, 0, 0);
+  head.position.set(0, 0, 0.3);
+  head.parent = root;
+  addToScene(utilityScene, head);
+  const tail = createCylinder(engine, {
+    diameterTop: 5e-3 * thickness,
+    height: 0.275,
+    diameterBottom: 5e-3 * thickness,
+    tessellation: 96
+  });
+  tail.material = material;
+  tail.rotation.set(Math.PI / 2, 0, 0);
+  tail.position.set(0, 0, 0.275 / 2);
+  tail.parent = root;
+  addToScene(utilityScene, tail);
+  if (isCollider) {
+    head.visible = false;
+    tail.visible = false;
+  }
+  return [head, tail];
+}
+function createAxisScaleGizmo(engine, layer, options) {
+  const color = options.color ?? [0.5, 0.5, 0.5];
+  const thickness = options.thickness ?? 1;
+  const sensitivity = options.sensitivity ?? 1;
+  const uniformScaling = options.uniformScaling ?? false;
+  const localAxis = normalizeVec3Obj(options.dragAxis);
+  const dragAxis = { x: localAxis.x, y: localAxis.y, z: localAxis.z };
+  const utilityScene = layer.scene;
+  const materials = createGizmoMaterials(color, options.hoverColor, options.disableColor);
+  const root = createCylinder(engine, { diameterTop: 0, diameterBottom: 0, height: 0, tessellation: 3 });
+  root.material = materials.colored;
+  root.visible = false;
+  addToScene(utilityScene, root);
+  const qBake = directionToQuat(localAxis);
+  if (uniformScaling) {
+    root.rotationQuaternion.set(0, 0, 0, 1);
+  } else {
+    root.rotationQuaternion.set(qBake[0], qBake[1], qBake[2], qBake[3]);
+  }
+  root.scaling.set(1 / 3, 1 / 3, 1 / 3);
+  const visibleMeshes = buildScaleArrow(engine, utilityScene, materials.colored, root, thickness, false, uniformScaling);
+  const colliderMeshes = buildScaleArrow(engine, utilityScene, materials.colored, root, thickness + 4, true, uniformScaling);
+  const drag = createPointerDrag({
+    dragAxis: { x: dragAxis.x, y: dragAxis.y, z: dragAxis.z },
+    moveAttached: false,
+    // BJS-faithful drag-plane anchor — see axis-drag-gizmo.ts for rationale.
+    getPlanePoint: () => ({ x: root.position.x, y: root.position.y, z: root.position.z })
+  });
+  drag._colliders = [...visibleMeshes, ...colliderMeshes];
+  const onScaleChanged = new GizmoObservable();
+  const gizmo = {
+    root,
+    drag,
+    onScaleChanged,
+    attachedNode: null,
+    useLocalCoordinates: false,
+    materials,
+    _visibleMeshes: visibleMeshes,
+    _meshes: [root, ...visibleMeshes, ...colliderMeshes],
+    _disposePointer: () => void 0,
+    _disposeFollow: () => void 0
+  };
+  drag.onDrag.add((event) => {
+    const node = gizmo.attachedNode;
+    if (!node) {
+      return;
+    }
+    const sx = root.scaling.x, sy = root.scaling.y, sz = root.scaling.z;
+    const rootLen = Math.hypot(sx, sy, sz) || 1;
+    const dotDelta = event.delta.x * dragAxis.x + event.delta.y * dragAxis.y + event.delta.z * dragAxis.z;
+    const dragStrength = sensitivity * dotDelta / rootLen;
+    if (uniformScaling) {
+      const m = 1 + dragStrength * 0.57735;
+      node.scaling.set(node.scaling.x * m, node.scaling.y * m, node.scaling.z * m);
+    } else {
+      const mx = 1 + dragStrength * Math.abs(localAxis.x);
+      const my = 1 + dragStrength * Math.abs(localAxis.y);
+      const mz = 1 + dragStrength * Math.abs(localAxis.z);
+      node.scaling.set(node.scaling.x * mx, node.scaling.y * my, node.scaling.z * mz);
+    }
+    onScaleChanged.notify({ x: node.scaling.x, y: node.scaling.y, z: node.scaling.z });
+  });
+  drag.onDragStart.add(() => setMeshesMaterial(visibleMeshes, materials.hover));
+  drag.onDragEnd.add(() => setMeshesMaterial(visibleMeshes, materials.colored));
+  drag.onHoverStart.add(() => setMeshesMaterial(visibleMeshes, materials.hover));
+  drag.onHoverEnd.add(() => {
+    if (!drag.dragging) {
+      setMeshesMaterial(visibleMeshes, materials.colored);
+    }
+  });
+  const canvas = engine.canvas;
+  if ("setAttribute" in canvas) {
+    gizmo._disposePointer = registerPointerDrag(layer, canvas, drag);
+  }
+  gizmo._disposeFollow = attachFollowTarget(
+    utilityScene,
+    root,
+    () => gizmo.attachedNode,
+    1 / 3,
+    (_target, wm) => {
+      if (gizmo.useLocalCoordinates) {
+        const worldAxis = transformDirectionByWorld(wm, localAxis);
+        dragAxis.x = worldAxis.x;
+        dragAxis.y = worldAxis.y;
+        dragAxis.z = worldAxis.z;
+        const dragOpt = drag.options.dragAxis;
+        if (dragOpt) {
+          dragOpt.x = worldAxis.x;
+          dragOpt.y = worldAxis.y;
+          dragOpt.z = worldAxis.z;
+        }
+        const qNode = rotationQuatFromMatrix(wm);
+        const qr = quatMul(qNode[0], qNode[1], qNode[2], qNode[3], qBake[0], qBake[1], qBake[2], qBake[3]);
+        root.rotationQuaternion.set(qr[0], qr[1], qr[2], qr[3]);
+      } else if (dragAxis.x !== localAxis.x || dragAxis.y !== localAxis.y || dragAxis.z !== localAxis.z) {
+        dragAxis.x = localAxis.x;
+        dragAxis.y = localAxis.y;
+        dragAxis.z = localAxis.z;
+        const dragOpt = drag.options.dragAxis;
+        if (dragOpt) {
+          dragOpt.x = localAxis.x;
+          dragOpt.y = localAxis.y;
+          dragOpt.z = localAxis.z;
+        }
+        root.rotationQuaternion.set(qBake[0], qBake[1], qBake[2], qBake[3]);
+      }
+    }
+  );
+  return gizmo;
+}
+function attachAxisScaleGizmoToNode(gizmo, node) {
+  gizmo.attachedNode = node;
+  gizmo.drag.enabled = node !== null;
+}
+function disposeAxisScaleGizmo(gizmo, layer) {
+  gizmo._disposePointer();
+  gizmo._disposeFollow();
+  gizmo.onScaleChanged.clear();
+  gizmo.drag.onDrag.clear();
+  gizmo.drag.onDragStart.clear();
+  gizmo.drag.onDragEnd.clear();
+  for (const m of gizmo._meshes) {
+    removeFromScene(layer.scene, m);
+  }
+  gizmo._meshes.length = 0;
+}
+
+export { attachAxisScaleGizmoToNode, createAxisScaleGizmo, disposeAxisScaleGizmo };
+//# sourceMappingURL=axis-scale-gizmo.js.map

@@ -1,0 +1,19 @@
+import { Z as Zx } from '../_chunks/vendor/text-shaper-CsjRQ393.js';
+
+async function loadFont(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`loadFont: failed to fetch ${url} (${response.status})`);
+  }
+  const data = await response.arrayBuffer();
+  return createFontFromBuffer(data);
+}
+function createFontFromBuffer(data) {
+  return {
+    _font: Zx.load(data),
+    _curvesCache: null
+  };
+}
+
+export { createFontFromBuffer, loadFont };
+//# sourceMappingURL=font.js.map

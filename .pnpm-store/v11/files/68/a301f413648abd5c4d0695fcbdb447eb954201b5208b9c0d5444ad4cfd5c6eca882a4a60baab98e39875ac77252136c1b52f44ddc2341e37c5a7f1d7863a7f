@@ -1,0 +1,6 @@
+import { binaryEmitter } from './_math-factory.js';
+
+const emitter = binaryEmitter("AddBlock", (l, r) => `${l} + ${r}`);
+
+export { emitter };
+//# sourceMappingURL=add-block.js.map

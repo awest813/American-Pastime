@@ -1,0 +1,19 @@
+import type { EventData } from '@fluentui/react-utilities';
+export type GrowDirection = 'end' | 'start' | 'up' | 'down';
+export type SupportedKeys = 'ArrowRight' | 'ArrowLeft' | 'ArrowUp' | 'ArrowDown';
+export type CSSUnit = 'px' | 'viewport';
+export type CSSUnitName = 'px' | 'vw' | 'vh';
+export declare const UNMEASURED = -1;
+export declare const EVENTS: {
+    readonly keyboard: "keyboard";
+    readonly touch: "touch";
+    readonly mouse: "mouse";
+    readonly setValue: "setValue";
+    readonly handleRef: "handleRef";
+    readonly wrapperRef: "wrapperRef";
+    readonly elementRef: "elementRef";
+};
+export type ResizeHandleUpdateEventData = (EventData<typeof EVENTS.keyboard, KeyboardEvent> | EventData<typeof EVENTS.touch, TouchEvent> | EventData<typeof EVENTS.mouse, MouseEvent> | EventData<typeof EVENTS.setValue, CustomEvent> | EventData<typeof EVENTS.handleRef, CustomEvent> | EventData<typeof EVENTS.wrapperRef, CustomEvent> | EventData<typeof EVENTS.elementRef, CustomEvent>) & {
+    value: number;
+    unit: CSSUnitName;
+};

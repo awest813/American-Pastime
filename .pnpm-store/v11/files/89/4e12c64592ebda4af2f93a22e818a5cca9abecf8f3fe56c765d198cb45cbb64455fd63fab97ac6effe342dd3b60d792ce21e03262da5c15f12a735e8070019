@@ -1,0 +1,12 @@
+import { type FunctionComponent } from "react";
+type PlayHeadProps = {
+    width: number;
+    height: number;
+};
+/**
+ * Playhead component showing current frame position
+ * Uses direct DOM manipulation (like v1) to avoid render cycle flashing during animation
+ * @returns The playhead component
+ */
+export declare const PlayHead: FunctionComponent<PlayHeadProps>;
+export {};

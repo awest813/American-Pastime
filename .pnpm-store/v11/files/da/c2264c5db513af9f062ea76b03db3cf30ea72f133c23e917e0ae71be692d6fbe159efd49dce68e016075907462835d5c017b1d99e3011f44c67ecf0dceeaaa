@@ -1,0 +1,22 @@
+import { type SmartAssetManager } from "@babylonjs/core/SmartAssets/smartAssetManager.pure.js";
+type InspectorAssetNotFoundPromptHandlerCallback = (key: string, expectedUrl: string) => Promise<string | File | null>;
+/**
+ * Sets the Inspector-owned prompt handler used by Smart Assets when an asset is missing.
+ * @param handler - The handler installed by the Inspector UI, or null to clear it.
+ */
+export declare function SetInspectorAssetNotFoundPromptHandler(handler: InspectorAssetNotFoundPromptHandlerCallback | null): void;
+/**
+ * Default handler for missing assets. Delegates to the Inspector UI when it is open.
+ * Pane focus is handled by the prompt host itself once the user picks a file.
+ * @param key - The smart asset key that was not found.
+ * @param expectedUrl - The URL that failed to load.
+ * @returns A promise resolving to a new URL, File, or null to skip.
+ */
+export declare function inspectorAssetNotFoundHandler(key: string, expectedUrl: string): Promise<string | File | null>;
+/**
+ * Installs the Inspector `onAssetNotFound` handler while preserving any existing handler for restoration.
+ * @param sam - The SmartAssetManager to install the handler on.
+ * @returns A function that restores the previous handler if the Inspector handler is still installed.
+ */
+export declare function installInspectorAssetNotFoundHandler(sam: SmartAssetManager): () => void;
+export {};

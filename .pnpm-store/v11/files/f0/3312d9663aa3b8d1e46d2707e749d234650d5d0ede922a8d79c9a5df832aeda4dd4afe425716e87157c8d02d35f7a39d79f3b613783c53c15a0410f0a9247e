@@ -1,0 +1,20 @@
+import { F32, I8, I16, U8 } from '../engine/typed-arrays.js';
+import { _installSamplerConverter } from './gltf-animation.js';
+
+_installSamplerConverter((src, length, normalized) => {
+  if (src instanceof F32) {
+    return new F32(src.buffer, src.byteOffset, length);
+  }
+  const out = new F32(length);
+  const div = src instanceof I8 ? 127 : src instanceof I16 ? 32767 : src instanceof U8 ? 255 : 65535;
+  const signed = src instanceof I8 || src instanceof I16;
+  const s = src;
+  for (let i = 0; i < length; i++) {
+    out[i] = normalized ? signed ? Math.max(s[i] / div, -1) : s[i] / div : s[i];
+  }
+  return out;
+});
+const feature = { id: "_sampler_denorm" };
+
+export { feature as default };
+//# sourceMappingURL=gltf-sampler-denorm.js.map

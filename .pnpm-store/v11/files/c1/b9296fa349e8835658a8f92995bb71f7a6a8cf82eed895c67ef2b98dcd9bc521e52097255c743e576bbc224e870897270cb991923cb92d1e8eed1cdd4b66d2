@@ -1,0 +1,141 @@
+import './gltf-sampler-denorm.js';
+import { PATH_WEIGHTS, PATH_SCALE, PATH_ROTATION, PATH_TRANSLATION, PATH_POINTER } from '../animation/types.js';
+import { resolveAnimationPointer } from './animation-pointer.js';
+import { _installPointerHandlers } from './gltf-animation.js';
+
+const NODE_TRS_PATH = {
+  translation: PATH_TRANSLATION,
+  rotation: PATH_ROTATION,
+  scale: PATH_SCALE,
+  weights: PATH_WEIGHTS
+};
+let _matMapKey = null;
+let _matMap = [];
+const _LIGHT_POINTER_RE = /^\/extensions\/KHR_lights_punctual\/lights\/\d+\/(?:color|intensity|range|spot\/outerConeAngle)$/;
+const _MAT_EXT_POINTER_RE = /^\/materials\/\d+\/(?:pbrMetallicRoughness\/metallicFactor|normalTexture\/scale|occlusionTexture\/strength|extensions\/KHR_materials_(?:transmission|ior|volume|iridescence)\/)/;
+const _BASE_COLOR_POINTER_RE = /^\/materials\/\d+\/pbrMetallicRoughness\/baseColorFactor$/;
+let _matExtMod = null;
+let _baseColorMod = null;
+function materialMap(json, meshes) {
+  if (meshes === _matMapKey) {
+    return _matMap;
+  }
+  _matMapKey = meshes;
+  const map = [];
+  const baseColorAnimated = /* @__PURE__ */ new Set();
+  const uvTransformAnimated = /* @__PURE__ */ new Set();
+  for (const anim of json.animations ?? []) {
+    for (const ch of anim.channels ?? []) {
+      const ptr = ch.target?.extensions?.KHR_animation_pointer?.pointer;
+      const m = ptr && /^\/materials\/(\d+)\/pbrMetallicRoughness\/baseColorFactor$/.exec(ptr);
+      if (m) {
+        baseColorAnimated.add(+m[1]);
+      }
+      const tx = ptr && /^\/materials\/(\d+)\/.*\/KHR_texture_transform\/(offset|scale|rotation)$/.exec(ptr);
+      if (tx) {
+        uvTransformAnimated.add(+tx[1]);
+      }
+    }
+  }
+  const nodes = json.nodes ?? [];
+  let gpuIdx = 0;
+  for (let ni = 0; ni < nodes.length; ni++) {
+    const meshRef = nodes[ni]?.mesh;
+    if (meshRef === void 0) {
+      continue;
+    }
+    const prims = json.meshes?.[meshRef]?.primitives ?? [];
+    for (let p = 0; p < prims.length; p++) {
+      const matIdx = prims[p]?.material;
+      const mesh = meshes[gpuIdx++];
+      if (matIdx !== void 0 && mesh) {
+        const pm = mesh.material;
+        const def = json.materials?.[matIdx];
+        if (def && pm.emissiveColor) {
+          const ef = def.emissiveFactor ?? [0, 0, 0];
+          pm._animEmissiveFactor = [ef[0] ?? 0, ef[1] ?? 0, ef[2] ?? 0];
+          pm._animEmissiveStrength = def.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1;
+        }
+        if (baseColorAnimated.has(matIdx) && !pm.baseColorFactor) {
+          const bcf = def?.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1];
+          pm.baseColorFactor = [bcf[0] ?? 1, bcf[1] ?? 1, bcf[2] ?? 1, bcf[3] ?? 1];
+        }
+        if (uvTransformAnimated.has(matIdx)) {
+          pm._hasUvTx = true;
+        }
+        map[matIdx] = pm;
+      }
+    }
+  }
+  _matExtMod?.seedExtMaterials(json, map);
+  _matMap = map;
+  return map;
+}
+_installPointerHandlers((ptr, c, nodeMap, json, meshes) => {
+  if (!nodeMap) {
+    return null;
+  }
+  const trs = /^\/nodes\/(\d+)\/(translation|rotation|scale|weights)$/.exec(ptr);
+  if (trs) {
+    return { samplerIdx: c.sampler, nodeIdx: +trs[1], path: NODE_TRS_PATH[trs[2]] };
+  }
+  const resolved = resolveAnimationPointer(ptr, { nodes: nodeMap, materials: materialMap(json, meshes), _json: json });
+  if (!resolved) {
+    return null;
+  }
+  const ch = {
+    samplerIdx: c.sampler,
+    nodeIdx: -1,
+    path: PATH_POINTER,
+    pointerWriter: resolved.writer,
+    pointerArity: resolved.arity
+  };
+  return ch;
+});
+const feature = {
+  id: "KHR_animation_pointer",
+  // Raw glTF material defs whose pbrMetallicRoughness/baseColorFactor is animated.
+  // Collected here (where `json` is available) and consumed in applyMaterial (which
+  // only receives the GltfMaterialData). Both hooks live in this lazy feature module,
+  // so non-pointer scenes pay zero bytes for the white-fallback handling.
+  async preParse(json) {
+    let hasLightPointer = false;
+    let hasMatExtPointer = false;
+    let hasBaseColorPointer = false;
+    for (const anim of json.animations ?? []) {
+      for (const ch of anim.channels ?? []) {
+        const ptr = ch.target?.extensions?.KHR_animation_pointer?.pointer;
+        if (!ptr) {
+          continue;
+        }
+        if (_BASE_COLOR_POINTER_RE.test(ptr)) {
+          hasBaseColorPointer = true;
+        }
+        if (_LIGHT_POINTER_RE.test(ptr)) {
+          hasLightPointer = true;
+        }
+        if (_MAT_EXT_POINTER_RE.test(ptr)) {
+          hasMatExtPointer = true;
+        }
+      }
+    }
+    if (hasBaseColorPointer) {
+      _baseColorMod = await import('./animation-pointer-basecolor.js');
+      _baseColorMod.collectBaseColorDefs(json);
+    }
+    if (hasLightPointer) {
+      await import('./animation-pointer-lights.js');
+    }
+    if (hasMatExtPointer) {
+      _matExtMod = await import('./animation-pointer-ext.js');
+    }
+  },
+  // Animated baseColorFactor on untextured materials needs a white 1×1 fallback so the
+  // factor isn't double-applied; the logic lives in the lazy base-color module loaded above.
+  async applyMaterial(mat) {
+    return _baseColorMod?.whiteFallback(mat) ?? null;
+  }
+};
+
+export { feature as default };
+//# sourceMappingURL=gltf-feature-animation-pointer.js.map

@@ -1,0 +1,466 @@
+import { createRampParam, isRamping, setRampTarget } from './audio-param.js';
+import { rebuildSoundSubGraphHead } from './sound-sub-graph.js';
+import { mat4Decompose } from '../math/mat4-decompose.js';
+
+const SpatialDefaults = {
+  coneInnerAngle: 6.28318530718,
+  coneOuterAngle: 6.28318530718,
+  coneOuterVolume: 0,
+  distanceModel: "linear",
+  maxDistance: 1e4,
+  minDistance: 1,
+  panningEnabled: true,
+  panningModel: "equalpower",
+  rolloffFactor: 1
+};
+const ATTACH_POSITION = 1;
+const ATTACH_ROTATION = 2;
+const ATTACH_BOTH = 3;
+const EPSILON = 1e-3;
+function r2d(radians) {
+  return radians * 180 / Math.PI;
+}
+function rotateByQuat(q, vx, vy, vz) {
+  const tx = 2 * (q.y * vz - q.z * vy);
+  const ty = 2 * (q.z * vx - q.x * vz);
+  const tz = 2 * (q.x * vy - q.y * vx);
+  return {
+    x: vx + q.w * tx + (q.y * tz - q.z * ty),
+    y: vy + q.w * ty + (q.z * tx - q.x * tz),
+    z: vz + q.w * tz + (q.x * ty - q.y * tx)
+  };
+}
+function vecEquals(a, b) {
+  return Math.abs(a.x - b.x) < EPSILON && Math.abs(a.y - b.y) < EPSILON && Math.abs(a.z - b.z) < EPSILON;
+}
+function quatEquals(a, b) {
+  return Math.abs(a.x - b.x) < EPSILON && Math.abs(a.y - b.y) < EPSILON && Math.abs(a.z - b.z) < EPSILON && Math.abs(a.w - b.w) < EPSILON;
+}
+function toAttachmentFlags(type) {
+  switch (type) {
+    case "position":
+      return ATTACH_POSITION;
+    case "rotation":
+      return ATTACH_ROTATION;
+    default:
+      return ATTACH_BOTH;
+  }
+}
+function createSpatialSubNode(engine) {
+  const ctx = engine._ctx;
+  const inputNode = new GainNode(ctx);
+  const attenuationNode = new GainNode(ctx);
+  const panner = new PannerNode(ctx);
+  const node = {
+    _engine: engine,
+    _inputNode: inputNode,
+    _panner: panner,
+    _attenuationNode: attenuationNode,
+    _attenuationRamp: createRampParam(attenuationNode.gain, engine),
+    _panningEnabled: SpatialDefaults.panningEnabled,
+    _positionX: createRampParam(panner.positionX, engine),
+    _positionY: createRampParam(panner.positionY, engine),
+    _positionZ: createRampParam(panner.positionZ, engine),
+    _orientationX: createRampParam(panner.orientationX, engine),
+    _orientationY: createRampParam(panner.orientationY, engine),
+    _orientationZ: createRampParam(panner.orientationZ, engine),
+    _position: { x: 0, y: 0, z: 0 },
+    _orientation: { x: 1, y: 0, z: 0 },
+    _rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 },
+    _lastPosition: { x: NaN, y: NaN, z: NaN },
+    _lastOrientation: { x: NaN, y: NaN, z: NaN },
+    _lastQuat: { x: NaN, y: NaN, z: NaN, w: NaN },
+    _attached: null,
+    _attachmentType: ATTACH_BOTH,
+    _attachUnsub: null,
+    _update: () => updateAttachedSubNode(node),
+    _dispose: () => disposeSpatialSubNode(node)
+  };
+  panner.coneInnerAngle = r2d(SpatialDefaults.coneInnerAngle);
+  panner.coneOuterAngle = r2d(SpatialDefaults.coneOuterAngle);
+  panner.coneOuterGain = SpatialDefaults.coneOuterVolume;
+  panner.distanceModel = SpatialDefaults.distanceModel;
+  panner.maxDistance = SpatialDefaults.maxDistance;
+  panner.refDistance = SpatialDefaults.minDistance;
+  panner.rolloffFactor = SpatialDefaults.rolloffFactor;
+  panner.panningModel = SpatialDefaults.panningModel;
+  connectActiveInput(node);
+  return node;
+}
+function connectActiveInput(node) {
+  node._inputNode.disconnect();
+  node._inputNode.connect(node._panningEnabled ? node._panner : node._attenuationNode);
+}
+function connectSpatialOutput(node, downstream) {
+  node._panner.connect(downstream);
+  node._attenuationNode.connect(downstream);
+}
+function disposeSpatialSubNode(node) {
+  detachSubNode(node);
+  node._inputNode.disconnect();
+  node._attenuationNode.disconnect();
+  node._panner.disconnect();
+}
+function updateSubNodePosition(node) {
+  if (vecEquals(node._lastPosition, node._position)) {
+    updateAttenuation(node);
+    return;
+  }
+  setRampTarget(node._positionX, node._position.x);
+  setRampTarget(node._positionY, node._position.y);
+  setRampTarget(node._positionZ, node._position.z);
+  node._lastPosition = { x: node._position.x, y: node._position.y, z: node._position.z };
+  updateAttenuation(node);
+}
+function updateSubNodeRotation(node) {
+  let changed = false;
+  if (!quatEquals(node._lastQuat, node._rotationQuaternion)) {
+    node._orientation = rotateByQuat(node._rotationQuaternion, 1, 0, 0);
+    node._lastQuat = { x: node._rotationQuaternion.x, y: node._rotationQuaternion.y, z: node._rotationQuaternion.z, w: node._rotationQuaternion.w };
+    changed = true;
+  } else if (!vecEquals(node._lastOrientation, node._orientation)) {
+    changed = true;
+  }
+  if (!changed) {
+    return;
+  }
+  setRampTarget(node._orientationX, node._orientation.x);
+  setRampTarget(node._orientationY, node._orientation.y);
+  setRampTarget(node._orientationZ, node._orientation.z);
+  node._lastOrientation = { x: node._orientation.x, y: node._orientation.y, z: node._orientation.z };
+}
+function updateAttenuation(node) {
+  if (node._panningEnabled) {
+    setRampTarget(node._attenuationRamp, 1);
+    return;
+  }
+  const listenerPosition = node._engine._listener?._position ?? { x: 0, y: 0, z: 0 };
+  const deltaX = node._position.x - listenerPosition.x;
+  const deltaY = node._position.y - listenerPosition.y;
+  const deltaZ = node._position.z - listenerPosition.z;
+  const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+  const minDistance = Math.max(node._panner.refDistance, 0);
+  const rolloffFactor = node._panner.rolloffFactor;
+  let attenuation = 1;
+  switch (node._panner.distanceModel) {
+    case "linear": {
+      const maxDistance = Math.max(node._panner.maxDistance, minDistance);
+      const clampedDistance = Math.min(Math.max(distance, minDistance), maxDistance);
+      attenuation = maxDistance === minDistance ? distance <= minDistance ? 1 : 0 : 1 - rolloffFactor * (clampedDistance - minDistance) / (maxDistance - minDistance);
+      break;
+    }
+    case "inverse":
+      attenuation = minDistance === 0 ? 0 : minDistance / (minDistance + rolloffFactor * (Math.max(distance, minDistance) - minDistance));
+      break;
+    case "exponential":
+      attenuation = minDistance === 0 ? 0 : Math.pow(Math.max(distance, minDistance) / minDistance, -rolloffFactor);
+      break;
+  }
+  setRampTarget(node._attenuationRamp, Math.min(Math.max(attenuation, 0), 1));
+}
+function setSubNodePanningEnabled(node, value) {
+  if (node._panningEnabled === value) {
+    return;
+  }
+  node._panningEnabled = value;
+  connectActiveInput(node);
+  updateAttenuation(node);
+}
+function configureSubNode(node, opts) {
+  const panner = node._panner;
+  if (opts.coneInnerAngle !== void 0) {
+    panner.coneInnerAngle = r2d(opts.coneInnerAngle);
+  }
+  if (opts.coneOuterAngle !== void 0) {
+    panner.coneOuterAngle = r2d(opts.coneOuterAngle);
+  }
+  if (opts.coneOuterVolume !== void 0) {
+    panner.coneOuterGain = opts.coneOuterVolume;
+  }
+  if (opts.distanceModel !== void 0) {
+    panner.distanceModel = opts.distanceModel;
+  }
+  if (opts.maxDistance !== void 0) {
+    panner.maxDistance = opts.maxDistance;
+  }
+  if (opts.minDistance !== void 0) {
+    panner.refDistance = opts.minDistance;
+  }
+  if (opts.rolloffFactor !== void 0) {
+    panner.rolloffFactor = opts.rolloffFactor;
+  }
+  if (opts.panningModel !== void 0) {
+    panner.panningModel = opts.panningModel;
+  }
+  if (opts.panningEnabled !== void 0) {
+    setSubNodePanningEnabled(node, opts.panningEnabled);
+  }
+  if (opts.position) {
+    node._position = { x: opts.position.x, y: opts.position.y, z: opts.position.z };
+  }
+  if (opts.rotationQuaternion) {
+    node._rotationQuaternion = { x: opts.rotationQuaternion.x, y: opts.rotationQuaternion.y, z: opts.rotationQuaternion.z, w: opts.rotationQuaternion.w };
+  } else if (opts.orientation) {
+    node._orientation = { x: opts.orientation.x, y: opts.orientation.y, z: opts.orientation.z };
+    node._lastQuat = { x: node._rotationQuaternion.x, y: node._rotationQuaternion.y, z: node._rotationQuaternion.z, w: node._rotationQuaternion.w };
+  }
+  updateSubNodePosition(node);
+  updateSubNodeRotation(node);
+}
+function attachSubNode(node, target, type) {
+  detachSubNode(node);
+  node._attached = target;
+  node._attachmentType = toAttachmentFlags(type);
+  if (target.onDispose) {
+    node._attachUnsub = target.onDispose.add(() => detachSubNode(node));
+  }
+  node._engine._spatialUpdaters.add(node._update);
+  updateAttachedSubNode(node);
+}
+function detachSubNode(node) {
+  node._attachUnsub?.();
+  node._attachUnsub = null;
+  node._attached = null;
+  node._engine._spatialUpdaters.delete(node._update);
+}
+function updateAttachedSubNode(node) {
+  const target = node._attached;
+  if (!target) {
+    return;
+  }
+  const { translation, rotation } = mat4Decompose(target.worldMatrix);
+  const updatesPosition = (node._attachmentType & ATTACH_POSITION) !== 0;
+  if (updatesPosition) {
+    node._position = translation;
+    updateSubNodePosition(node);
+  }
+  if (node._attachmentType & ATTACH_ROTATION) {
+    node._rotationQuaternion = rotation;
+    updateSubNodeRotation(node);
+  }
+  if (!updatesPosition && !node._panningEnabled) {
+    updateSubNodePosition(node);
+  }
+}
+function ensureSpatialSubNode(host) {
+  const graph = host._graph;
+  if (graph._spatial) {
+    return graph._spatial;
+  }
+  ensureSpatialListener(host._engine);
+  const node = createSpatialSubNode(host._engine);
+  connectSpatialOutput(node, graph._volume);
+  graph._spatial = node;
+  rebuildSoundSubGraphHead(graph, host._instances);
+  return node;
+}
+function enableSpatial(host, options = {}) {
+  const node = ensureSpatialSubNode(host);
+  configureSubNode(node, options);
+  if (options.attachedTo) {
+    attachSubNode(node, options.attachedTo, options.attachmentType);
+  }
+}
+function setSpatialPosition(host, position) {
+  const node = ensureSpatialSubNode(host);
+  node._position = { x: position.x, y: position.y, z: position.z };
+  updateSubNodePosition(node);
+}
+function setSpatialOrientation(host, orientation) {
+  const node = ensureSpatialSubNode(host);
+  node._orientation = { x: orientation.x, y: orientation.y, z: orientation.z };
+  node._lastQuat = { x: node._rotationQuaternion.x, y: node._rotationQuaternion.y, z: node._rotationQuaternion.z, w: node._rotationQuaternion.w };
+  updateSubNodeRotation(node);
+}
+function attachSpatialTarget(target, worldTarget, type) {
+  if (isEngine(target)) {
+    const listener = ensureSpatialListener(target);
+    attachListener(listener, worldTarget, type);
+    return;
+  }
+  const node = ensureSpatialSubNode(target);
+  attachSubNode(node, worldTarget, type);
+}
+function detachSpatialTarget(target) {
+  if (isEngine(target)) {
+    if (target._listener) {
+      detachListener(target._listener);
+    }
+    return;
+  }
+  if (target._graph._spatial) {
+    detachSubNode(target._graph._spatial);
+  }
+}
+function setSpatialListener(engine, options = {}) {
+  const listener = ensureSpatialListener(engine);
+  if (options.position) {
+    listener._position = { x: options.position.x, y: options.position.y, z: options.position.z };
+    updateListenerPosition(listener);
+  }
+  if (options.rotationQuaternion) {
+    listener._rotationQuaternion = { x: options.rotationQuaternion.x, y: options.rotationQuaternion.y, z: options.rotationQuaternion.z, w: options.rotationQuaternion.w };
+    updateListenerRotation(listener);
+  }
+  if (options.attachedTo) {
+    attachListener(listener, options.attachedTo, options.attachmentType);
+  }
+}
+function setSpatialListenerPosition(engine, position) {
+  const listener = ensureSpatialListener(engine);
+  listener._position = { x: position.x, y: position.y, z: position.z };
+  updateListenerPosition(listener);
+}
+function updateSpatialAudio(engine) {
+  for (const update of engine._spatialUpdaters) {
+    update();
+  }
+}
+function setSpatialAutoUpdate(engine, enabled, minUpdateMs = 0) {
+  engine._spatialAutoStop?.();
+  engine._spatialAutoStop = null;
+  if (!enabled || typeof requestAnimationFrame !== "function") {
+    return;
+  }
+  let active = true;
+  let rafId = 0;
+  let lastTime = 0;
+  const tick = () => {
+    if (!active) {
+      return;
+    }
+    let skip = false;
+    if (minUpdateMs > 0) {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (lastTime && now - lastTime < minUpdateMs) {
+        skip = true;
+      } else {
+        lastTime = now;
+      }
+    }
+    if (!skip) {
+      updateSpatialAudio(engine);
+    }
+    rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+  const stop = () => {
+    active = false;
+    if (typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(rafId);
+    }
+  };
+  engine._spatialAutoStop = stop;
+  engine._disposers.push(stop);
+}
+function isEngine(target) {
+  return "_spatialUpdaters" in target;
+}
+function ensureSpatialListener(engine) {
+  if (engine._listener) {
+    return engine._listener;
+  }
+  const al = engine._ctx.listener;
+  const hasParams = !!(al.positionX && al.forwardX && al.upX);
+  const listener = {
+    _engine: engine,
+    _listener: al,
+    _hasParams: hasParams,
+    _position: { x: 0, y: 0, z: 0 },
+    _rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 },
+    _lastPosition: { x: NaN, y: NaN, z: NaN },
+    _lastQuat: { x: NaN, y: NaN, z: NaN, w: NaN },
+    _positionX: hasParams ? createRampParam(al.positionX, engine) : null,
+    _positionY: hasParams ? createRampParam(al.positionY, engine) : null,
+    _positionZ: hasParams ? createRampParam(al.positionZ, engine) : null,
+    _forwardX: hasParams ? createRampParam(al.forwardX, engine) : null,
+    _forwardY: hasParams ? createRampParam(al.forwardY, engine) : null,
+    _forwardZ: hasParams ? createRampParam(al.forwardZ, engine) : null,
+    _upX: hasParams ? createRampParam(al.upX, engine) : null,
+    _upY: hasParams ? createRampParam(al.upY, engine) : null,
+    _upZ: hasParams ? createRampParam(al.upZ, engine) : null,
+    _attached: null,
+    _attachmentType: ATTACH_BOTH,
+    _attachUnsub: null,
+    _update: () => updateAttachedListener(listener),
+    _dispose: () => disposeSpatialListener(listener)
+  };
+  engine._listener = listener;
+  return listener;
+}
+function updateListenerPosition(listener) {
+  if (vecEquals(listener._lastPosition, listener._position)) {
+    return;
+  }
+  const p = listener._position;
+  if (listener._hasParams) {
+    if (listener._attached && (isRamping(listener._positionX) || isRamping(listener._positionY) || isRamping(listener._positionZ))) {
+      return;
+    }
+    setRampTarget(listener._positionX, p.x);
+    setRampTarget(listener._positionY, p.y);
+    setRampTarget(listener._positionZ, p.z);
+  } else {
+    listener._listener.setPosition(p.x, p.y, p.z);
+  }
+  listener._lastPosition = { x: p.x, y: p.y, z: p.z };
+}
+function updateListenerRotation(listener) {
+  if (quatEquals(listener._lastQuat, listener._rotationQuaternion)) {
+    return;
+  }
+  const forward = rotateByQuat(listener._rotationQuaternion, 0, 0, -1);
+  const up = rotateByQuat(listener._rotationQuaternion, 0, 1, 0);
+  if (listener._hasParams) {
+    if (listener._attached && (isRamping(listener._forwardX) || isRamping(listener._forwardY) || isRamping(listener._forwardZ) || isRamping(listener._upX) || isRamping(listener._upY) || isRamping(listener._upZ))) {
+      return;
+    }
+    setRampTarget(listener._forwardX, forward.x);
+    setRampTarget(listener._forwardY, forward.y);
+    setRampTarget(listener._forwardZ, forward.z);
+    setRampTarget(listener._upX, up.x);
+    setRampTarget(listener._upY, up.y);
+    setRampTarget(listener._upZ, up.z);
+  } else {
+    listener._listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
+  }
+  listener._lastQuat = { x: listener._rotationQuaternion.x, y: listener._rotationQuaternion.y, z: listener._rotationQuaternion.z, w: listener._rotationQuaternion.w };
+}
+function attachListener(listener, target, type) {
+  detachListener(listener);
+  listener._attached = target;
+  listener._attachmentType = toAttachmentFlags(type);
+  if (target.onDispose) {
+    listener._attachUnsub = target.onDispose.add(() => detachListener(listener));
+  }
+  listener._engine._spatialUpdaters.add(listener._update);
+  updateAttachedListener(listener);
+}
+function detachListener(listener) {
+  listener._attachUnsub?.();
+  listener._attachUnsub = null;
+  listener._attached = null;
+  listener._engine._spatialUpdaters.delete(listener._update);
+}
+function updateAttachedListener(listener) {
+  const target = listener._attached;
+  if (!target) {
+    return;
+  }
+  const { translation, rotation } = mat4Decompose(target.worldMatrix);
+  if (listener._attachmentType & ATTACH_POSITION) {
+    listener._position = translation;
+    updateListenerPosition(listener);
+  }
+  if (listener._attachmentType & ATTACH_ROTATION) {
+    listener._rotationQuaternion = rotation;
+    updateListenerRotation(listener);
+  }
+}
+function disposeSpatialListener(listener) {
+  detachListener(listener);
+  listener._engine._listener = null;
+}
+
+export { attachSpatialTarget, detachSpatialTarget, enableSpatial, ensureSpatialListener, setSpatialAutoUpdate, setSpatialListener, setSpatialListenerPosition, setSpatialOrientation, setSpatialPosition, updateSpatialAudio };
+//# sourceMappingURL=spatial.js.map

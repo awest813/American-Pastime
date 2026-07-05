@@ -1,0 +1,18 @@
+function addPassDependencies(pass, deps) {
+  if (Array.isArray(deps)) {
+    for (const dep of deps) {
+      pass._dependencies.add(dep);
+    }
+  } else {
+    pass._dependencies.add(deps);
+  }
+}
+function setRenderPassExecuteFunc(pass, fn) {
+  pass._executeFunc = fn;
+}
+function setRenderPassBeforeExecute(pass, fn) {
+  pass._beforeExecute = fn;
+}
+
+export { addPassDependencies, setRenderPassBeforeExecute, setRenderPassExecuteFunc };
+//# sourceMappingURL=pass.js.map

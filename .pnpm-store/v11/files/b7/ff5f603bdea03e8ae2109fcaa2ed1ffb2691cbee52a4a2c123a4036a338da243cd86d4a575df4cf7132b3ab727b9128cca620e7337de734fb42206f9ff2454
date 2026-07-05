@@ -1,0 +1,25 @@
+let _animBaseColorDefs = null;
+function collectBaseColorDefs(json) {
+  for (const anim of json.animations ?? []) {
+    for (const ch of anim.channels ?? []) {
+      const ptr = ch.target?.extensions?.KHR_animation_pointer?.pointer;
+      const m = ptr && /^\/materials\/(\d+)\/pbrMetallicRoughness\/baseColorFactor$/.exec(ptr);
+      const def = m && json.materials?.[+m[1]];
+      if (def) {
+        (_animBaseColorDefs ??= /* @__PURE__ */ new WeakSet()).add(def);
+      }
+    }
+  }
+}
+function whiteFallback(mat) {
+  if (mat._rawMatDef && _animBaseColorDefs?.has(mat._rawMatDef) && !mat._baseColorImage) {
+    const f = mat._baseColorFactor;
+    const real = [f[0], f[1], f[2], f[3]];
+    mat._baseColorFactor = [1, 1, 1, 1];
+    return { baseColorFactor: real };
+  }
+  return null;
+}
+
+export { collectBaseColorDefs, whiteFallback };
+//# sourceMappingURL=animation-pointer-basecolor.js.map

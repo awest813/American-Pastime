@@ -1,0 +1,66 @@
+import { enabledPlugins, bindPluginTextures, writePluginUbo, pluginSignature, buildPluginFragment } from './plugin-bridge-shared.js';
+
+const PLUGIN_INDEX_SHIFT = 24;
+let _sigToIndex = null;
+let _indexToEntry = null;
+let _counter = 0;
+function _resetState() {
+  _sigToIndex = /* @__PURE__ */ new Map();
+  _indexToEntry = /* @__PURE__ */ new Map();
+  _counter = 0;
+}
+function _indexFor(plugins) {
+  const sig = pluginSignature(plugins);
+  const map = _sigToIndex ??= /* @__PURE__ */ new Map();
+  let idx = map.get(sig);
+  if (idx === void 0) {
+    idx = ++_counter;
+    map.set(sig, idx);
+    (_indexToEntry ??= /* @__PURE__ */ new Map()).set(idx, { _plugins: plugins, _fragment: buildPluginFragment(plugins, idx, false)._fragment });
+  }
+  return idx;
+}
+const pbrPluginExt = {
+  id: "plugin",
+  phase: "fragment",
+  detect(mat) {
+    const plugins = mat.plugins;
+    if (!plugins?.length) {
+      return { f: 0, f2: 0 };
+    }
+    return { f: 0, f2: _indexFor(plugins) << PLUGIN_INDEX_SHIFT };
+  },
+  frag(ctx) {
+    const idx = ctx._features2 >>> PLUGIN_INDEX_SHIFT & 255;
+    if (!idx) {
+      return null;
+    }
+    return _indexToEntry?.get(idx)?._fragment ?? null;
+  },
+  writeUbo(data, mat, offsets) {
+    const plugins = mat.plugins;
+    if (plugins?.length) {
+      writePluginUbo(plugins, data, offsets);
+    }
+  },
+  bind(ctx, entries, b) {
+    const plugins = ctx._material.plugins;
+    return plugins?.length ? bindPluginTextures(plugins, entries, b) : b;
+  },
+  textures(mat, out) {
+    const plugins = mat.plugins;
+    if (!plugins?.length) {
+      return;
+    }
+    for (const p of enabledPlugins(plugins)) {
+      p.getActiveTextures?.(out);
+    }
+  }
+};
+function registerPbrPlugins(register) {
+  _resetState();
+  register(pbrPluginExt);
+}
+
+export { registerPbrPlugins };
+//# sourceMappingURL=pbr-plugin-bridge.js.map

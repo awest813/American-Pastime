@@ -1,0 +1,32 @@
+import { getViewProjectionMatrix, getViewMatrix } from '../camera/camera.js';
+import { packMat4IntoF32 } from '../math/pack-mat4-into-f32.js';
+
+function _packSceneUniforms(data, eng, scene, camera, aspect) {
+  data.fill(0);
+  const viewProj = getViewProjectionMatrix(camera, aspect);
+  const viewMat = getViewMatrix(camera);
+  const wm = camera.worldMatrix;
+  packMat4IntoF32(data, viewProj, 0);
+  packMat4IntoF32(data, viewMat, 16);
+  if (eng.useFloatingOrigin) {
+    data[32] = 0;
+    data[33] = 0;
+    data[34] = 0;
+  } else {
+    data[32] = wm[12];
+    data[33] = wm[13];
+    data[34] = wm[14];
+  }
+  data[87] = eng.canvas.width;
+  data[36] = scene.envRotationY || 0;
+  const envTextures = scene._envTextures;
+  const img = scene.imageProcessing;
+  data[76] = img.exposure;
+  data[77] = img.contrast;
+  data[78] = envTextures?.lodGenerationScale ?? 0.8;
+  data[79] = +img.toneMappingEnabled;
+  data[37] = eng.canvas.height;
+}
+
+export { _packSceneUniforms };
+//# sourceMappingURL=scene-uniforms-pack.js.map

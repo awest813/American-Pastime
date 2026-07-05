@@ -1,0 +1,7 @@
+const TU = globalThis.GPUTextureUsage;
+const BU = globalThis.GPUBufferUsage;
+const SS = globalThis.GPUShaderStage;
+const CW = globalThis.GPUColorWrite;
+
+export { BU, CW, SS, TU };
+//# sourceMappingURL=gpu-flags.js.map

@@ -1,0 +1,34 @@
+var GeometryTextureType = /* @__PURE__ */ ((GeometryTextureType2) => {
+  GeometryTextureType2[GeometryTextureType2["IRRADIANCE"] = 0] = "IRRADIANCE";
+  GeometryTextureType2[GeometryTextureType2["WORLD_POSITION"] = 1] = "WORLD_POSITION";
+  GeometryTextureType2[GeometryTextureType2["LOCAL_POSITION"] = 2] = "LOCAL_POSITION";
+  GeometryTextureType2[GeometryTextureType2["REFLECTIVITY"] = 3] = "REFLECTIVITY";
+  GeometryTextureType2[GeometryTextureType2["VIEW_DEPTH"] = 4] = "VIEW_DEPTH";
+  GeometryTextureType2[GeometryTextureType2["NORMALIZED_VIEW_DEPTH"] = 5] = "NORMALIZED_VIEW_DEPTH";
+  GeometryTextureType2[GeometryTextureType2["SCREENSPACE_DEPTH"] = 6] = "SCREENSPACE_DEPTH";
+  GeometryTextureType2[GeometryTextureType2["VIEW_NORMAL"] = 7] = "VIEW_NORMAL";
+  GeometryTextureType2[GeometryTextureType2["WORLD_NORMAL"] = 8] = "WORLD_NORMAL";
+  GeometryTextureType2[GeometryTextureType2["ALBEDO"] = 9] = "ALBEDO";
+  GeometryTextureType2[GeometryTextureType2["LINEAR_VELOCITY"] = 10] = "LINEAR_VELOCITY";
+  return GeometryTextureType2;
+})(GeometryTextureType || {});
+const ZERO = { r: 0, g: 0, b: 0, a: 0 };
+const ONE = { r: 1, g: 1, b: 1, a: 1 };
+const GEOMETRY_TEXTURE_DESCRIPTIONS = [
+  { name: "Irradiance", defaultFormat: "rgba16float", clearValue: ZERO },
+  { name: "WorldPosition", defaultFormat: "rgba16float", clearValue: ZERO },
+  { name: "LocalPosition", defaultFormat: "rgba16float", clearValue: ZERO },
+  { name: "Reflectivity", defaultFormat: "rgba8unorm", clearValue: ZERO },
+  { name: "ViewDepth", defaultFormat: "r32float", clearValue: ZERO },
+  { name: "NormalizedViewDepth", defaultFormat: "r16float", clearValue: ONE },
+  // Reverse-Z: clip-space Z maps far→0, near→1, so the background (no geometry)
+  // clears to 0 (far). BJS clears this to 1, which is incorrect under reverse-Z.
+  { name: "ScreenspaceDepth", defaultFormat: "r16float", clearValue: ZERO },
+  { name: "ViewNormal", defaultFormat: "rgba16float", clearValue: ZERO },
+  { name: "WorldNormal", defaultFormat: "rgba16float", clearValue: ZERO },
+  { name: "Albedo", defaultFormat: "rgba8unorm", clearValue: ZERO },
+  { name: "LinearVelocity", defaultFormat: "rgba16float", clearValue: ZERO }
+];
+
+export { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType };
+//# sourceMappingURL=geometry-types.js.map

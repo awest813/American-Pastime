@@ -1,0 +1,16 @@
+import { bumpVisibilityEpoch } from '../engine/engine.js';
+
+function setSubtreeVisible(node, v) {
+  cascade(node, v);
+  bumpVisibilityEpoch();
+}
+function cascade(node, v) {
+  node.visible = v;
+  const kids = node.children;
+  for (let i = 0; i < kids.length; i++) {
+    cascade(kids[i], v);
+  }
+}
+
+export { setSubtreeVisible };
+//# sourceMappingURL=visibility.js.map

@@ -1,0 +1,33 @@
+import { createRampParam, setRampTarget } from './audio-param.js';
+
+function createMainOut(ctx, clock) {
+  const gain = new GainNode(ctx);
+  gain.connect(ctx.destination);
+  return { _gain: gain, _volumeRamp: createRampParam(gain.gain, clock) };
+}
+function setMainOutVolume(mainOut, value, options) {
+  setRampTarget(mainOut._volumeRamp, value, options);
+}
+function disposeMainOut(mainOut) {
+  mainOut._gain.disconnect();
+}
+function createMainBus(name, ctx, clock, mainOut) {
+  const volume = new GainNode(ctx);
+  volume.connect(mainOut._gain);
+  return {
+    name,
+    _volume: volume,
+    _volumeRamp: createRampParam(volume.gain, clock),
+    _in: volume,
+    _out: volume
+  };
+}
+function setMainBusVolume(bus, value, options) {
+  setRampTarget(bus._volumeRamp, value, options);
+}
+function disposeMainBus(bus) {
+  bus._volume.disconnect();
+}
+
+export { createMainBus, createMainOut, disposeMainBus, disposeMainOut, setMainBusVolume, setMainOutVolume };
+//# sourceMappingURL=bus.js.map

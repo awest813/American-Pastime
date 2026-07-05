@@ -1,0 +1,384 @@
+import { U8 } from '../engine/typed-arrays.js';
+import { BU, SS } from '../engine/gpu-flags.js';
+import { registerRenderingContext, unregisterRenderingContext } from '../engine/engine.js';
+import { createRenderTarget, disposeRenderTarget, buildRenderTarget, targetSignatureKey } from '../engine/render-target.js';
+
+const DEFAULT_VERTEX_WGSL = `struct EffectVertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>};
+@vertex fn effectFullscreenVertex(@builtin(vertex_index) vertexIndex:u32)->EffectVertexOutput{var positions=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));let p=positions[vertexIndex];var out:EffectVertexOutput;out.position=vec4<f32>(p,0.0,1.0);out.uv=p*0.5+vec2<f32>(0.5,0.5);return out;}`;
+function createEffectWrapper(engine, options) {
+  const eng = engine;
+  const wrapper = {
+    name: options.name ?? "effect-wrapper",
+    options,
+    _engine: eng,
+    _shader: null,
+    _bindGroupLayout: null,
+    _pipelineLayout: null,
+    _bindGroup: null,
+    _bindGroupDirty: true,
+    _pipelines: null,
+    _uniforms: [],
+    _textures: []
+  };
+  createBindingSlots(wrapper);
+  return wrapper;
+}
+function setEffectUniforms(wrapper, data) {
+  const internal = wrapper;
+  if (isBufferData(data)) {
+    const slot = internal._uniforms[0];
+    if (!slot) {
+      throw new Error("setEffectUniforms: wrapper has no uniform binding.");
+    }
+    writeUniformSlot(internal, slot, data);
+    return;
+  }
+  for (const key of Object.keys(data)) {
+    const slot = findUniformSlot(internal, key);
+    if (!slot) {
+      throw new Error(`setEffectUniforms: unknown uniform binding "${key}".`);
+    }
+    writeUniformSlot(internal, slot, data[key]);
+  }
+}
+function setEffectTexture(wrapper, bindingNameOrIndex, texture) {
+  const internal = wrapper;
+  const slot = findTextureSlot(internal, bindingNameOrIndex);
+  if (!slot) {
+    throw new Error(`setEffectTexture: unknown texture binding "${String(bindingNameOrIndex)}".`);
+  }
+  slot.texture = texture;
+  internal._bindGroupDirty = true;
+}
+function createEffectRenderTask(config, engine, scene) {
+  const eng = engine;
+  const effect = config.effect;
+  const rt = config.target;
+  config.clearColor ??= { r: 0, g: 0, b: 0, a: 1 };
+  const sampleCount = rt._descriptor.samples ?? 1;
+  const targetSignature = {
+    _colorFormat: rt._descriptor.format,
+    _sampleCount: sampleCount
+  };
+  const colorAttachment = { loadOp: "clear", storeOp: "store" };
+  const task = {
+    name: config.name,
+    _config: config,
+    engine: eng,
+    scene,
+    _passes: [],
+    _rt: rt,
+    _targetSignature: targetSignature,
+    _renderPassDescriptor: { label: config.name, colorAttachments: [colorAttachment] },
+    _colorAttachment: colorAttachment,
+    _pipeline: null,
+    _bindGroup: null,
+    record() {
+      buildRenderTarget(rt, eng);
+      task._pipeline = getEffectPipeline(effect, task._targetSignature);
+      task._bindGroup = getEffectBindGroup(effect);
+    },
+    execute() {
+      const pipeline = task._pipeline;
+      if (!pipeline) {
+        throw new Error(`EffectRenderTask "${task.name}" executed before record().`);
+      }
+      task._bindGroup = getEffectBindGroup(effect);
+      applyColorAttachmentState(task._colorAttachment, rt, void 0, task._config.clear !== false, task._config.clearColor);
+      const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+      pass.setPipeline(pipeline);
+      if (task._bindGroup) {
+        pass.setBindGroup(0, task._bindGroup);
+      }
+      pass.draw(3);
+      pass.end();
+      return 1;
+    },
+    dispose() {
+      task._passes.length = 0;
+      disposeRenderTarget(task._rt);
+      task._pipeline = null;
+      task._bindGroup = null;
+    }
+  };
+  return task;
+}
+function disposeEffectWrapper(wrapper) {
+  const internal = wrapper;
+  for (const slot of internal._uniforms) {
+    slot.buffer.destroy();
+  }
+  internal._uniforms.length = 0;
+  internal._textures.length = 0;
+  internal._pipelines?.clear();
+  internal._pipelines = null;
+  internal._shader = null;
+  internal._bindGroupLayout = null;
+  internal._pipelineLayout = null;
+  internal._bindGroup = null;
+  internal._bindGroupDirty = true;
+}
+function createEffectRenderer(surface, effect, options) {
+  const eng = surface.engine;
+  const ew = effect;
+  const name = options?.name ?? effect.name;
+  const clear = options?.clear !== false;
+  const clearColor = options?.clearColor ?? { r: 0, g: 0, b: 0, a: 1 };
+  const update = options?.update;
+  const useMsaa = surface.msaaSamples > 1;
+  const rt = useMsaa ? createRenderTarget({ lbl: `${name}-msaa`, format: surface.format, samples: surface.msaaSamples, size: surface }) : surface.scRT;
+  const resolveRt = useMsaa ? surface.scRT : void 0;
+  const targetSignature = {
+    _colorFormat: rt._descriptor.format,
+    _sampleCount: rt._descriptor.samples ?? 1
+  };
+  const colorAttachment = {
+    view: void 0,
+    loadOp: "clear",
+    storeOp: "store"
+  };
+  const renderPassDescriptor = { label: name, colorAttachments: [colorAttachment] };
+  const er = {
+    name,
+    clearColor,
+    _drawCallsPre: 0,
+    _surface: surface,
+    _effect: ew,
+    _clear: clear,
+    _rt: rt,
+    _targetSignature: targetSignature,
+    _renderPassDescriptor: renderPassDescriptor,
+    _colorAttachment: colorAttachment,
+    _pipeline: null,
+    _bindGroup: null,
+    _disposed: false,
+    _update() {
+      update?.(eng._currentDelta);
+    },
+    _record() {
+      if (er._disposed) {
+        return 0;
+      }
+      ensureRtCanvasSize(er._rt);
+      applyColorAttachmentState(er._colorAttachment, er._rt, resolveRt, er._clear, er.clearColor);
+      const encoder = er._surface.engine._currentEncoder;
+      if (!encoder) {
+        return 0;
+      }
+      const pipeline = er._pipeline;
+      if (!pipeline) {
+        throw new Error(`EffectRenderer "${er.name}" recorded before registerEffectRenderer().`);
+      }
+      const pass = encoder.beginRenderPass(er._renderPassDescriptor);
+      pass.setPipeline(pipeline);
+      if (er._bindGroup) {
+        pass.setBindGroup(0, er._bindGroup);
+      }
+      pass.draw(3);
+      pass.end();
+      return 1;
+    },
+    _resize() {
+      if (er._disposed) {
+        return;
+      }
+      buildRenderTarget(er._rt, er._surface.engine);
+    }
+  };
+  return er;
+}
+function registerEffectRenderer(er) {
+  const internal = er;
+  prepareEffectRenderer(internal);
+  registerRenderingContext(internal._surface, er);
+}
+function unregisterEffectRenderer(er) {
+  unregisterRenderingContext(er._surface, er);
+}
+function disposeEffectRenderer(er) {
+  const internal = er;
+  if (internal._disposed) {
+    return;
+  }
+  unregisterEffectRenderer(er);
+  disposeRenderTarget(internal._rt);
+  internal._disposed = true;
+}
+function createBindingSlots(wrapper) {
+  const layouts = [...wrapper.options.bindings ?? []].sort((a, b) => a.binding - b.binding);
+  const seen = /* @__PURE__ */ new Set();
+  for (const layout of layouts) {
+    if (seen.has(layout.binding)) {
+      throw new Error(`createEffectWrapper: duplicate binding ${layout.binding}.`);
+    }
+    seen.add(layout.binding);
+    if (layout.kind === "uniform") {
+      const byteLength = align4(layout.uniformByteLength ?? 16);
+      const buffer = wrapper._engine._device.createBuffer({
+        label: `${wrapper.name}-${layout.name ?? layout.binding}-ubo`,
+        size: byteLength,
+        usage: BU.UNIFORM | BU.COPY_DST
+      });
+      wrapper._uniforms.push({ layout, buffer, byteLength });
+    } else if (layout.kind === "texture") {
+      wrapper._textures.push({ layout, texture: null });
+    }
+  }
+}
+function applyColorAttachmentState(att, rt, resolveRt, clear, clearColor) {
+  att.clearValue = clearColor;
+  att.loadOp = clear ? "clear" : "load";
+  att.view = rt._colorView;
+  att.resolveTarget = resolveRt?._colorView ?? void 0;
+}
+function ensureRtCanvasSize(rt) {
+  const size = rt._descriptor.size;
+  if (!("canvas" in size)) {
+    return;
+  }
+  const canvas = size.canvas;
+  if (rt._width === canvas.width && rt._height === canvas.height) {
+    return;
+  }
+  buildRenderTarget(rt, size.engine);
+}
+function getEffectPipeline(wrapper, targetSignature) {
+  const key = targetSignatureKey(targetSignature);
+  if (!wrapper._pipelines) {
+    wrapper._pipelines = /* @__PURE__ */ new Map();
+  }
+  const hit = wrapper._pipelines.get(key);
+  if (hit) {
+    return hit;
+  }
+  const device = wrapper._engine._device;
+  const pipeline = device.createRenderPipeline({
+    label: `${wrapper.name}-${key}`,
+    layout: getPipelineLayout(wrapper),
+    vertex: { module: getShaderModule(wrapper), entryPoint: "effectFullscreenVertex" },
+    fragment: {
+      module: getShaderModule(wrapper),
+      entryPoint: "effectFragment",
+      targets: [{ format: targetSignature._colorFormat, blend: wrapper.options.blend }]
+    },
+    primitive: { topology: "triangle-list" },
+    multisample: { count: targetSignature._sampleCount }
+  });
+  wrapper._pipelines.set(key, pipeline);
+  return pipeline;
+}
+function getShaderModule(wrapper) {
+  if (!wrapper._shader) {
+    wrapper._shader = wrapper._engine._device.createShaderModule({
+      label: wrapper.name,
+      code: `${wrapper.options.vertexWGSL ?? DEFAULT_VERTEX_WGSL}
+${wrapper.options.fragmentWGSL}`
+    });
+  }
+  return wrapper._shader;
+}
+function getPipelineLayout(wrapper) {
+  if (!wrapper._pipelineLayout) {
+    wrapper._pipelineLayout = wrapper._engine._device.createPipelineLayout({
+      label: `${wrapper.name}-pipeline-layout`,
+      bindGroupLayouts: [getBindGroupLayout(wrapper)]
+    });
+  }
+  return wrapper._pipelineLayout;
+}
+function getBindGroupLayout(wrapper) {
+  if (!wrapper._bindGroupLayout) {
+    const entries = (wrapper.options.bindings ?? []).slice().sort((a, b) => a.binding - b.binding).map((layout) => bindingLayoutEntry(layout));
+    wrapper._bindGroupLayout = wrapper._engine._device.createBindGroupLayout({
+      label: `${wrapper.name}-bgl`,
+      entries
+    });
+  }
+  return wrapper._bindGroupLayout;
+}
+function bindingLayoutEntry(layout) {
+  const visibility = layout.visibility ?? SS.FRAGMENT;
+  if (layout.kind === "uniform") {
+    return { binding: layout.binding, visibility, buffer: { type: "uniform" } };
+  }
+  if (layout.kind === "texture") {
+    return { binding: layout.binding, visibility, texture: { sampleType: layout.textureSampleType ?? "float", viewDimension: layout.viewDimension ?? "2d" } };
+  }
+  return { binding: layout.binding, visibility, sampler: { type: layout.samplerType ?? "filtering" } };
+}
+function getEffectBindGroup(wrapper) {
+  const bindings = wrapper.options.bindings ?? [];
+  if (bindings.length === 0) {
+    return null;
+  }
+  if (!wrapper._bindGroupDirty && wrapper._bindGroup) {
+    return wrapper._bindGroup;
+  }
+  const entries = bindings.slice().sort((a, b) => a.binding - b.binding).map((layout) => bindGroupEntry(wrapper, layout));
+  wrapper._bindGroup = wrapper._engine._device.createBindGroup({
+    label: `${wrapper.name}-bg`,
+    layout: getBindGroupLayout(wrapper),
+    entries
+  });
+  wrapper._bindGroupDirty = false;
+  return wrapper._bindGroup;
+}
+function prepareEffectRenderer(er) {
+  er._pipeline ??= getEffectPipeline(er._effect, er._targetSignature);
+  er._bindGroup = getEffectBindGroup(er._effect);
+}
+function bindGroupEntry(wrapper, layout) {
+  if (layout.kind === "uniform") {
+    const slot = findUniformSlot(wrapper, layout.binding);
+    if (!slot) {
+      throw new Error(`Effect "${wrapper.name}" missing uniform binding ${layout.binding}.`);
+    }
+    return { binding: layout.binding, resource: { buffer: slot.buffer, size: slot.byteLength } };
+  }
+  if (layout.kind === "texture") {
+    const slot = findTextureSlot(wrapper, layout.binding);
+    if (!slot?.texture) {
+      throw new Error(`Effect "${wrapper.name}" missing texture binding ${layout.binding}.`);
+    }
+    return { binding: layout.binding, resource: slot.texture.view };
+  }
+  const textureSlot = layout.textureBinding != null ? findTextureSlot(wrapper, layout.textureBinding) : wrapper._textures[0];
+  if (!textureSlot?.texture) {
+    throw new Error(`Effect "${wrapper.name}" missing texture for sampler binding ${layout.binding}.`);
+  }
+  return { binding: layout.binding, resource: textureSlot.texture.sampler };
+}
+function findUniformSlot(wrapper, bindingNameOrIndex) {
+  return wrapper._uniforms.find((slot) => matchesBinding(slot.layout, bindingNameOrIndex));
+}
+function findTextureSlot(wrapper, bindingNameOrIndex) {
+  return wrapper._textures.find((slot) => matchesBinding(slot.layout, bindingNameOrIndex));
+}
+function matchesBinding(layout, bindingNameOrIndex) {
+  if (typeof bindingNameOrIndex === "number") {
+    return layout.binding === bindingNameOrIndex;
+  }
+  return layout.name === bindingNameOrIndex || String(layout.binding) === bindingNameOrIndex;
+}
+function writeUniformSlot(wrapper, slot, data) {
+  const bytes = toBytes(data);
+  if (bytes.byteLength > slot.byteLength) {
+    throw new Error(`writeUniformSlot: ${bytes.byteLength} bytes exceeds uniform binding ${slot.layout.binding} size ${slot.byteLength}.`);
+  }
+  wrapper._engine._device.queue.writeBuffer(slot.buffer, 0, bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+function toBytes(data) {
+  if (data instanceof ArrayBuffer) {
+    return new U8(data);
+  }
+  return new U8(data.buffer, data.byteOffset, data.byteLength);
+}
+function isBufferData(data) {
+  return data instanceof ArrayBuffer || ArrayBuffer.isView(data);
+}
+function align4(value) {
+  return value + 3 & -4;
+}
+
+export { createEffectRenderTask, createEffectRenderer, createEffectWrapper, disposeEffectRenderer, disposeEffectWrapper, registerEffectRenderer, setEffectTexture, setEffectUniforms, unregisterEffectRenderer };
+//# sourceMappingURL=effect-renderer.js.map

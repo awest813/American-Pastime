@@ -1,0 +1,15 @@
+import { type FunctionComponent } from "react";
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type IAttractorSource } from "./attractorAdapter";
+type AttractorListProps = {
+    scene: Scene;
+    attractorSource: IAttractorSource;
+};
+/**
+ * Component that displays a list of attractors with debug visualization and editing controls.
+ * Supports both CPU particle systems (editable) and Node particle systems (read-only).
+ * @param props The component props containing the scene and attractor source.
+ * @returns The rendered AttractorList component.
+ */
+export declare const AttractorList: FunctionComponent<AttractorListProps>;
+export {};

@@ -1,0 +1,11 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../../services/sceneContext";
+import { type ISelectionService } from "../../services/selectionService";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+import "@babylonjs/core/Particles/webgl2ParticleSystem.js";
+import "@babylonjs/core/Rendering/prePassRendererSceneComponent.js";
+export declare const CreateToolsServiceDefinition: ServiceDefinition<[], [IShellService, ISceneContext, ISelectionService]>;
+declare const _default: {
+    readonly serviceDefinitions: readonly [ServiceDefinition<[], [IShellService, ISceneContext, ISelectionService]>];
+};
+export default _default;

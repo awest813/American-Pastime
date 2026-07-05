@@ -1,0 +1,5 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../../sceneContext";
+import { type ISceneExplorerService } from "./sceneExplorerService";
+import { type IWatcherService } from "../../watcherService";
+export declare const SoundExplorerServiceDefinition: ServiceDefinition<[], [ISceneExplorerService, ISceneContext, IWatcherService]>;

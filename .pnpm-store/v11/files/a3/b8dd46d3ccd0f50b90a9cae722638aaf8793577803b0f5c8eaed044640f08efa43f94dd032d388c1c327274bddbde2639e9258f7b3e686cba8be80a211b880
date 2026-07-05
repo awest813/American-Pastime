@@ -1,0 +1,15 @@
+async function registerPbrRefraction(scene, engine, register) {
+  let dispersionSampleWgsl;
+  for (const mesh of scene.meshes) {
+    const refr = mesh.material?.subsurface?.refraction;
+    if (refr?.dispersion) {
+      dispersionSampleWgsl = (await import('./fragments/refraction-dispersion-wgsl.js')).DISPERSION_SAMPLE_WGSL;
+      break;
+    }
+  }
+  const mod = await import('./pbr-transmission-ext.js');
+  mod.registerPbrTransmission(scene, engine, register, dispersionSampleWgsl);
+}
+
+export { registerPbrRefraction };
+//# sourceMappingURL=pbr-refraction.js.map

@@ -1,0 +1,16 @@
+import { type FunctionComponent } from "react";
+import { type IDisposable } from "@babylonjs/core/index.js";
+type CommonEntity = {
+    readonly id?: number;
+    readonly uniqueId?: number;
+    name?: string;
+    getClassName?: () => string;
+};
+export declare function IsCommonEntity(entity: unknown): entity is CommonEntity;
+export declare const CommonGeneralProperties: FunctionComponent<{
+    commonEntity: CommonEntity;
+}>;
+export declare const DisposableGeneralProperties: FunctionComponent<{
+    disposableEntity: IDisposable;
+}>;
+export {};

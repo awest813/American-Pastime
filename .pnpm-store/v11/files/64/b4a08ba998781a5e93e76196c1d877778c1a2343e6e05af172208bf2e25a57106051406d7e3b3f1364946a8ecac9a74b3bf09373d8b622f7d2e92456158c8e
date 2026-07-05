@@ -1,0 +1,1 @@
+{"version":3,"file":"vec3-up.js","sources":["../../../src/math/vec3-up.ts"],"sourcesContent":["import type { Vec3 } from \"./types.js\";\n\n/** Unit vector pointing up on the positive Y axis. */\nexport const Vec3Up: Readonly<Vec3> = { x: 0, y: 1, z: 0 };\n"],"names":[],"mappings":"AAGO,MAAM,SAAyB,EAAE,CAAA,EAAG,GAAG,CAAA,EAAG,CAAA,EAAG,GAAG,CAAA;;;;"}

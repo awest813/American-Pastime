@@ -1,0 +1,24 @@
+import { type IReadonlyObservable, type Nullable } from "@babylonjs/core/index.js";
+import { type IService, type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISettingsService } from "@babylonjs/shared-ui-components/modularTool/services/settingsService.js";
+import { type ISceneContext } from "./sceneContext";
+import { type ISettingsStore } from "@babylonjs/shared-ui-components/modularTool/services/settingsStore.js";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+/**
+ * The unique identity symbol for the selection service.
+ */
+export declare const SelectionServiceIdentity: unique symbol;
+/**
+ * Tracks the currently selected entity.
+ */
+export interface ISelectionService extends IService<typeof SelectionServiceIdentity> {
+    /**
+     * Gets or sets the currently selected entity.
+     */
+    selectedEntity: Nullable<object>;
+    /**
+     * An observable that notifies when the selected entity changes.
+     */
+    readonly onSelectedEntityChanged: IReadonlyObservable<void>;
+}
+export declare const SelectionServiceDefinition: ServiceDefinition<[ISelectionService], [IShellService, ISettingsStore, ISettingsService, ISceneContext]>;

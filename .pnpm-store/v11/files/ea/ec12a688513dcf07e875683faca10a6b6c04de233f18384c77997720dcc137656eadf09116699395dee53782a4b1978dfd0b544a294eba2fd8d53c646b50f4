@@ -1,0 +1,11 @@
+import { type ParticleSystem } from "@babylonjs/core/Particles/particleSystem.js";
+import { type FunctionComponent } from "react";
+/**
+ * Display attractor-related properties for a particle system.
+ * Supports both CPU particle systems (editable) and Node particle systems (read-only).
+ * @param props Component props.
+ * @returns Render property lines.
+ */
+export declare const ParticleSystemAttractorProperties: FunctionComponent<{
+    particleSystem: ParticleSystem;
+}>;

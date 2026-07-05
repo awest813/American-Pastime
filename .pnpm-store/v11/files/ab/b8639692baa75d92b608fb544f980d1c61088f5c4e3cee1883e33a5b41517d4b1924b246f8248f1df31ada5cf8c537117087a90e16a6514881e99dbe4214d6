@@ -1,0 +1,10 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+import { type ISceneContext } from "../sceneContext";
+import { type ISelectionService } from "../selectionService";
+/**
+ * Inspector pane service that hosts the Project Authoring pane. Combines
+ * smart-asset management (assets list, asset map I/O) with override-driven
+ * scene authoring (material assignment, override summary).
+ */
+export declare const BabylonProjectAuthoringServiceDefinition: ServiceDefinition<[], [IShellService, ISceneContext, ISelectionService]>;

@@ -1,0 +1,14 @@
+function linearToSrgbByte(v) {
+  const c = Math.max(0, Math.min(1, v));
+  return Math.round((c <= 31308e-7 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255);
+}
+function srgbByteToLinear(b) {
+  const c = Math.max(0, Math.min(255, b)) / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function packedSrgbToLinearRgba(packed, alpha = 1) {
+  return [srgbByteToLinear(packed >> 16 & 255), srgbByteToLinear(packed >> 8 & 255), srgbByteToLinear(packed & 255), alpha];
+}
+
+export { linearToSrgbByte, packedSrgbToLinearRgba, srgbByteToLinear };
+//# sourceMappingURL=color.js.map

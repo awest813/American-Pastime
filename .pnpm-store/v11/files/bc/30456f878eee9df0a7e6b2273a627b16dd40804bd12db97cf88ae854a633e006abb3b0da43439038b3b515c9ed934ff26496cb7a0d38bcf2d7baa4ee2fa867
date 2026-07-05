@@ -1,0 +1,6 @@
+import { type FunctionComponent } from "react";
+/**
+ * Main canvas area containing the graph, playhead, and frame bars
+ * @returns The canvas component
+ */
+export declare const Canvas: FunctionComponent;

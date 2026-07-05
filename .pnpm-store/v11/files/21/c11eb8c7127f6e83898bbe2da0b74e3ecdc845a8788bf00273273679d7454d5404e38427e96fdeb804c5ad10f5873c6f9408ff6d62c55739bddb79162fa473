@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "clamp", {
+    enumerable: true,
+    get: function() {
+        return _clamp.clamp;
+    }
+});
+const _clamp = require("./clamp");
+
+//# sourceMappingURL=index.js.map

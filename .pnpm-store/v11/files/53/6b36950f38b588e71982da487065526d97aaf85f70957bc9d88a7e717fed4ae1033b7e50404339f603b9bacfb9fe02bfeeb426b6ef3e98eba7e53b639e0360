@@ -1,0 +1,18 @@
+function _resolveStencil(stencil) {
+  const op = {
+    compare: stencil.compare ?? "always",
+    passOp: stencil.passOp ?? "keep",
+    failOp: stencil.failOp ?? "keep",
+    depthFailOp: stencil.depthFailOp ?? "keep"
+  };
+  const readMask = stencil.readMask ?? 255;
+  const writeMask = stencil.writeMask ?? 255;
+  return {
+    // Front and back share the same ops object — GPUStencilFaceState is read by value at pipeline creation.
+    _desc: { stencilFront: op, stencilBack: op, stencilReadMask: readMask, stencilWriteMask: writeMask },
+    _key: `st:${op.compare}:${op.passOp}:${op.failOp}:${op.depthFailOp}:${readMask}:${writeMask}`
+  };
+}
+
+export { _resolveStencil };
+//# sourceMappingURL=stencil-state.js.map

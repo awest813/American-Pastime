@@ -1,0 +1,36 @@
+import { mat4Invert } from '../math/mat4-invert.js';
+
+function createPickingRay(x, y, vpMatrix, width, height) {
+  const invVP = mat4Invert(vpMatrix);
+  if (!invVP) {
+    return null;
+  }
+  const ndcX = 2 * x / width - 1;
+  const ndcY = 1 - 2 * y / height;
+  const near = unprojectPoint(invVP, ndcX, ndcY, 1);
+  const far = unprojectPoint(invVP, ndcX, ndcY, 0);
+  const dx = far[0] - near[0];
+  const dy = far[1] - near[1];
+  const dz = far[2] - near[2];
+  const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (len < 1e-10) {
+    return null;
+  }
+  const invLen = 1 / len;
+  return {
+    origin: near,
+    direction: [dx * invLen, dy * invLen, dz * invLen],
+    length: len
+  };
+}
+function unprojectPoint(invVP, ndcX, ndcY, depth) {
+  const x = invVP[0] * ndcX + invVP[4] * ndcY + invVP[8] * depth + invVP[12];
+  const y = invVP[1] * ndcX + invVP[5] * ndcY + invVP[9] * depth + invVP[13];
+  const z = invVP[2] * ndcX + invVP[6] * ndcY + invVP[10] * depth + invVP[14];
+  const w = invVP[3] * ndcX + invVP[7] * ndcY + invVP[11] * depth + invVP[15];
+  const invW = 1 / w;
+  return [x * invW, y * invW, z * invW];
+}
+
+export { createPickingRay };
+//# sourceMappingURL=ray.js.map

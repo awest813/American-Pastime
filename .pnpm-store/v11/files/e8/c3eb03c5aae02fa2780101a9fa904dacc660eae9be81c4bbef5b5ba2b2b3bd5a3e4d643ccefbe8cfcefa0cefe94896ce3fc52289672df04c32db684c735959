@@ -1,0 +1,58 @@
+import { makeSpritePrologueWgsl } from './sprite-pipeline.js';
+import { _registerSpriteCoverageGammaHook } from './sprite-coverage-gamma-hook.js';
+
+function makeCoverageGammaWgsl(hasDepth, spriteGroupIndex, uvScroll) {
+  return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
+@fragment
+fn fs(in: O) -> @location(0) vec4f {
+let s = textureSample(atlasTex, atlasSamp, in.uv);
+let a = pow(s.a, L.aa.x);
+return vec4f(s.rgb, a) * in.tint * L.opacityMul;
+}`;
+}
+let _shaderCache = null;
+function getCoverageGammaShaderModule(engine, hasDepth, uvScroll) {
+  const device = engine._device;
+  const cache = _shaderCache ??= /* @__PURE__ */ new WeakMap();
+  let perDevice = cache.get(device);
+  if (!perDevice) {
+    perDevice = /* @__PURE__ */ new Map();
+    cache.set(device, perDevice);
+  }
+  const key = `${hasDepth ? 1 : 0}:${uvScroll ? 1 : 0}`;
+  let module = perDevice.get(key);
+  if (!module) {
+    module = device.createShaderModule({ code: makeCoverageGammaWgsl(hasDepth, hasDepth ? 1 : 0, uvScroll) });
+    perDevice.set(key, module);
+  }
+  return module;
+}
+function isGammaActive(layer) {
+  const g = layer._coverageGamma;
+  return g != null && Number.isFinite(g) && g > 0 && g !== 1;
+}
+const COVERAGE_GAMMA_HOOK = {
+  pipelineKeyPart(layer) {
+    return isGammaActive(layer) ? "1" : "0";
+  },
+  shaderModule(engine, hasDepth, layer) {
+    if (!isGammaActive(layer)) {
+      return null;
+    }
+    return getCoverageGammaShaderModule(engine, hasDepth, layer._uvScrollAttr != null);
+  },
+  writeUbo(layer, ubo) {
+    if (isGammaActive(layer)) {
+      ubo[12] = 1 / layer._coverageGamma;
+    } else {
+      ubo[12] = 0;
+    }
+  }
+};
+function setSprite2DCoverageGamma(layer, gamma) {
+  _registerSpriteCoverageGammaHook(COVERAGE_GAMMA_HOOK);
+  layer._coverageGamma = gamma;
+}
+
+export { setSprite2DCoverageGamma };
+//# sourceMappingURL=sprite-2d-coverage-gamma.js.map

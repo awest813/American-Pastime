@@ -1,0 +1,111 @@
+function createAnimationTask(update, options) {
+  return {
+    _entityType: "animation-task",
+    active: true,
+    _update: update,
+    _category: options?.category,
+    _dispose: options?.dispose
+  };
+}
+function createAnimationManager(options) {
+  return {
+    animations: [],
+    fixedDeltaMs: options?.fixedDeltaMs ?? 0,
+    running: false,
+    engine: options?.engine,
+    onUpdate: options?.onUpdate,
+    _rafId: 0,
+    _lastTime: 0
+  };
+}
+function setAnimationTaskCategoryHandler(manager, category, handler) {
+  if (!category) {
+    throw new Error("Animation task category is required.");
+  }
+  manager._taskCategory = category;
+  manager._taskCategoryHandler = handler;
+}
+function addAnimationTask(manager, task) {
+  const owner = task._owner;
+  if (owner === manager) {
+    return;
+  }
+  if (owner) {
+    throw new Error("AnimationTask is already attached to another AnimationManager");
+  }
+  task.active = true;
+  task._owner = manager;
+  manager.animations.push(task);
+}
+function removeAnimationTask(manager, task) {
+  const index = manager.animations.indexOf(task);
+  if (index !== -1) {
+    removeAnimationTaskAt(manager, index);
+  } else if (task._owner === manager) {
+    task._owner = void 0;
+    task.active = false;
+  }
+}
+function clearAnimationManager(manager) {
+  while (manager.animations.length > 0) {
+    removeAnimationTaskAt(manager, manager.animations.length - 1);
+  }
+}
+function updateAnimationManager(manager, deltaMs) {
+  const step = manager.fixedDeltaMs > 0 ? manager.fixedDeltaMs : deltaMs;
+  if (!Number.isFinite(step) || step < 0) {
+    return;
+  }
+  const handledCategory = manager._taskCategoryHandler?.(manager, step) ? manager._taskCategory : void 0;
+  const tasks = manager.animations.slice();
+  for (let index = 0; index < tasks.length; index++) {
+    const task = tasks[index];
+    if (!task.active || task._category && task._category === handledCategory) {
+      continue;
+    }
+    task._update(manager, step, task);
+  }
+}
+function startAnimationManager(manager) {
+  if (manager.running) {
+    return;
+  }
+  if (typeof requestAnimationFrame !== "function" || typeof cancelAnimationFrame !== "function") {
+    throw new Error("AnimationManager autonomous mode requires requestAnimationFrame");
+  }
+  manager.running = true;
+  manager._lastTime = 0;
+  const tick = (now) => {
+    if (!manager.running) {
+      return;
+    }
+    const deltaMs = manager._lastTime > 0 ? now - manager._lastTime : 0;
+    manager._lastTime = now;
+    const step = manager.fixedDeltaMs > 0 ? manager.fixedDeltaMs : deltaMs;
+    updateAnimationManager(manager, deltaMs);
+    manager.onUpdate?.(step);
+    manager._rafId = requestAnimationFrame(tick);
+  };
+  manager._rafId = requestAnimationFrame(tick);
+}
+function stopAnimationManager(manager) {
+  if (!manager.running) {
+    return;
+  }
+  cancelAnimationFrame(manager._rafId);
+  manager._rafId = 0;
+  manager._lastTime = 0;
+  manager.running = false;
+}
+function removeAnimationTaskAt(manager, index) {
+  const task = manager.animations[index];
+  manager.animations.splice(index, 1);
+  if (task._owner === manager) {
+    task._owner = void 0;
+  }
+  task.active = false;
+  task._dispose?.(manager);
+}
+
+export { addAnimationTask, clearAnimationManager, createAnimationManager, createAnimationTask, removeAnimationTask, setAnimationTaskCategoryHandler, startAnimationManager, stopAnimationManager, updateAnimationManager };
+//# sourceMappingURL=animation-manager.js.map

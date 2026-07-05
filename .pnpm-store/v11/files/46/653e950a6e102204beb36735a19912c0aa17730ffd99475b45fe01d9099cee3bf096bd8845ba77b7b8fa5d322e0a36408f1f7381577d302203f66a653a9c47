@@ -1,0 +1,146 @@
+import { F32, U32 } from '../engine/typed-arrays.js';
+import { TU } from '../engine/gpu-flags.js';
+import { getBilinearSampler } from '../resource/samplers.js';
+import { createUniformBuffer, createEmptyUniformBuffer } from '../resource/gpu-buffers.js';
+
+const equirectToCubeWGSL = "struct t{faceSize:u32,equirectWidth:u32,equirectHeight:u32,_pad:u32}@group(0) @binding(0) var p:texture_2d<f32>;@group(0) @binding(1) var k:texture_storage_2d_array<rgba16float,write>;@group(0) @binding(2) var<uniform> params:t;const i=3.14159265359;const d=array<vec3<f32>,24>(vec3(1.0,-1.0,1.0),vec3(-1.0,-1.0,1.0),vec3(1.0,1.0,1.0),vec3(-1.0,1.0,1.0),vec3(-1.0,-1.0,-1.0),vec3(1.0,-1.0,-1.0),vec3(-1.0,1.0,-1.0),vec3(1.0,1.0,-1.0),vec3(-1.0,-1.0,-1.0),vec3(-1.0,-1.0,1.0),vec3(1.0,-1.0,-1.0),vec3(1.0,-1.0,1.0),vec3(1.0,1.0,-1.0),vec3(1.0,1.0,1.0),vec3(-1.0,1.0,-1.0),vec3(-1.0,1.0,1.0),vec3(1.0,-1.0,-1.0),vec3(1.0,-1.0,1.0),vec3(1.0,1.0,-1.0),vec3(1.0,1.0,1.0),vec3(-1.0,-1.0,1.0),vec3(-1.0,-1.0,-1.0),vec3(-1.0,1.0,1.0),vec3(-1.0,1.0,-1.0));@compute @workgroup_size(8,8,1) fn main(@builtin(global_invocation_id) a:vec3u){let h=a.z;let c=params.faceSize;if (a.x>=c||a.y>=c||h>=6u){return;}let f=f32(a.x)/f32(c);let e=f32(a.y)/f32(c);let b=h*4u;let g=normalize(d[b]*(1.0-f)*(1.0-e)+d[b+1u]*f*(1.0-e)+d[b+2u]*(1.0-f)*e+d[b+3u]*f*e);let l=atan2(g.z,g.x);let m=acos(clamp(g.y,-1.0,1.0));let n=l/i*0.5+0.5;let o=m/i;let j=clamp(i32(round(n*f32(params.equirectWidth))),0,i32(params.equirectWidth)-1);let q=clamp(i32(round(o*f32(params.equirectHeight))),0,i32(params.equirectHeight)-1);let r=i32(params.equirectHeight)-q-1;let s=textureLoad(p,vec2<i32>(j,r),0);textureStore(k,vec2<i32>(a.xy),i32(h),vec4<f32>(s.rgb,1.0));}";
+
+const prefilterCubeWGSL = "struct ha{faceSize:u32,mipLevel:u32,totalMips:u32,srcSize:u32}@group(0) @binding(0) var x:texture_cube<f32>;@group(0) @binding(1) var F:sampler;@group(0) @binding(2) var z:texture_storage_2d_array<rgba16float,write>;@group(0) @binding(3) var<uniform> params:ha;const k=3.14159265359;const n=1024u;const g=array<vec3<f32>,24>(vec3(1.0,-1.0,1.0),vec3(-1.0,-1.0,1.0),vec3(1.0,1.0,1.0),vec3(-1.0,1.0,1.0),vec3(-1.0,-1.0,-1.0),vec3(1.0,-1.0,-1.0),vec3(-1.0,1.0,-1.0),vec3(1.0,1.0,-1.0),vec3(-1.0,-1.0,-1.0),vec3(-1.0,-1.0,1.0),vec3(1.0,-1.0,-1.0),vec3(1.0,-1.0,1.0),vec3(1.0,1.0,-1.0),vec3(1.0,1.0,1.0),vec3(-1.0,1.0,-1.0),vec3(-1.0,1.0,1.0),vec3(1.0,-1.0,-1.0),vec3(1.0,-1.0,1.0),vec3(1.0,1.0,-1.0),vec3(1.0,1.0,1.0),vec3(-1.0,-1.0,1.0),vec3(-1.0,-1.0,-1.0),vec3(-1.0,1.0,1.0),vec3(-1.0,1.0,-1.0));fn I(ca:u32,j:f32,d:f32)->vec3<f32>{let i=ca*4u;return normalize(g[i]*(1.0-j)*(1.0-d)+g[i+1u]*j*(1.0-d)+g[i+2u]*(1.0-j)*d+g[i+3u]*j*d);}fn J(ba:u32)->f32{var a=ba;a=(a<<16u)|(a>>16u);a=((a&0x55555555u)<<1u)|((a&0xAAAAAAAAu)>>1u);a=((a&0x33333333u)<<2u)|((a&0xCCCCCCCCu)>>2u);a=((a&0x0F0F0F0Fu)<<4u)|((a&0xF0F0F0F0u)>>4u);a=((a&0x00FF00FFu)<<8u)|((a&0xFF00FF00u)>>8u);return f32(a)*2.3283064365386963e-10;}fn K(aa:f32,C:f32,s:f32)->vec3<f32>{let Z=s*s;let u=2.0*k*aa;let o=sqrt((1.0-C)/(1.0+(Z-1.0)*C));let w=sqrt(1.0-o*o);return vec3<f32>(cos(u)*w,sin(u)*w,o);}fn L(y:f32,t:f32)->f32{let A=y*y*(t-1.0)+1.0;return t/(k*A*A);}fn H(Y:u32,M:f32,S:f32)->vec3<f32>{return I(Y,M,S);}@compute @workgroup_size(8,8,1) fn main(@builtin(global_invocation_id) c:vec3u){let f=c.z;let h=params.faceSize>>params.mipLevel;if (c.x>=h||c.y>=h||f>=6u){return;}let R=f32(c.x)/f32(h);let Q=f32(c.y)/f32(h);let b=normalize(H(f,R,Q));let q=pow(2.0,f32(params.mipLevel)/0.8)/f32(params.srcSize);if (params.mipLevel==0u){let O=textureSampleLevel(x,F,b,0.0);textureStore(z,vec2<i32>(c.xy),i32(f),vec4<f32>(O.rgb,1.0));return;}var X=select(vec3<f32>(1.0,0.0,0.0),vec3<f32>(0.0,0.0,1.0),abs(b.z)<0.999);let v=normalize(cross(X,b));let P=cross(b,v);var p=vec3<f32>(0.0);var m=0.0;let E=f32(params.srcSize);let T=4.0*k/(6.0*E*E);let U=f32(params.totalMips)-1.0;for(var e=0u;e<n;e++){let W=f32(e)/f32(n);let N=J(e);let r=K(W,N,q);let B=v*r.x+P*r.y+b*r.z;let D=max(dot(b,B),0.0);let G=2.0*D*B-b;let l=dot(b,G);if (l>0.0){let da=q*q;let ea=L(D,da)/4.0;let fa=1.0/(f32(n)*max(ea,0.0001));let ga=clamp(0.5*log2(fa/T)+1.0,0.0,U);let V=textureSampleLevel(x,F,G,ga);p+=V.rgb*l;m+=l;}}if (m>0.0){p/=m;}textureStore(z,vec2<i32>(c.xy),i32(f),vec4<f32>(p,1.0));}";
+
+const brdfLutWGSL = "@group(0) @binding(0) var z:texture_storage_2d<rgba16float,write>;fn x(G:u32)->f32{var a=G;a=(a<<16u)|(a>>16u);a=((a&0x55555555u)<<1u)|((a&0xAAAAAAAAu)>>1u);a=((a&0x33333333u)<<2u)|((a&0xCCCCCCCCu)>>2u);a=((a&0x0F0F0F0Fu)<<4u)|((a&0xF0F0F0F0u)>>4u);a=((a&0x00FF00FFu)<<8u)|((a&0xFF00FF00u)>>8u);return f32(a)*2.3283064365386963e-10;}fn w(B:f32,u:f32,J:f32)->vec3f{let t=2.0*3.14159265359*B;let k=sqrt((1.0-u)/(1.0+(J-1.0)*u));let q=sqrt(1.0-k*k);return vec3f(cos(t)*q,sin(t)*q,k);}fn y(b:f32,n:f32)->vec2f{let o=vec3f(sqrt(1.0-b*b),0.0,b);let p=n*n;let e=p*p;var r=0.0;var l=0.0;let g=1024u;for(var f=0u;f<g;f++){let F=f32(f)/f32(g);let E=x(f);let j=w(F,E,e);let i=max(dot(o,j),0.0);let A=2.0*i*j-o;let d=max(A.z,0.0);let s=max(j.z,0.0);if (d>0.0&&s>0.0){let C=d*sqrt(b*b*(1.0-e)+e);let D=b*sqrt(d*d*(1.0-e)+e);let v=(0.5/max(C+D,1e-6))*d*(4.0*i/s);let m=pow(1.0-i,5.0);r+=(1.0-m)*v;l+=m*v;}}return vec2f(r/f32(g),l/f32(g));}@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) c:vec3u){if (c.x>=256u||c.y>=256u){return;}let H=max((f32(c.x)+0.5)/256.0,0.001);let I=max((f32(c.y)+0.5)/256.0,0.04);let h=y(H,I);textureStore(z,vec2u(c.x,c.y),vec4f(h.y,h.x+h.y,0.0,1.0));}";
+
+function equirectToCubemapGPU(engine, hdr, faceSize) {
+  const device = engine._device;
+  const equirectTex = device.createTexture({
+    size: [hdr.width, hdr.height],
+    format: "rgba32float",
+    usage: TU.TEXTURE_BINDING | TU.COPY_DST
+  });
+  {
+    const rgba = new F32(hdr.width * hdr.height * 4);
+    for (let i = 0; i < hdr.width * hdr.height; i++) {
+      rgba[i * 4] = hdr.data[i * 3];
+      rgba[i * 4 + 1] = hdr.data[i * 3 + 1];
+      rgba[i * 4 + 2] = hdr.data[i * 3 + 2];
+      rgba[i * 4 + 3] = 1;
+    }
+    device.queue.writeTexture({ texture: equirectTex }, rgba.buffer, { bytesPerRow: hdr.width * 16 }, { width: hdr.width, height: hdr.height });
+  }
+  const cubeTex = device.createTexture({
+    size: [faceSize, faceSize, 6],
+    format: "rgba16float",
+    usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_SRC,
+    dimension: "2d"
+  });
+  const module = device.createShaderModule({ code: equirectToCubeWGSL });
+  const pipeline = device.createComputePipeline({
+    layout: "auto",
+    compute: { module, entryPoint: "main" }
+  });
+  const paramBuf = createUniformBuffer(engine, new U32([faceSize, hdr.width, hdr.height, 0]));
+  const bg = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: equirectTex.createView() },
+      { binding: 1, resource: cubeTex.createView({ dimension: "2d-array", arrayLayerCount: 6 }) },
+      { binding: 2, resource: { buffer: paramBuf } }
+    ]
+  });
+  const enc = device.createCommandEncoder();
+  const pass = enc.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bg);
+  pass.dispatchWorkgroups(Math.ceil(faceSize / 8), Math.ceil(faceSize / 8), 6);
+  pass.end();
+  device.queue.submit([enc.finish()]);
+  equirectTex.destroy();
+  paramBuf.destroy();
+  return cubeTex;
+}
+function prefilterCubemapGPU(engine, srcCube, faceSize, mipCount) {
+  const device = engine._device;
+  const dstCube = device.createTexture({
+    size: { width: faceSize, height: faceSize, depthOrArrayLayers: 6 },
+    mipLevelCount: mipCount,
+    format: "rgba16float",
+    usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST
+  });
+  const srcCubeView = srcCube.createView({ dimension: "cube" });
+  const srcSampler = getBilinearSampler(engine);
+  const pipeline = device.createComputePipeline({
+    layout: "auto",
+    compute: { module: device.createShaderModule({ code: prefilterCubeWGSL }), entryPoint: "main" }
+  });
+  const paramsBuffer = createEmptyUniformBuffer(engine, 16);
+  {
+    const copyEnc = device.createCommandEncoder();
+    copyEnc.copyTextureToTexture({ texture: srcCube }, { texture: dstCube, mipLevel: 0 }, { width: faceSize, height: faceSize, depthOrArrayLayers: 6 });
+    device.queue.submit([copyEnc.finish()]);
+  }
+  for (let mip = 1; mip < mipCount; mip++) {
+    const mipSize = faceSize >> mip;
+    if (mipSize < 1) {
+      break;
+    }
+    device.queue.writeBuffer(paramsBuffer, 0, new U32([faceSize, mip, mipCount, faceSize]));
+    const dstView = dstCube.createView({
+      dimension: "2d-array",
+      baseMipLevel: mip,
+      mipLevelCount: 1,
+      baseArrayLayer: 0,
+      arrayLayerCount: 6
+    });
+    const bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: srcCubeView },
+        { binding: 1, resource: srcSampler },
+        { binding: 2, resource: dstView },
+        { binding: 3, resource: { buffer: paramsBuffer } }
+      ]
+    });
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(Math.ceil(mipSize / 8), Math.ceil(mipSize / 8), 6);
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+  }
+  srcCube.destroy();
+  paramsBuffer.destroy();
+  return dstCube;
+}
+let _brdfPipeline = null;
+let _brdfPipelineDevice = null;
+function generateBrdfLut(engine) {
+  const device = engine._device;
+  if (!_brdfPipeline || _brdfPipelineDevice !== device) {
+    _brdfPipeline = device.createComputePipeline({
+      layout: "auto",
+      compute: { module: device.createShaderModule({ code: brdfLutWGSL }), entryPoint: "main" }
+    });
+    _brdfPipelineDevice = device;
+  }
+  const size = 256;
+  const texture = device.createTexture({
+    size: { width: size, height: size },
+    format: "rgba16float",
+    usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING
+  });
+  const bindGroup = device.createBindGroup({
+    layout: _brdfPipeline.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: texture.createView() }]
+  });
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(_brdfPipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.ceil(size / 8), Math.ceil(size / 8));
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+  return texture;
+}
+
+export { equirectToCubemapGPU, generateBrdfLut, prefilterCubemapGPU };
+//# sourceMappingURL=hdr-ibl-pipeline.js.map

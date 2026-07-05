@@ -1,0 +1,249 @@
+function clampCameraToLimits(camera) {
+  if (camera.lowerRadiusLimit !== void 0 && camera.radius < camera.lowerRadiusLimit) {
+    camera.radius = camera.lowerRadiusLimit;
+    camera.inertialRadiusOffset = 0;
+  } else if (camera.upperRadiusLimit !== void 0 && camera.radius > camera.upperRadiusLimit) {
+    camera.radius = camera.upperRadiusLimit;
+    camera.inertialRadiusOffset = 0;
+  }
+  if (camera.lowerBetaLimit !== void 0 && camera.beta < camera.lowerBetaLimit) {
+    camera.beta = camera.lowerBetaLimit;
+    camera.inertialBetaOffset = 0;
+  } else if (camera.upperBetaLimit !== void 0 && camera.beta > camera.upperBetaLimit) {
+    camera.beta = camera.upperBetaLimit;
+    camera.inertialBetaOffset = 0;
+  }
+  if (camera.lowerAlphaLimit !== void 0 && camera.alpha < camera.lowerAlphaLimit) {
+    camera.alpha = camera.lowerAlphaLimit;
+    camera.inertialAlphaOffset = 0;
+  } else if (camera.upperAlphaLimit !== void 0 && camera.alpha > camera.upperAlphaLimit) {
+    camera.alpha = camera.upperAlphaLimit;
+    camera.inertialAlphaOffset = 0;
+  }
+}
+function setCameraLimits(camera, limits, scene) {
+  if ("lowerAlphaLimit" in limits) {
+    camera.lowerAlphaLimit = limits.lowerAlphaLimit;
+  }
+  if ("upperAlphaLimit" in limits) {
+    camera.upperAlphaLimit = limits.upperAlphaLimit;
+  }
+  if ("lowerBetaLimit" in limits) {
+    camera.lowerBetaLimit = limits.lowerBetaLimit;
+  }
+  if ("upperBetaLimit" in limits) {
+    camera.upperBetaLimit = limits.upperBetaLimit;
+  }
+  if ("lowerRadiusLimit" in limits) {
+    camera.lowerRadiusLimit = limits.lowerRadiusLimit;
+  }
+  if ("upperRadiusLimit" in limits) {
+    camera.upperRadiusLimit = limits.upperRadiusLimit;
+  }
+  const enforce = () => clampCameraToLimits(camera);
+  camera._clampToLimits = enforce;
+  enforce();
+  return () => {
+    if (camera._clampToLimits === enforce) {
+      camera._clampToLimits = void 0;
+    }
+  };
+}
+function attachControl(camera, canvas, scene, options) {
+  const angularSensibility = camera.angularSensibility ?? 1e3;
+  const panningSensibility = camera.panningSensibility ?? 50;
+  const wheelPrecision = camera.wheelPrecision ?? 3;
+  const ROTATION_EPSILON = 1e-3;
+  const RADIUS_EPSILON = 1e-3;
+  const PANNING_EPSILON = 1e-4;
+  let isDragging = false;
+  let isPanning = false;
+  let lastX = 0;
+  let lastY = 0;
+  const activeTouches = /* @__PURE__ */ new Map();
+  let pinchStartDist = 0;
+  let pinchStartRadius = 0;
+  function onPointerDown(e) {
+    if (options?.shouldHandlePointerDown && !options.shouldHandlePointerDown(e)) {
+      return;
+    }
+    canvas.setPointerCapture(e.pointerId);
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (e.button === 0) {
+      isDragging = true;
+      isPanning = false;
+    } else if (e.button === 2) {
+      isDragging = false;
+      isPanning = true;
+    }
+  }
+  function onPointerMove(e) {
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (activeTouches.size >= 2) {
+      return;
+    }
+    if (!isDragging && !isPanning) {
+      return;
+    }
+    if (options?.isExternalDragActive?.()) {
+      isDragging = false;
+      isPanning = false;
+      camera.inertialAlphaOffset = 0;
+      camera.inertialBetaOffset = 0;
+      camera.inertialPanningX = 0;
+      camera.inertialPanningY = 0;
+      return;
+    }
+    if (options?.isExternalPickPending?.()) {
+      return;
+    }
+    if (isDragging) {
+      camera.inertialAlphaOffset -= dx / angularSensibility;
+      camera.inertialBetaOffset -= dy / angularSensibility;
+    }
+    if (isPanning) {
+      camera.inertialPanningX += -dx / panningSensibility;
+      camera.inertialPanningY += dy / panningSensibility;
+    }
+  }
+  function onPointerUp(e) {
+    canvas.releasePointerCapture(e.pointerId);
+    isDragging = false;
+    isPanning = false;
+  }
+  function onWheel(e) {
+    e.preventDefault();
+    camera.inertialRadiusOffset -= e.deltaY * camera.radius / (wheelPrecision * 1e3);
+  }
+  function onContextMenu(e) {
+    e.preventDefault();
+  }
+  function onTouchStart(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    if (activeTouches.size >= 2) {
+      isDragging = false;
+      isPanning = false;
+      const iter = activeTouches.values();
+      const p0 = iter.next().value;
+      const p1 = iter.next().value;
+      pinchStartDist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      pinchStartRadius = camera.radius;
+      e.preventDefault();
+    }
+  }
+  function onTouchMove(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    if (activeTouches.size >= 2) {
+      e.preventDefault();
+      const iter = activeTouches.values();
+      const p0 = iter.next().value;
+      const p1 = iter.next().value;
+      const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      if (pinchStartDist > 0 && dist > 0) {
+        camera.radius = pinchStartRadius * (pinchStartDist / dist);
+        camera.radius = Math.max(0.01, camera.radius);
+      }
+    }
+  }
+  function onTouchEnd(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      activeTouches.delete(e.changedTouches[i].identifier);
+    }
+    if (activeTouches.size === 1) {
+      const p = activeTouches.values().next().value;
+      lastX = p.x;
+      lastY = p.y;
+    }
+    if (activeTouches.size < 2) {
+      pinchStartDist = 0;
+    }
+  }
+  function onGesture(e) {
+    e.preventDefault();
+  }
+  function applyInertia() {
+    if (camera.inertialAlphaOffset !== 0 || camera.inertialBetaOffset !== 0) {
+      camera.alpha += camera.inertialAlphaOffset;
+      camera.beta += camera.inertialBetaOffset;
+      const eps = 0.01;
+      camera.beta = Math.max(eps, Math.min(Math.PI - eps, camera.beta));
+      camera.inertialAlphaOffset *= camera.inertia;
+      camera.inertialBetaOffset *= camera.inertia;
+      if (Math.abs(camera.inertialAlphaOffset) < ROTATION_EPSILON) {
+        camera.inertialAlphaOffset = 0;
+      }
+      if (Math.abs(camera.inertialBetaOffset) < ROTATION_EPSILON) {
+        camera.inertialBetaOffset = 0;
+      }
+    }
+    if (camera.inertialRadiusOffset !== 0) {
+      camera.radius -= camera.inertialRadiusOffset;
+      camera.radius = Math.max(0.01, camera.radius);
+      camera.inertialRadiusOffset *= camera.inertia;
+      if (Math.abs(camera.inertialRadiusOffset) < RADIUS_EPSILON) {
+        camera.inertialRadiusOffset = 0;
+      }
+    }
+    if (camera.inertialPanningX !== 0 || camera.inertialPanningY !== 0) {
+      const cosA = Math.cos(camera.alpha);
+      const sinA = Math.sin(camera.alpha);
+      const rightX = -sinA;
+      const rightZ = cosA;
+      const panScale = camera.radius * 1e-3;
+      camera.target.x += rightX * camera.inertialPanningX * panScale;
+      camera.target.y += camera.inertialPanningY * panScale;
+      camera.target.z += rightZ * camera.inertialPanningX * panScale;
+      camera.inertialPanningX *= camera.panningInertia;
+      camera.inertialPanningY *= camera.panningInertia;
+      if (Math.abs(camera.inertialPanningX) < PANNING_EPSILON) {
+        camera.inertialPanningX = 0;
+      }
+      if (Math.abs(camera.inertialPanningY) < PANNING_EPSILON) {
+        camera.inertialPanningY = 0;
+      }
+    }
+  }
+  if (scene) {
+    scene._beforeRender.push(applyInertia);
+  }
+  const listeners = [
+    ["pointerdown", onPointerDown],
+    ["pointermove", onPointerMove],
+    ["pointerup", onPointerUp],
+    ["wheel", onWheel, { passive: false }],
+    ["contextmenu", onContextMenu],
+    ["touchstart", onTouchStart, { passive: false }],
+    ["touchmove", onTouchMove, { passive: false }],
+    ["touchend", onTouchEnd],
+    ["gesturestart", onGesture, { passive: false }],
+    ["gesturechange", onGesture, { passive: false }],
+    ["gestureend", onGesture, { passive: false }]
+  ];
+  for (const [ev, h, opts] of listeners) {
+    canvas.addEventListener(ev, h, opts);
+  }
+  return () => {
+    if (scene) {
+      const idx = scene._beforeRender.indexOf(applyInertia);
+      if (idx >= 0) {
+        scene._beforeRender.splice(idx, 1);
+      }
+    }
+    for (const [ev, h] of listeners) {
+      canvas.removeEventListener(ev, h);
+    }
+  };
+}
+
+export { attachControl, setCameraLimits };
+//# sourceMappingURL=arc-rotate-controls.js.map

@@ -1,0 +1,5 @@
+import { type SpotLight } from "@babylonjs/core/index.js";
+import { type FunctionComponent } from "react";
+export declare const SpotLightSetupProperties: FunctionComponent<{
+    context: SpotLight;
+}>;

@@ -1,0 +1,27 @@
+import { playSpriteTargetAnimation } from './sprite-animation.js';
+import { removeSprite2DIndex, setSprite2DFrameIndex } from './sprite-2d.js';
+
+function playSprite2DIndexAnimation(manager, layer, index, from, to, loop, delayMs, options) {
+  return playSpriteTargetAnimation(
+    manager,
+    {
+      setFrame(frame) {
+        setSprite2DFrameIndex(layer, index, frame);
+      },
+      remove() {
+        removeSprite2DIndex(layer, index);
+      },
+      isAlive() {
+        return index >= 0 && index < layer.count;
+      }
+    },
+    from,
+    to,
+    loop,
+    delayMs,
+    options
+  );
+}
+
+export { playSprite2DIndexAnimation };
+//# sourceMappingURL=sprite-2d-index-animation.js.map

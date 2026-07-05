@@ -1,0 +1,10 @@
+import { type FunctionComponent } from "react";
+type RangeFrameBarProps = {
+    width: number;
+};
+/**
+ * Range frame bar showing frame tick marks and keyframe indicators
+ * @returns The range frame bar component
+ */
+export declare const RangeFrameBar: FunctionComponent<RangeFrameBarProps>;
+export {};

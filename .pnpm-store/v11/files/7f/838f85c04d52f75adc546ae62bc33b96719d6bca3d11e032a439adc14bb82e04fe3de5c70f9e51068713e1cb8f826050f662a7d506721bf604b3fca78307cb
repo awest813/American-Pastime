@@ -1,0 +1,11 @@
+import { markNextDeviceLossForRecovery } from './device-lost-recovery.js';
+
+function forceWebGpuDeviceLossForTesting(engine) {
+  if (!markNextDeviceLossForRecovery(engine)) {
+    throw new Error("forceWebGpuDeviceLossForTesting requires enableDeviceLostRecovery(engine) first");
+  }
+  engine._device.destroy();
+}
+
+export { forceWebGpuDeviceLossForTesting };
+//# sourceMappingURL=device-lost-recovery-testing.js.map

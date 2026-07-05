@@ -1,0 +1,8 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../sceneContext";
+import { type IBridgeCommandRegistry } from "@babylonjs/shared-ui-components/modularTool/services/cli/bridgeCommandRegistry.js";
+/**
+ * Service that registers CLI commands for querying scene entities by uniqueId.
+ * When uniqueId is omitted, returns a summary list of all entities of that type.
+ */
+export declare const EntityQueryServiceDefinition: ServiceDefinition<[], [IBridgeCommandRegistry, ISceneContext]>;

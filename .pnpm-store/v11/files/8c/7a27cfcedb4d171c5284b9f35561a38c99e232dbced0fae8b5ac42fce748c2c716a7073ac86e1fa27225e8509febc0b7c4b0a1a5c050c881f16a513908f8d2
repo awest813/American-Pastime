@@ -1,0 +1,82 @@
+import { TU } from '../engine/gpu-flags.js';
+import { getOrCreateSampler, acquireTexture } from '../resource/gpu-pool.js';
+
+function cloneTexture2D(base, transform) {
+  return { ...base, ...transform };
+}
+let _tex2dCache = null;
+function clearTexture2DCache(engine) {
+  const device = engine._device;
+  _tex2dCache?.delete(device);
+}
+function loadTexture2D(engine, url, opts = {}) {
+  const device = engine._device;
+  if (!_tex2dCache) {
+    _tex2dCache = /* @__PURE__ */ new WeakMap();
+  }
+  let dc = _tex2dCache.get(device);
+  if (!dc) {
+    dc = /* @__PURE__ */ new Map();
+    _tex2dCache.set(device, dc);
+  }
+  const key = `${url}\0${opts.mipMaps ?? true}\0${opts.addressModeU ?? "repeat"}\0${opts.addressModeV ?? "repeat"}\0${opts.minFilter ?? "linear"}\0${opts.magFilter ?? "linear"}\0${opts.invertY ?? true}\0${opts.srgb ?? false}\0${opts.premultiplyAlpha ?? false}`;
+  const hit = dc.get(key);
+  if (hit) {
+    return hit;
+  }
+  const map = dc;
+  const p = loadTexture2DImpl(engine, url, opts);
+  map.set(key, p);
+  p.catch(() => map.delete(key));
+  return p;
+}
+async function loadTexture2DImpl(engine, url, opts) {
+  const device = engine._device;
+  const mipMaps = opts.mipMaps ?? true;
+  const addressModeU = opts.addressModeU ?? "repeat";
+  const addressModeV = opts.addressModeV ?? "repeat";
+  const invertY = opts.invertY ?? true;
+  const srgb = opts.srgb ?? false;
+  const premultiplyAlpha = opts.premultiplyAlpha ?? false;
+  const format = srgb ? "rgba8unorm-srgb" : "rgba8unorm";
+  const response = await fetch(url);
+  const blob = await response.blob();
+  const imageBitmap = await createImageBitmap(blob, {
+    premultiplyAlpha: premultiplyAlpha ? "premultiply" : "none",
+    colorSpaceConversion: "none"
+  });
+  const width = imageBitmap.width;
+  const height = imageBitmap.height;
+  const mipLevelCount = mipMaps ? Math.floor(Math.log2(Math.max(width, height))) + 1 : 1;
+  const texture = device.createTexture({
+    size: { width, height },
+    format,
+    mipLevelCount,
+    usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT
+  });
+  device.queue.copyExternalImageToTexture({ source: imageBitmap, flipY: invertY }, { texture, premultipliedAlpha: premultiplyAlpha }, { width, height });
+  imageBitmap.close();
+  if (mipMaps && mipLevelCount > 1) {
+    const { generateMipmaps } = await import('./generate-mipmaps.js');
+    generateMipmaps(engine, texture);
+  }
+  const minF = opts.minFilter ?? "linear";
+  const magF = opts.magFilter ?? "linear";
+  const mipF = mipMaps ? "linear" : "nearest";
+  const allLinear = minF === "linear" && magF === "linear" && mipF === "linear";
+  const sampler = getOrCreateSampler(engine, {
+    addressModeU,
+    addressModeV,
+    minFilter: minF,
+    magFilter: magF,
+    mipmapFilter: mipF,
+    maxAnisotropy: allLinear ? 4 : 1
+  });
+  const tex2d = { texture, view: texture.createView(), sampler, width, height };
+  engine._dlr?.u(tex2d, url, opts);
+  acquireTexture(tex2d);
+  return tex2d;
+}
+
+export { clearTexture2DCache, cloneTexture2D, loadTexture2D };
+//# sourceMappingURL=texture-2d.js.map

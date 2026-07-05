@@ -1,0 +1,275 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { BU, SS } from '../engine/gpu-flags.js';
+import { createRenderTarget, disposeRenderTarget, buildRenderTarget, targetSignatureKey } from '../engine/render-target.js';
+import { getNearestSampler, getBilinearSampler } from '../resource/samplers.js';
+
+const fullscreenVertexWGSL = (extraOutput, extraMain) => `struct PostProcessVertexOutput{@builtin(position) position:vec4f,@location(0) uv:vec2f${extraOutput}}
+@vertex fn postProcessVertex(@builtin(vertex_index) vertexIndex:u32)->PostProcessVertexOutput{var positions=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));let p=positions[vertexIndex];var out:PostProcessVertexOutput;out.position=vec4f(p,0,1);out.uv=vec2f(p.x*0.5+0.5,0.5-p.y*0.5);${extraMain}return out;}`;
+const SOURCE_WGSL = `@group(0) @binding(0) var sourceSampler:sampler;
+@group(0) @binding(1) var sourceTextureSampler:texture_2d<f32>;
+fn samplePostProcessSource(uv:vec2f)->vec4f{return textureSample(sourceTextureSampler,sourceSampler,uv);}
+fn readPostProcessSource(uv:vec2f)->vec4f{let dims=vec2f(textureDimensions(sourceTextureSampler));let p=clamp(floor(uv*dims)+vec2f(0.5),vec2f(0.5),dims-vec2f(0.5));return textureSampleLevel(sourceTextureSampler,sourceSampler,p/dims,0);}`;
+const FRAGMENT_WRAPPER_WGSL = `@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{return applyPostProcess(samplePostProcessSource(input.uv),input.uv);}`;
+function createPostProcessTask(config, engine, scene) {
+  const source = config.sourceTexture;
+  const internalTarget = config.targetTexture ? null : createInternalTarget(config.name ?? "post-process", source);
+  const colorAttachment = {
+    view: void 0,
+    loadOp: "clear",
+    storeOp: "store"
+  };
+  const task = {
+    name: config.name ?? "post-process",
+    engine,
+    scene,
+    _passes: [],
+    sourceTexture: source,
+    sourceSamplingMode: config.sourceSamplingMode ?? "linear",
+    targetTexture: config.targetTexture ?? null,
+    alphaMode: config.alphaMode ?? 0,
+    viewport: config.viewport ?? null,
+    clear: config.clear ?? true,
+    outputTexture: config.targetTexture ?? internalTarget,
+    _shader: config._shader,
+    _internalTarget: internalTarget,
+    _internalTargetKey: internalTarget ? internalTargetKey(source) : "",
+    _pipeline: null,
+    _bindGroup: null,
+    _bindGroupLayout: null,
+    _pipelineLayout: null,
+    _shaderModule: null,
+    _shaderModuleCode: "",
+    _uniformBuffer: null,
+    _uniformData: null,
+    _renderPassDescriptor: { label: config.name ?? "post-process", colorAttachments: [colorAttachment] },
+    _colorAttachment: colorAttachment,
+    record() {
+      prepareOutputTarget(task);
+      buildRenderTarget(task.outputTexture, engine);
+      createPostProcessGpuState(task, engine);
+    },
+    execute() {
+      applyColorAttachmentState(task._colorAttachment, task.outputTexture, task.clear);
+      const pass = engine._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+      applyViewport(pass, task.viewport, task.outputTexture);
+      pass.setPipeline(task._pipeline);
+      pass.setBindGroup(0, task._bindGroup);
+      pass.draw(3);
+      pass.end();
+      return 1;
+    },
+    updateUniforms() {
+      writePostProcessUniforms(task, engine);
+    },
+    dispose() {
+      task._passes.length = 0;
+      task._uniformBuffer?.destroy();
+      task._uniformBuffer = null;
+      task._uniformData = null;
+      task._pipeline = null;
+      task._bindGroup = null;
+      task._bindGroupLayout = null;
+      task._pipelineLayout = null;
+      task._shaderModule = null;
+      task._shaderModuleCode = "";
+      disposeRenderTarget(task._internalTarget);
+    }
+  };
+  return task;
+}
+function createPostProcessGpuState(task, engine) {
+  const source = task.sourceTexture;
+  if (!source._colorTexture || !source._colorView) {
+    throw new Error(`PostProcessTask "${task.name}": sourceTexture has no color texture. Render the source to an offscreen RenderTarget before post-processing.`);
+  }
+  if ((source._descriptor.samples ?? 1) !== 1) {
+    throw new Error(`PostProcessTask "${task.name}": multisampled source textures are not supported. Use a sampleCount: 1 source RenderTarget.`);
+  }
+  const target = task.outputTexture;
+  const format = target._descriptor.format;
+  if (!format) {
+    throw new Error(`PostProcessTask "${task.name}": outputTexture must have a format.`);
+  }
+  task._uniformBuffer ??= createUniformBuffer(task, engine);
+  task._uniformData ??= createUniformData(task);
+  writePostProcessUniforms(task, engine);
+  const bgl = getBindGroupLayout(task, engine);
+  task._pipelineLayout ??= engine._device.createPipelineLayout({ label: `${task.name}-pipeline-layout`, bindGroupLayouts: [bgl] });
+  const signature = {
+    _colorFormat: format,
+    _sampleCount: target._descriptor.samples ?? 1
+  };
+  task._pipeline = engine._device.createRenderPipeline({
+    label: `${task.name}-${targetSignatureKey(signature)}-${task.alphaMode}`,
+    layout: task._pipelineLayout,
+    vertex: { module: getShaderModule(task, engine), entryPoint: "postProcessVertex" },
+    fragment: {
+      module: getShaderModule(task, engine),
+      entryPoint: "postProcessFragment",
+      targets: [{ format, blend: alphaModeToBlend(task.alphaMode) }]
+    },
+    primitive: { topology: "triangle-list" },
+    multisample: { count: signature._sampleCount }
+  });
+  const entries = [
+    { binding: 0, resource: task.sourceSamplingMode === "nearest" ? getNearestSampler(engine) : getBilinearSampler(engine) },
+    { binding: 1, resource: source._colorView }
+  ];
+  const extraTextures = task._shader.extraTextures ?? [];
+  if (task._uniformBuffer) {
+    entries.push({ binding: getUniformBinding(task), resource: { buffer: task._uniformBuffer } });
+  }
+  for (let i = 0; i < extraTextures.length; i++) {
+    const texture = extraTextures[i];
+    if (!texture._colorView) {
+      throw new Error(`PostProcessTask "${task.name}": extra texture ${i} has no color texture.`);
+    }
+    entries.push({ binding: 2 + i, resource: texture._colorView });
+  }
+  task._bindGroup = engine._device.createBindGroup({
+    label: `${task.name}-bind-group`,
+    layout: bgl,
+    entries
+  });
+}
+function prepareOutputTarget(task) {
+  const target = task.targetTexture;
+  if (target) {
+    task.outputTexture = target;
+    return;
+  }
+  const key = internalTargetKey(task.sourceTexture);
+  if (task._internalTarget && task._internalTargetKey === key) {
+    task.outputTexture = task._internalTarget;
+    return;
+  }
+  if (task._internalTarget) {
+    disposeRenderTarget(task._internalTarget);
+  }
+  task._internalTarget = createInternalTarget(task.name, task.sourceTexture);
+  task._internalTargetKey = key;
+  task.outputTexture = task._internalTarget;
+}
+function createInternalTarget(name, source) {
+  const srcDesc = source._descriptor;
+  if (!srcDesc.format) {
+    throw new Error(`PostProcessTask "${name}": sourceTexture must have a format.`);
+  }
+  const desc = {
+    lbl: `${name}-output`,
+    format: srcDesc.format,
+    samples: 1,
+    size: srcDesc.size
+  };
+  return createRenderTarget(desc);
+}
+function internalTargetKey(source) {
+  const desc = source._descriptor;
+  const sz = desc.size;
+  const sizeKey = "canvas" in sz ? `surface:${sz._uniqueId}` : `${sz.width}x${sz.height}`;
+  return `${desc.format ?? "-"}|${desc.samples ?? 1}|${sizeKey}`;
+}
+function getBindGroupLayout(task, engine) {
+  const hasUniform = (task._shader.uniformByteLength ?? 0) > 0;
+  if (task._bindGroupLayout) {
+    return task._bindGroupLayout;
+  }
+  const entries = [
+    { binding: 0, visibility: SS.FRAGMENT, sampler: { type: "filtering" } },
+    { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: "float" } }
+  ];
+  const extraTextures = task._shader.extraTextures ?? [];
+  for (let i = 0; i < extraTextures.length; i++) {
+    entries.push({ binding: 2 + i, visibility: SS.FRAGMENT, texture: { sampleType: "float" } });
+  }
+  if (hasUniform) {
+    entries.push({ binding: getUniformBinding(task), visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } });
+  }
+  task._bindGroupLayout = engine._device.createBindGroupLayout({ label: `${task.name}-bind-group-layout`, entries });
+  return task._bindGroupLayout;
+}
+function getUniformBinding(task) {
+  return task._shader.uniformBinding ?? 2 + (task._shader.extraTextures?.length ?? 0);
+}
+function getShaderModule(task, engine) {
+  const code = `${fullscreenVertexWGSL(task._shader.vertexOutputWGSL ?? "", task._shader.vertexMainWGSL ?? "")}
+${SOURCE_WGSL}
+${task._shader.extraTextureWGSL ?? ""}
+${task._shader.uniformWGSL ?? ""}
+${task._shader.fragmentWGSL}
+${task._shader.fragmentWrapperWGSL ?? FRAGMENT_WRAPPER_WGSL}`;
+  if (!task._shaderModule || task._shaderModuleCode !== code) {
+    task._shaderModuleCode = code;
+    task._shaderModule = engine._device.createShaderModule({
+      label: task.name,
+      code
+    });
+  }
+  return task._shaderModule;
+}
+function createUniformBuffer(task, engine) {
+  const size = align16(task._shader.uniformByteLength ?? 0);
+  if (size === 0) {
+    return null;
+  }
+  return engine._device.createBuffer({
+    label: `${task.name}-uniforms`,
+    size,
+    usage: BU.UNIFORM | BU.COPY_DST
+  });
+}
+function createUniformData(task) {
+  const size = align16(task._shader.uniformByteLength ?? 0);
+  return size === 0 ? null : new F32(size / 4);
+}
+function writePostProcessUniforms(task, engine) {
+  if ((task._shader.uniformByteLength ?? 0) === 0) {
+    return;
+  }
+  task._uniformData.fill(0);
+  task._shader.writeUniforms?.(task._uniformData);
+  engine._device.queue.writeBuffer(task._uniformBuffer, 0, task._uniformData);
+}
+function applyColorAttachmentState(att, rt, clear) {
+  att.view = rt._colorView;
+  att.resolveTarget = void 0;
+  att.loadOp = clear ? "clear" : "load";
+}
+function applyViewport(pass, viewport, rt) {
+  if (!viewport) {
+    return;
+  }
+  const x = Math.floor(viewport.x * rt._width);
+  const y = Math.floor((1 - viewport.y - viewport.height) * rt._height);
+  const w = Math.ceil((viewport.x + viewport.width) * rt._width) - x;
+  const h = Math.ceil((1 - viewport.y) * rt._height) - y;
+  pass.setViewport(x, y, w, h, 0, 1);
+  pass.setScissorRect(x, y, w, h);
+}
+function alphaModeToBlend(mode) {
+  switch (mode) {
+    case 1:
+      return {
+        color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" }
+      };
+    case 2:
+      return {
+        color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" }
+      };
+    case 7:
+      return {
+        color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" }
+      };
+    default:
+      return void 0;
+  }
+}
+function align16(value) {
+  return Math.ceil(value / 16) * 16;
+}
+
+export { createPostProcessTask };
+//# sourceMappingURL=post-process-task.js.map

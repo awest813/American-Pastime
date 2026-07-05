@@ -1,0 +1,43 @@
+import { F32, U32 } from '../engine/typed-arrays.js';
+
+function createDiscData(options = {}) {
+  const radius = options.radius ?? 0.5;
+  const tessellation = options.tessellation ?? 64;
+  const arc = options.arc && (options.arc <= 0 || options.arc > 1) ? 1 : options.arc ?? 1;
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  positions.push(0, 0, 0);
+  uvs.push(0.5, 0.5);
+  const theta = Math.PI * 2 * arc;
+  const step = arc === 1 ? theta / tessellation : theta / (tessellation - 1);
+  let a = 0;
+  for (let t = 0; t < tessellation; t++) {
+    const x = Math.cos(a);
+    const y = Math.sin(a);
+    positions.push(radius * x, radius * y, 0);
+    uvs.push((x + 1) / 2, (1 - y) / 2);
+    a += step;
+  }
+  if (arc === 1) {
+    positions.push(positions[3], positions[4], positions[5]);
+    uvs.push(uvs[2], uvs[3]);
+  }
+  const vertexNb = positions.length / 3;
+  for (let i = 1; i < vertexNb - 1; i++) {
+    indices.push(i + 1, 0, i);
+  }
+  const normals = new F32(vertexNb * 3);
+  for (let i = 0; i < vertexNb; i++) {
+    normals[i * 3 + 2] = -1;
+  }
+  return {
+    positions: new F32(positions),
+    normals,
+    uvs: new F32(uvs),
+    indices: new U32(indices)
+  };
+}
+
+export { createDiscData };
+//# sourceMappingURL=create-disc.js.map

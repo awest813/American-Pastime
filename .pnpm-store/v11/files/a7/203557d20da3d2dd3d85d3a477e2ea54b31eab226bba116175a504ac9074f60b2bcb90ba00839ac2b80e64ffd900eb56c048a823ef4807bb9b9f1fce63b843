@@ -1,0 +1,6 @@
+import { type FunctionComponent } from "react";
+import { type TransformNode } from "@babylonjs/core/index.js";
+import "@babylonjs/core/Physics/v2/physicsEngineComponent.js";
+export declare const TransformNodePhysicsProperties: FunctionComponent<{
+    node: TransformNode;
+}>;

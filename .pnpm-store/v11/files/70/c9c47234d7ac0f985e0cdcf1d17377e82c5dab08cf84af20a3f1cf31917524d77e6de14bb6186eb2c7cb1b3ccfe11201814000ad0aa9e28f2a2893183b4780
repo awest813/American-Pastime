@@ -1,0 +1,74 @@
+import type { EventHandler } from '@fluentui/react-utilities';
+import * as React from 'react';
+import { CSSUnit, GrowDirection, ResizeHandleUpdateEventData } from '../types';
+export type UseResizeHandleParams = {
+    /**
+     * The direction in which the element is considered growing in size ('end', 'start', 'up', or 'down').
+     */
+    growDirection: GrowDirection;
+    /**
+     * The name of the CSS variable that will be set on the wrapper element to reflect the current size of the element.
+     */
+    variableName: string;
+    /**
+     * Defines where to apply a variable:
+     * - 'wrapper' - apply to the wrapper element
+     * - 'element' - apply to the element itself
+     *
+     * @default 'wrapper'
+     */
+    variableTarget?: 'wrapper' | 'element';
+    /**
+     * The minimum value in pixels that the element can be resized to. Only applicable if relative is false.
+     */
+    minValue?: number;
+    /**
+     * The maximum value in pixels that the element can be resized to. Only applicable if relative is false.
+     */
+    maxValue?: number;
+    /**
+     * A callback that will be called when the element is resized.
+     *
+     * @remarks The passed function should be memoized for better performance.
+     */
+    onChange?: EventHandler<ResizeHandleUpdateEventData>;
+    /**
+     * Is called when a resize attempt didn't result in a change of size of the element.
+     *
+     * @remarks The passed function should be memoized for better performance.
+     */
+    onChangeRejected?: EventHandler<ResizeHandleUpdateEventData & {
+        rejectedValue: number;
+    }>;
+    /**
+     * A callback that will be called when the resize operation starts.
+     */
+    onDragStart?: EventHandler<ResizeHandleUpdateEventData>;
+    /**
+     * A callback that will be called when the resize operation ends.
+     */
+    onDragEnd?: EventHandler<ResizeHandleUpdateEventData>;
+    /**
+     * A function that will be called to get the value that will be set as the aria-valuetext attribute on the resize handle.
+     * Use this for localization.
+     */
+    getA11ValueText?: (value: number, unit: string) => string | undefined;
+    /**
+     * Only measure relative change in size, useful to use with CSS calc() function.
+     * Example: clamp(60px, calc(20% + var(--nav-size)), 40%)
+     * This will take 20% of the parent size by default, but will allow to resize between 60px and 40%.
+     * Also, the size will still be relative in nature (20% + (X)px).
+     */
+    relative?: boolean;
+    /**
+     * The unit to use for the value. Can be 'px' or 'viewport' (will use 'vh' or 'vw' depending on 'growDirection').
+     */
+    unit?: CSSUnit;
+};
+export declare const useResizeHandle: (params: UseResizeHandleParams) => {
+    setValue: (value: number) => void;
+    elementRef: React.RefCallback<HTMLElement>;
+    handleRef: React.RefCallback<HTMLElement>;
+    wrapperRef: React.RefCallback<HTMLElement>;
+    growDirection: GrowDirection;
+};

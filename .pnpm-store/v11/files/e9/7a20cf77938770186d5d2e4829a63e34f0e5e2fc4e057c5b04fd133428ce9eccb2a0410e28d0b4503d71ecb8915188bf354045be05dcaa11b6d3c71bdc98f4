@@ -1,0 +1,5 @@
+/**
+ * Gets functions used to convert to/from display values for angles based on the current settings.
+ * @returns A tuple containing the functions to convert to and from display values.
+ */
+export declare function useAngleConverters(): readonly [(angle: number, wrap?: boolean) => number, (angle: number, wrap?: boolean) => number, boolean];

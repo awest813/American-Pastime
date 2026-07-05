@@ -1,0 +1,92 @@
+import { BU } from '../engine/gpu-flags.js';
+import { createMappedBuffer } from '../resource/gpu-buffers.js';
+import { mat4Compose } from '../math/mat4-compose.js';
+import { mat4Identity } from '../math/mat4-identity.js';
+import { ObservableVec3 } from '../math/observable-vec3.js';
+import { ObservableQuat } from '../math/observable-quat.js';
+import { createWorldMatrixState, attachWorldMatrixState } from '../scene/world-matrix-state.js';
+import { eulerToQuat, createEulerProxy } from '../scene/scene-node.js';
+
+function initMeshTransform(mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) {
+  const wm = createWorldMatrixState(() => {
+    const p = mesh.position, rq2 = mesh.rotationQuaternion, s = mesh.scaling;
+    const isIdentity = p.x === 0 && p.y === 0 && p.z === 0 && rq2.x === 0 && rq2.y === 0 && rq2.z === 0 && rq2.w === 1 && s.x === 1 && s.y === 1 && s.z === 1;
+    return isIdentity ? mat4Identity() : mat4Compose(p.x, p.y, p.z, rq2.x, rq2.y, rq2.z, rq2.w, s.x, s.y, s.z);
+  });
+  const onWmDirty = () => wm.markLocalDirty();
+  const [iqx, iqy, iqz, iqw] = eulerToQuat(rx, ry, rz);
+  const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onWmDirty);
+  mesh.rotationQuaternion = rq;
+  mesh.rotation = createEulerProxy(rq);
+  mesh.position = new ObservableVec3(px, py, pz, onWmDirty);
+  mesh.scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
+  if (!mesh.children) {
+    mesh.children = [];
+  }
+  Object.defineProperty(mesh, "parent", {
+    get() {
+      return wm.parent;
+    },
+    set(v) {
+      wm.parent = v;
+    },
+    configurable: true,
+    enumerable: true
+  });
+  Object.defineProperty(mesh, "worldMatrix", {
+    get() {
+      return wm.getWorldMatrix();
+    },
+    configurable: true,
+    enumerable: false
+  });
+  Object.defineProperty(mesh, "worldMatrixVersion", {
+    get() {
+      return wm.getWorldMatrixVersion();
+    },
+    configurable: true,
+    enumerable: false
+  });
+  attachWorldMatrixState(mesh, wm);
+}
+function uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors) {
+  const device = engine._device;
+  const positionBuffer = createMappedBuffer(engine, positions, BU.VERTEX);
+  const normalBuffer = createMappedBuffer(engine, normals, BU.VERTEX);
+  const indexBuffer = createMappedBuffer(engine, indices, BU.INDEX);
+  let uvBuffer;
+  if (uvs && uvs.length > 0) {
+    uvBuffer = createMappedBuffer(engine, uvs, BU.VERTEX);
+  } else {
+    uvBuffer = device.createBuffer({
+      size: positions.length / 3 * 8,
+      usage: BU.VERTEX,
+      mappedAtCreation: true
+    });
+    uvBuffer.unmap();
+  }
+  let uv2Buffer = null;
+  if (uvs2 && uvs2.length > 0) {
+    uv2Buffer = createMappedBuffer(engine, uvs2, BU.VERTEX);
+  }
+  const tangentBuffer = tangents && tangents.length > 0 ? createMappedBuffer(engine, tangents, BU.VERTEX) : null;
+  const colorBuffer = colors && colors.length > 0 ? createMappedBuffer(engine, colors, BU.VERTEX) : null;
+  return {
+    positionBuffer,
+    normalBuffer,
+    uvBuffer,
+    uv2Buffer,
+    tangentBuffer,
+    colorBuffer,
+    hasUv: !!uvs && uvs.length > 0,
+    hasUv2: !!uvs2 && uvs2.length > 0,
+    hasTangent: !!tangents && tangents.length > 0,
+    hasColor: !!colors && colors.length > 0,
+    indexBuffer,
+    indexCount: indices.length,
+    indexFormat: "uint32"
+  };
+}
+
+export { initMeshTransform, uploadMeshToGPU };
+//# sourceMappingURL=mesh.js.map

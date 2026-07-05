@@ -1,0 +1,17 @@
+import { createMaterialView } from '../material-view.js';
+import { MATERIAL_ALPHA_BLEND, GEOMETRY_OUTPUT } from './standard-flags.js';
+import { getStandardGeometryGroupBuilder } from './standard-geometry-renderable.js';
+
+function createStandardGeometryMaterialView(source, config) {
+  const baseFeatures = source._renderFeatures?.features ?? 0;
+  const view = createMaterialView(source, { features: baseFeatures & ~MATERIAL_ALPHA_BLEND | GEOMETRY_OUTPUT });
+  Object.defineProperty(view, "_geometryAttachments", { value: config.attachments, enumerable: false });
+  Object.defineProperty(view, "_emitColor", { value: config.emitColor, enumerable: false });
+  Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
+  Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
+  Object.defineProperty(view, "_buildGroup", { value: getStandardGeometryGroupBuilder(), enumerable: false });
+  return view;
+}
+
+export { createStandardGeometryMaterialView };
+//# sourceMappingURL=geometry-view.js.map

@@ -1,0 +1,237 @@
+import { ObservableVec3 } from '../math/observable-vec3.js';
+import { ObservableQuat } from '../math/observable-quat.js';
+import { createWorldMatrixState } from '../scene/world-matrix-state.js';
+import { createEulerProxy } from '../scene/scene-node.js';
+import { mat4Compose } from '../math/mat4-compose.js';
+import { mat4Identity } from '../math/mat4-identity.js';
+import { createEmptyUniformBuffer } from '../resource/gpu-buffers.js';
+import { addDeferredSceneRenderables } from '../scene/scene-core.js';
+import { mat4MultiplyInto } from '../math/mat4-multiply-into.js';
+import { getEffectiveAspectRatio, getViewProjectionMatrix } from '../camera/camera.js';
+import { TEXT_INSTANCE_BYTES } from './text-data.js';
+import { ensureSharedAtlasGpu } from './_gpu/text-textures.js';
+import { getOrCreateTextPipeline } from './_gpu/text-pipeline.js';
+
+const TEXT_UBO_BYTES = 64 + 16 + 16;
+const _mvpScratch = new Float32Array(16);
+function targetSig(target) {
+  return (target._colorFormat ?? "-") + ":" + (target._sampleCount ?? 1) + ":" + (target._depthStencilFormat ?? "-");
+}
+function createTextRenderable(data, options) {
+  const pos = options?.position;
+  const rq = options?.rotationQuaternion;
+  const sc = options?.scaling;
+  const initRq = rq ?? { x: 0, y: 0, z: 0, w: 1 };
+  const wm = createWorldMatrixState(() => {
+    const p = r.position;
+    const q = r.rotationQuaternion;
+    const s = r.scaling;
+    const isIdentity = p.x === 0 && p.y === 0 && p.z === 0 && q.x === 0 && q.y === 0 && q.z === 0 && q.w === 1 && s.x === 1 && s.y === 1 && s.z === 1;
+    return isIdentity ? mat4Identity() : mat4Compose(p.x, p.y, p.z, q.x, q.y, q.z, q.w, s.x, s.y, s.z);
+  });
+  const markDirty = () => {
+    r._wmDirty = true;
+    wm.markLocalDirty();
+  };
+  const quat = new ObservableQuat(initRq.x, initRq.y, initRq.z, initRq.w, markDirty);
+  const r = {
+    _entityType: "text",
+    order: options?.order ?? 200,
+    isTransparent: true,
+    position: new ObservableVec3(pos?.x ?? 0, pos?.y ?? 0, pos?.z ?? 0, markDirty),
+    rotationQuaternion: quat,
+    rotation: createEulerProxy(quat),
+    scaling: new ObservableVec3(sc?.x ?? 1, sc?.y ?? 1, sc?.z ?? 1, markDirty),
+    opacity: options?.opacity ?? 1,
+    ignoreDepth: options?.ignoreDepth ?? false,
+    _data: data,
+    _wmDirty: true,
+    _gpu: null,
+    _version: 0,
+    _worldMatrix: () => wm.getWorldMatrix(),
+    bind(engine, target) {
+      return bindTextRenderable(r, engine, target);
+    }
+  };
+  return r;
+}
+function ensureGpu(r, engine, target) {
+  const device = engine._device;
+  const sampleCount = target._sampleCount === 1 ? 1 : 4;
+  const colorFormat = target._colorFormat;
+  if (!colorFormat) {
+    throw new Error("TextRenderable: render target has no color format.");
+  }
+  const depthFormat = target._depthStencilFormat ?? null;
+  const depthWrite = !r.ignoreDepth;
+  const { pipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite);
+  const key = targetSig(target);
+  let gpu = r._gpu;
+  if (gpu && gpu.device !== device) {
+    gpu.textU.destroy();
+    gpu.instanceBuf.destroy();
+    gpu = null;
+  }
+  if (!gpu || gpu.targetKey !== key || gpu.pipeline !== pipeline) {
+    if (!gpu) {
+      const cap = Math.max(r._data._instanceCount, 8);
+      gpu = {
+        device,
+        textU: createEmptyUniformBuffer(engine, TEXT_UBO_BYTES, "text-renderable-ubo"),
+        instanceBuf: device.createBuffer({
+          label: "text-instance",
+          size: cap * TEXT_INSTANCE_BYTES,
+          usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+        }),
+        instanceCap: cap,
+        pipeline,
+        uploadedDataVersion: -1,
+        uploadedCameraVersion: -1,
+        uploadedAspect: -1,
+        uploadedViewportW: 0,
+        uploadedViewportH: 0,
+        uploadedOpacity: NaN,
+        targetKey: key
+      };
+      r._gpu = gpu;
+    } else {
+      gpu.pipeline = pipeline;
+      gpu.targetKey = key;
+      for (const g of r._data._groups) {
+        g.bindGroup = null;
+        g.bindGroupVersion = -1;
+      }
+    }
+  }
+  return gpu;
+}
+function ensureInstanceCapacity(device, gpu, needed) {
+  if (needed <= gpu.instanceCap) {
+    return;
+  }
+  let cap = gpu.instanceCap;
+  while (cap < needed) {
+    cap *= 2;
+  }
+  gpu.instanceBuf.destroy();
+  gpu.instanceBuf = device.createBuffer({
+    label: "text-instance",
+    size: cap * TEXT_INSTANCE_BYTES,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+  });
+  gpu.instanceCap = cap;
+  gpu.uploadedDataVersion = -1;
+}
+function bindTextRenderable(r, engine, target) {
+  const gpu = ensureGpu(r, engine, target);
+  const { cache } = getOrCreateTextPipeline(engine, target._colorFormat, target._sampleCount === 1 ? 1 : 4, target._depthStencilFormat ?? null, !r.ignoreDepth);
+  const quadVertex = cache.quadVertexBuffer;
+  const bindGroupLayout = cache.bindGroupLayout;
+  return {
+    renderable: r,
+    pipeline: gpu.pipeline,
+    update(context) {
+      updateTextRenderable(r, engine, gpu, bindGroupLayout, context);
+    },
+    draw(pass) {
+      return drawTextRenderable(gpu, r._data, quadVertex, pass);
+    }
+  };
+}
+function updateTextRenderable(r, engine, gpu, bindGroupLayout, context) {
+  const device = engine._device;
+  const data = r._data;
+  for (const g of data._groups) {
+    const { rebuilt, gpu: atlasGpu } = ensureSharedAtlasGpu(device, g.curveSet.atlas);
+    if (rebuilt || !g.bindGroup || g.bindGroupVersion !== atlasGpu.uploadedVersion) {
+      g.bindGroup = device.createBindGroup({
+        label: "text-bg0-" + g.curveSetId,
+        layout: bindGroupLayout,
+        entries: [
+          { binding: 0, resource: { buffer: gpu.textU } },
+          { binding: 1, resource: atlasGpu.curveTex.createView() },
+          { binding: 2, resource: atlasGpu.bandTex.createView() }
+        ]
+      });
+      g.bindGroupVersion = atlasGpu.uploadedVersion;
+    }
+  }
+  ensureInstanceCapacity(device, gpu, data._instanceCount);
+  if (gpu.uploadedDataVersion !== data._version) {
+    if (data._instanceCount > 0) {
+      const dirtyValid = gpu.uploadedDataVersion !== -1 && data._dirtyEnd > data._dirtyStart;
+      if (dirtyValid) {
+        const startFloats = data._dirtyStart * (TEXT_INSTANCE_BYTES / 4);
+        const endFloats = data._dirtyEnd * (TEXT_INSTANCE_BYTES / 4);
+        const view = data._instances.subarray(startFloats, endFloats);
+        device.queue.writeBuffer(gpu.instanceBuf, data._dirtyStart * TEXT_INSTANCE_BYTES, view.buffer, view.byteOffset, view.byteLength);
+      } else {
+        const view = data._instances.subarray(0, data._instanceCount * (TEXT_INSTANCE_BYTES / 4));
+        device.queue.writeBuffer(gpu.instanceBuf, 0, view.buffer, view.byteOffset, view.byteLength);
+      }
+    }
+    gpu.uploadedDataVersion = data._version;
+    data._dirtyStart = 0;
+    data._dirtyEnd = 0;
+  }
+  const camera = context._camera ?? null;
+  if (camera) {
+    const aspect = getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight);
+    const camVer = camera.worldMatrixVersion;
+    if (r._wmDirty || gpu.uploadedCameraVersion !== camVer || gpu.uploadedAspect !== aspect) {
+      const vp = getViewProjectionMatrix(camera, aspect);
+      const wm = r._worldMatrix();
+      mat4MultiplyInto(_mvpScratch, 0, vp, 0, wm, 0);
+      device.queue.writeBuffer(gpu.textU, 0, _mvpScratch.buffer, _mvpScratch.byteOffset, 64);
+      r._wmDirty = false;
+      gpu.uploadedCameraVersion = camVer;
+      gpu.uploadedAspect = aspect;
+    }
+  }
+  if (gpu.uploadedViewportW !== context.targetWidth || gpu.uploadedViewportH !== context.targetHeight) {
+    const vp = new Float32Array([context.targetWidth, context.targetHeight, 0, 0]);
+    device.queue.writeBuffer(gpu.textU, 64, vp.buffer, vp.byteOffset, 16);
+    gpu.uploadedViewportW = context.targetWidth;
+    gpu.uploadedViewportH = context.targetHeight;
+  }
+  if (gpu.uploadedOpacity !== r.opacity) {
+    const col = new Float32Array([1, 1, 1, r.opacity]);
+    device.queue.writeBuffer(gpu.textU, 80, col.buffer, col.byteOffset, 16);
+    gpu.uploadedOpacity = r.opacity;
+  }
+}
+function drawTextRenderable(gpu, data, quadVertex, pass) {
+  if (data._instanceCount === 0) {
+    return 0;
+  }
+  pass.setVertexBuffer(0, quadVertex);
+  pass.setVertexBuffer(1, gpu.instanceBuf);
+  let draws = 0;
+  for (const g of data._groups) {
+    if (g.slotCount === 0 || !g.bindGroup) {
+      continue;
+    }
+    pass.setBindGroup(0, g.bindGroup);
+    pass.draw(6, g.slotCount, 0, g.slotStart);
+    draws++;
+  }
+  return draws;
+}
+function disposeTextRenderable(renderable) {
+  if (renderable._gpu) {
+    renderable._gpu.textU.destroy();
+    renderable._gpu.instanceBuf.destroy();
+    renderable._gpu = null;
+  }
+}
+function addTextRenderable(scene, renderable) {
+  addDeferredSceneRenderables(scene, () => {
+    return {
+      renderables: [renderable],
+      dispose: () => disposeTextRenderable(renderable)
+    };
+  });
+}
+
+export { addTextRenderable, createTextRenderable, disposeTextRenderable };
+//# sourceMappingURL=text-renderable.js.map

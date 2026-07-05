@@ -1,0 +1,139 @@
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+import { createNavigationPluginAsync, updateNavCrowd, getAgentPosition, addAgent, agentGoto, createNavMesh, addCylinderObstacle, addBoxObstacle, removeObstacle, updateNavMeshObstacles, createDebugNavMeshGeometry, createMeshFromData, addToScene, getClosestPoint, computePath, raycast, createNavCrowd } from "@babylonjs/lite";
+import { V as Vector3, a as Mesh } from "./meshes-a59_KvbH.js";
+class RecastJSCrowd {
+  constructor(lite, plugin, scene) {
+    /** @internal */
+    __publicField(this, "_lite");
+    __publicField(this, "_transforms", /* @__PURE__ */ new Map());
+    __publicField(this, "_plugin");
+    this._lite = lite;
+    this._plugin = plugin;
+    scene.onBeforeRenderObservable.add(() => {
+      updateNavCrowd(this._lite, 1 / 60 * this._plugin.timeFactor);
+      for (const [index, transform] of this._transforms) {
+        const p = getAgentPosition(this._lite, index);
+        transform.position.set(p.x, p.y, p.z);
+      }
+    });
+  }
+  /** Babylon.js `crowd.addAgent(pos, parameters, transform)` — returns the agent index. */
+  addAgent(pos, parameters, transform) {
+    const index = addAgent(this._lite, { x: pos.x, y: pos.y, z: pos.z }, parameters);
+    this._transforms.set(index, transform);
+    return index;
+  }
+  /** Babylon.js `crowd.getAgentPosition(index)`. */
+  getAgentPosition(index) {
+    const p = getAgentPosition(this._lite, index);
+    return new Vector3(p.x, p.y, p.z);
+  }
+  /** Babylon.js `crowd.agentGoto(index, destination)` — request the agent to move toward a target. */
+  agentGoto(index, destination) {
+    agentGoto(this._lite, index, { x: destination.x, y: destination.y, z: destination.z });
+  }
+}
+class RecastNavigationJSPluginV2 {
+  constructor(lite) {
+    /** @internal */
+    __publicField(this, "_lite");
+    /**
+     * Babylon.js `plugin.timeFactor` — multiplier applied to each crowd update step.
+     * `0` pauses crowd movement (used by parity tests); default `1`.
+     */
+    __publicField(this, "timeFactor", 1);
+    this._lite = lite;
+  }
+  /**
+   * Babylon.js `plugin.createNavMesh(meshes, parameters)`. Returns a
+   * `{ navMesh, tileCache }` handle (both reference this plugin) so scenes using
+   * the tile-cache obstacle API can pass them to {@link WaitForFullTileCacheUpdate}.
+   * Scenes that ignore the return (the non-obstacle navmesh scenes) are unaffected.
+   */
+  createNavMesh(meshes, parameters) {
+    createNavMesh(
+      this._lite,
+      meshes.map((m) => m._lite),
+      parameters
+    );
+    return { navMesh: this, tileCache: this };
+  }
+  /** Babylon.js `plugin.addCylinderObstacle(position, radius, height)` — tile-cache obstacle. */
+  addCylinderObstacle(position, radius, height) {
+    return addCylinderObstacle(this._lite, { x: position.x, y: position.y, z: position.z }, radius, height);
+  }
+  /** Babylon.js `plugin.addBoxObstacle(position, extent, angle)` — tile-cache obstacle (`extent` = half-extents). */
+  addBoxObstacle(position, extent, angle) {
+    return addBoxObstacle(this._lite, { x: position.x, y: position.y, z: position.z }, { x: extent.x, y: extent.y, z: extent.z }, angle);
+  }
+  /** Babylon.js `plugin.removeObstacle(obstacle)` — remove a previously-added tile-cache obstacle. */
+  removeObstacle(obstacle) {
+    removeObstacle(this._lite, obstacle);
+  }
+  /** @internal Apply pending tile-cache obstacle updates (drives {@link WaitForFullTileCacheUpdate}). */
+  _updateObstacles() {
+    updateNavMeshObstacles(this._lite);
+  }
+  /** Babylon.js `plugin.createDebugNavMesh(scene)` — builds a renderable debug mesh. */
+  createDebugNavMesh(scene) {
+    const geo = createDebugNavMeshGeometry(this._lite);
+    const engine = scene.getEngine()._lite;
+    const lite = createMeshFromData(engine, "navDebugMesh", geo.positions, geo.normals, geo.indices);
+    const mesh = new Mesh("navDebugMesh", lite, scene);
+    scene._deferAdd(() => {
+      const mat = mesh.material;
+      mat == null ? void 0 : mat._ensureRenderable(engine);
+      if (mat == null ? void 0 : mat._lite) {
+        mesh._lite.material = mat._lite;
+      }
+      addToScene(scene._lite, mesh._lite);
+    });
+    return mesh;
+  }
+  /** Babylon.js `plugin.getClosestPoint(position)` — snap to the navmesh. */
+  getClosestPoint(position) {
+    const p = getClosestPoint(this._lite, { x: position.x, y: position.y, z: position.z });
+    return new Vector3(p.x, p.y, p.z);
+  }
+  /** Babylon.js `plugin.computePath(start, end)` — navmesh-snapped path as world points. */
+  computePath(start, end) {
+    const points = computePath(this._lite, { x: start.x, y: start.y, z: start.z }, { x: end.x, y: end.y, z: end.z });
+    return points.map((p) => new Vector3(p.x, p.y, p.z));
+  }
+  /** Babylon.js `plugin.computePathSmooth(start, end)` — alias of {@link computePath} (Lite smooths internally). */
+  computePathSmooth(start, end) {
+    return this.computePath(start, end);
+  }
+  /**
+   * Babylon.js `plugin.raycast(start, end)` — walkability raycast on the navmesh.
+   * Returns `{ hit, hitPoint? }` (`hitPoint` is a `Vector3` when `hit`).
+   */
+  raycast(start, end) {
+    const r = raycast(this._lite, { x: start.x, y: start.y, z: start.z }, { x: end.x, y: end.y, z: end.z });
+    return r.hit && r.hitPoint ? { hit: true, hitPoint: new Vector3(r.hitPoint.x, r.hitPoint.y, r.hitPoint.z) } : { hit: false };
+  }
+  /** Babylon.js `plugin.createCrowd(maxAgents, maxAgentRadius, scene)`. */
+  createCrowd(maxAgents, maxAgentRadius, scene) {
+    const crowd = createNavCrowd(this._lite, maxAgents, maxAgentRadius);
+    return new RecastJSCrowd(crowd, this, scene);
+  }
+}
+async function CreateNavigationPluginAsync(_options) {
+  const lite = await createNavigationPluginAsync({ locateFile: () => "/recast-navigation.wasm" });
+  return new RecastNavigationJSPluginV2(lite);
+}
+function WaitForFullTileCacheUpdate(navMesh, _tileCache) {
+  const plugin = navMesh;
+  if (plugin && typeof plugin._updateObstacles === "function") {
+    plugin._updateObstacles();
+  }
+}
+export {
+  CreateNavigationPluginAsync,
+  RecastJSCrowd,
+  RecastNavigationJSPluginV2,
+  WaitForFullTileCacheUpdate
+};
+//# sourceMappingURL=navigation.js.map

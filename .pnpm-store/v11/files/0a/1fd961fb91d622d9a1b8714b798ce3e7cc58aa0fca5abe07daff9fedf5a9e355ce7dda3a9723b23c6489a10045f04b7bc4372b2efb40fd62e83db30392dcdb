@@ -1,0 +1,39 @@
+import { type IInspectorOptions as InspectorV1Options, type Scene } from "@babylonjs/core/index.js";
+import { type InspectorOptions as InspectorV2Options } from "../inspector";
+import { Observable } from "@babylonjs/core/Misc/observable.js";
+type PropertyChangedEvent = {
+    object: any;
+    property: string;
+    value: any;
+    initialValue: any;
+    allowNullValue?: boolean;
+};
+/**
+ * Converts Inspector v1 options to Inspector v2 options.
+ * @param v1Options Inspector v1 options.
+ * @returns Inspector v2 options.
+ */
+export declare function ConvertOptions(v1Options: Partial<InspectorV1Options>): Partial<InspectorV2Options>;
+/**
+ * @deprecated This class only exists for backward compatibility. Use the module-level ShowInspector function instead.
+ */
+export declare class Inspector {
+    private static _CurrentInstance;
+    private static _PopupToggler;
+    private static _SidePaneOpenCounter;
+    private static get _OpenedPane();
+    static readonly OnSelectionChangeObservable: Observable<any>;
+    static readonly OnPropertyChangedObservable: Observable<PropertyChangedEvent>;
+    private static readonly _OnMarkLineContainerObservable;
+    static MarkLineContainerTitleForHighlighting(title: string): void;
+    static MarkMultipleLineContainerTitlesForHighlighting(titles: string[]): void;
+    static PopupEmbed(): void;
+    static PopupSceneExplorer(): void;
+    static PopupInspector(): void;
+    static get IsVisible(): boolean;
+    static Show(scene: Scene, userOptions: Partial<InspectorV1Options>): void;
+    private static _Show;
+    static Hide(): void;
+    private static _SetNewScene;
+}
+export {};

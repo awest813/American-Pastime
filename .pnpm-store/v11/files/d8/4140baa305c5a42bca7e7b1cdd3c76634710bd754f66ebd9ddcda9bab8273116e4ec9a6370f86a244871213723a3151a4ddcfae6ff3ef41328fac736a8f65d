@@ -1,0 +1,43 @@
+import { createTiCullState, destroyTiCullState, prepareTiCull } from './thin-instance-gpu-culling.js';
+
+function tryBind(renderable, scene, mesh, engine, hasColor, excluded, baseUpdate, signature) {
+  const ti = mesh.thinInstances;
+  if (excluded || !ti?._gpuCullingEnabled) {
+    return void 0;
+  }
+  renderable._direct = true;
+  const holder = renderable;
+  const cache = holder._tiCullStates ??= /* @__PURE__ */ new WeakMap();
+  let state = cache.get(signature);
+  if (!state) {
+    state = createTiCullState();
+    cache.set(signature, state);
+    const owned = state;
+    scene._meshDisposables.get(mesh)?.push(() => {
+      destroyTiCullState(owned);
+    });
+  } else {
+    state._localSphereReady = false;
+  }
+  const binding = {
+    cullDrawBufs: null,
+    _args: null,
+    update(context) {
+      baseUpdate?.(context);
+      const res = prepareTiCull(engine, state, mesh, mesh._gpu, ti, hasColor, context);
+      binding.cullDrawBufs = res?.drawBuffers ?? null;
+      binding._args = res?.argsBuffer ?? null;
+    },
+    draw(pass, indexCount, instanceCount) {
+      if (binding._args) {
+        pass.drawIndexedIndirect(binding._args, 0);
+      } else {
+        pass.drawIndexed(indexCount, instanceCount);
+      }
+    }
+  };
+  return binding;
+}
+
+export { tryBind };
+//# sourceMappingURL=thin-instance-cull-binding.js.map

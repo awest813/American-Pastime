@@ -1,0 +1,10 @@
+import { type FunctionComponent } from "react";
+import { type Observable } from "@babylonjs/core/Misc/observable.js";
+import { type PerformanceViewerCollector } from "@babylonjs/core/Misc/PerformanceViewer/performanceViewerCollector.js";
+import { type VisibleRangeChangedObservableProps } from "./graphSupportingTypes";
+interface IPerformanceSidebarProps {
+    collector: PerformanceViewerCollector;
+    onVisibleRangeChangedObservable?: Observable<VisibleRangeChangedObservableProps>;
+}
+export declare const PerformanceSidebar: FunctionComponent<IPerformanceSidebarProps>;
+export {};

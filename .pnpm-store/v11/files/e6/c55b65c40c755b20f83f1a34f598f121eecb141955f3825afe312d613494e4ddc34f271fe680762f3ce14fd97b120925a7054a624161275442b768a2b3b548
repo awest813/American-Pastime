@@ -1,0 +1,234 @@
+import { addToScene } from '../scene/scene-core.js';
+import { removeFromScene } from '../scene/scene-remove.js';
+import { createBox, createCylinder } from '../mesh/mesh-factories.js';
+import { createTransformNode } from '../scene/transform-node.js';
+import { createStandardMaterial } from '../material/standard/create-standard-material.js';
+import { attachFollowTarget } from './gizmo-core.js';
+import { quatFromBjsEuler } from './gizmo-math.js';
+
+const CAMERA_BODY_SCALE = 0.05;
+const FRUSTUM_EDGE_THICKNESS = 0.036;
+function buildCameraBodyMesh(engine, scene, material, bodyMesh) {
+  const meshes = [];
+  const rotX = quatFromBjsEuler(Math.PI * 0.5, 0, 0);
+  const rotZ = quatFromBjsEuler(0, 0, Math.PI * 0.5);
+  const box = createBox(engine, 1);
+  box.scaling.set(1, 0.8, 0.5);
+  box.material = material;
+  box.pickable = false;
+  box.parent = bodyMesh;
+  addToScene(scene, box);
+  meshes.push(box);
+  const cyl1 = createCylinder(engine, { height: 0.5, diameterTop: 0.8, diameterBottom: 0.8, tessellation: 24 });
+  cyl1.material = material;
+  cyl1.pickable = false;
+  cyl1.position.set(-0.6, 0.3, 0);
+  cyl1.rotationQuaternion.set(rotX[0], rotX[1], rotX[2], rotX[3]);
+  cyl1.parent = bodyMesh;
+  addToScene(scene, cyl1);
+  meshes.push(cyl1);
+  const cyl2 = createCylinder(engine, { height: 0.5, diameterTop: 0.6, diameterBottom: 0.6, tessellation: 24 });
+  cyl2.material = material;
+  cyl2.pickable = false;
+  cyl2.position.set(0.4, 0.5, 0);
+  cyl2.rotationQuaternion.set(rotX[0], rotX[1], rotX[2], rotX[3]);
+  cyl2.parent = bodyMesh;
+  addToScene(scene, cyl2);
+  meshes.push(cyl2);
+  const cyl3 = createCylinder(engine, { height: 0.5, diameterTop: 0.5, diameterBottom: 0.5, tessellation: 24 });
+  cyl3.material = material;
+  cyl3.pickable = false;
+  cyl3.position.set(0.6, 0, 0);
+  cyl3.rotationQuaternion.set(rotZ[0], rotZ[1], rotZ[2], rotZ[3]);
+  cyl3.parent = bodyMesh;
+  addToScene(scene, cyl3);
+  meshes.push(cyl3);
+  return meshes;
+}
+function buildFrustumEdge(engine, utilityScene, material, root, thickness, a, b) {
+  const mesh = createCylinder(engine, { height: 1, diameterTop: thickness, diameterBottom: thickness, tessellation: 6 });
+  mesh.material = material;
+  mesh.pickable = false;
+  mesh.parent = root;
+  addToScene(utilityScene, mesh);
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  const len = Math.hypot(dx, dy, dz) || 1;
+  mesh.position.set((a.x + b.x) * 0.5, (a.y + b.y) * 0.5, (a.z + b.z) * 0.5);
+  mesh.scaling.set(1, len, 1);
+  const nx = dx / len, ny = dy / len, nz = dz / len;
+  const cx = 1 * nz - 0 * ny;
+  const cy = 0 * nx - 0 * nz;
+  const cz = 0 * ny - 1 * nx;
+  const cLen = Math.hypot(cx, cy, cz);
+  const dot = 0 * nx + 1 * ny + 0 * nz;
+  if (cLen < 1e-7) {
+    if (dot > 0) {
+      mesh.rotationQuaternion.set(0, 0, 0, 1);
+    } else {
+      mesh.rotationQuaternion.set(1, 0, 0, 0);
+    }
+  } else {
+    const angle = Math.atan2(cLen, dot);
+    const s = Math.sin(angle * 0.5);
+    mesh.rotationQuaternion.set(cx / cLen * s, cy / cLen * s, cz / cLen * s, Math.cos(angle * 0.5));
+  }
+  return mesh;
+}
+function buildFrustumWireframe(engine, utilityScene, material, root, fov, aspect, nearPlane, farPlane) {
+  const tanHalf = Math.tan(fov * 0.5);
+  const nearP = Math.max(nearPlane, 1e-4);
+  const far = Math.max(farPlane, nearP);
+  const near = far * nearP / (2 * far - nearP);
+  const nh = tanHalf * near;
+  const nw = nh * aspect;
+  const fh = tanHalf * far;
+  const fw = fh * aspect;
+  const corners = [
+    { x: -nw, y: -nh, z: +near },
+    { x: +nw, y: -nh, z: +near },
+    { x: +nw, y: +nh, z: +near },
+    { x: -nw, y: +nh, z: +near },
+    { x: -fw, y: -fh, z: +far },
+    { x: +fw, y: -fh, z: +far },
+    { x: +fw, y: +fh, z: +far },
+    { x: -fw, y: +fh, z: +far }
+  ];
+  const edgePairs = [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 0],
+    [4, 5],
+    [5, 6],
+    [6, 7],
+    [7, 4],
+    [0, 4],
+    [1, 5],
+    [2, 6],
+    [3, 7]
+  ];
+  const meshes = [];
+  for (const [i, j] of edgePairs) {
+    meshes.push(buildFrustumEdge(engine, utilityScene, material, root, FRUSTUM_EDGE_THICKNESS, corners[i], corners[j]));
+  }
+  return meshes;
+}
+function createCameraGizmo(engine, layer, options = {}) {
+  const bodyColor = options.color ?? [0.5, 0.5, 0.5];
+  const frustumColor = options.frustumColor ?? [1, 1, 1];
+  const displayFrustum = options.displayFrustum ?? true;
+  const displayBody = options.displayBody ?? true;
+  const utilityScene = layer.scene;
+  const material = createStandardMaterial();
+  material.diffuseColor = bodyColor;
+  material.specularColor = [0.1, 0.1, 0.1];
+  const frustumMaterial = createStandardMaterial();
+  frustumMaterial.diffuseColor = frustumColor;
+  frustumMaterial.emissiveColor = [1, 1, 1];
+  frustumMaterial.disableLighting = true;
+  const root = createTransformNode("cameraGizmoRoot", 0, 0, 0, 0, 0, 0, 1);
+  addToScene(utilityScene, root);
+  const gizmo = {
+    root,
+    material,
+    frustumMaterial,
+    attachedCamera: null,
+    _meshes: [root],
+    _frustumEdges: [],
+    _bodyOuter: null,
+    _disposeFollow: () => void 0
+  };
+  if (displayBody) {
+    const outerRot = quatFromBjsEuler(0, -Math.PI * 0.5, 0);
+    const bodyOuter = createTransformNode("cameraBodyOuter", 0, 0, 0, outerRot[0], outerRot[1], outerRot[2], outerRot[3]);
+    bodyOuter.parent = root;
+    const bodyMesh = createTransformNode("cameraBodyMesh", -0.9, 0, 0, 0, 0, 0, 1);
+    bodyMesh.parent = bodyOuter;
+    const bodyMeshes = buildCameraBodyMesh(engine, utilityScene, material, bodyMesh);
+    gizmo._bodyOuter = bodyOuter;
+    gizmo._meshes.push(bodyOuter, bodyMesh, ...bodyMeshes);
+  }
+  const _ensureFrustum = (cam) => {
+    if (!displayFrustum || gizmo._frustumEdges.length > 0) {
+      return;
+    }
+    const canvas = engine.canvas;
+    const aspect = canvas.width > 0 && canvas.height > 0 ? canvas.width / canvas.height : 16 / 9;
+    const fov = cam.fov ?? 0.8;
+    const nearPlane = cam.nearPlane ?? 0.1;
+    const farPlane = cam.farPlane ?? 100;
+    const edges = buildFrustumWireframe(engine, utilityScene, frustumMaterial, root, fov, aspect, nearPlane, farPlane);
+    gizmo._frustumEdges = edges;
+    gizmo._meshes.push(...edges);
+  };
+  gizmo._ensureFrustum = _ensureFrustum;
+  gizmo._disposeFollow = attachFollowTarget(
+    utilityScene,
+    root,
+    () => gizmo.attachedCamera ? cameraAsSceneNode(gizmo.attachedCamera) : null,
+    null,
+    (_target, wm) => {
+      const [qx, qy, qz, qw] = quatFromMat4Upper3x3(wm);
+      root.rotationQuaternion.set(qx, qy, qz, qw);
+      if (gizmo._bodyOuter) {
+        const cam = utilityScene.camera;
+        let dist = CAMERA_BODY_SCALE;
+        if (cam) {
+          const cw = cam.worldMatrix;
+          dist = Math.hypot(cw[12] - wm[12], cw[13] - wm[13], cw[14] - wm[14]) * CAMERA_BODY_SCALE;
+        }
+        gizmo._bodyOuter.scaling.set(dist, dist, dist);
+      }
+    }
+  );
+  return gizmo;
+}
+function attachCameraGizmoToCamera(gizmo, camera) {
+  gizmo.attachedCamera = camera;
+  if (camera) {
+    const ensure = gizmo._ensureFrustum;
+    if (ensure) {
+      ensure(camera);
+    }
+  }
+}
+function disposeCameraGizmo(gizmo, layer) {
+  gizmo._disposeFollow();
+  for (const m of gizmo._meshes) {
+    if ("_gpu" in m) {
+      removeFromScene(layer.scene, m);
+    } else {
+      m.parent = null;
+    }
+  }
+  gizmo._meshes.length = 0;
+}
+function cameraAsSceneNode(cam) {
+  return cam;
+}
+function quatFromMat4Upper3x3(m) {
+  const sx = Math.hypot(m[0], m[1], m[2]) || 1;
+  const sy = Math.hypot(m[4], m[5], m[6]) || 1;
+  const sz = Math.hypot(m[8], m[9], m[10]) || 1;
+  const m00 = m[0] / sx, m01 = m[4] / sy, m02 = m[8] / sz;
+  const m10 = m[1] / sx, m11 = m[5] / sy, m12 = m[9] / sz;
+  const m20 = m[2] / sx, m21 = m[6] / sy, m22 = m[10] / sz;
+  const trace = m00 + m11 + m22;
+  if (trace > 0) {
+    const s2 = 0.5 / Math.sqrt(trace + 1);
+    return [(m21 - m12) * s2, (m02 - m20) * s2, (m10 - m01) * s2, 0.25 / s2];
+  }
+  if (m00 > m11 && m00 > m22) {
+    const s2 = 2 * Math.sqrt(1 + m00 - m11 - m22);
+    return [0.25 * s2, (m01 + m10) / s2, (m02 + m20) / s2, (m21 - m12) / s2];
+  }
+  if (m11 > m22) {
+    const s2 = 2 * Math.sqrt(1 + m11 - m00 - m22);
+    return [(m01 + m10) / s2, 0.25 * s2, (m12 + m21) / s2, (m02 - m20) / s2];
+  }
+  const s = 2 * Math.sqrt(1 + m22 - m00 - m11);
+  return [(m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s];
+}
+
+export { attachCameraGizmoToCamera, createCameraGizmo, disposeCameraGizmo };
+//# sourceMappingURL=camera-gizmo.js.map

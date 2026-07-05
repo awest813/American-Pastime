@@ -1,0 +1,285 @@
+import { type FunctionComponent } from "react";
+import { PBRBaseMaterial } from "@babylonjs/core/Materials/PBR/pbrBaseMaterial.js";
+import { type ISelectionService } from "../../../services/selectionService";
+declare module "@babylonjs/core/Materials/PBR/pbrSheenConfiguration.js" {
+    interface PBRSheenConfiguration {
+        _useRoughness: boolean;
+    }
+}
+export declare const LightFalloffOptions: [{
+    readonly label: "Physical";
+    readonly value: 0;
+}, {
+    readonly label: "glTF";
+    readonly value: 1;
+}, {
+    readonly label: "Standard";
+    readonly value: 2;
+}];
+export declare const RealTimeFilteringQualityOptions: [{
+    readonly label: "Low";
+    readonly value: 8;
+}, {
+    readonly label: "Medium";
+    readonly value: 16;
+}, {
+    readonly label: "High";
+    readonly value: 64;
+}];
+export declare const BaseDiffuseModelOptions: [{
+    readonly label: "Lambert";
+    readonly value: 2;
+}, {
+    readonly label: "Burley";
+    readonly value: 1;
+}, {
+    readonly label: "OpenPBR";
+    readonly value: 0;
+}];
+export declare const DielectricSpecularModelOptions: [{
+    readonly label: "glTF";
+    readonly value: 0;
+}, {
+    readonly label: "OpenPBR";
+    readonly value: 1;
+}];
+export declare const ConductorSpecularModelOptions: [{
+    readonly label: "glTF";
+    readonly value: 0;
+}, {
+    readonly label: "OpenPBR";
+    readonly value: 1;
+}];
+export declare const DebugMode: [{
+    readonly label: "None";
+    readonly value: 0;
+}, {
+    readonly label: "Normalized position";
+    readonly value: 1;
+}, {
+    readonly label: "Normals";
+    readonly value: 2;
+}, {
+    readonly label: "Tangents";
+    readonly value: 3;
+}, {
+    readonly label: "Bitangents";
+    readonly value: 4;
+}, {
+    readonly label: "Bump Normals";
+    readonly value: 5;
+}, {
+    readonly label: "UV1";
+    readonly value: 6;
+}, {
+    readonly label: "UV2";
+    readonly value: 7;
+}, {
+    readonly label: "ClearCoat Normals";
+    readonly value: 8;
+}, {
+    readonly label: "ClearCoat Tangents";
+    readonly value: 9;
+}, {
+    readonly label: "ClearCoat Bitangents";
+    readonly value: 10;
+}, {
+    readonly label: "Anisotropic Normals";
+    readonly value: 11;
+}, {
+    readonly label: "Anisotropic Tangents";
+    readonly value: 12;
+}, {
+    readonly label: "Anisotropic Bitangents";
+    readonly value: 13;
+}, {
+    readonly label: "Albedo Map";
+    readonly value: 20;
+}, {
+    readonly label: "Ambient Map";
+    readonly value: 21;
+}, {
+    readonly label: "Opacity Map";
+    readonly value: 22;
+}, {
+    readonly label: "Emissive Map";
+    readonly value: 23;
+}, {
+    readonly label: "Light Map";
+    readonly value: 24;
+}, {
+    readonly label: "Metallic Map";
+    readonly value: 25;
+}, {
+    readonly label: "Reflectivity Map";
+    readonly value: 26;
+}, {
+    readonly label: "ClearCoat Map";
+    readonly value: 27;
+}, {
+    readonly label: "ClearCoat Tint Map";
+    readonly value: 28;
+}, {
+    readonly label: "Sheen Map";
+    readonly value: 29;
+}, {
+    readonly label: "Anisotropic Map";
+    readonly value: 30;
+}, {
+    readonly label: "Thickness Map";
+    readonly value: 31;
+}, {
+    readonly label: "Bump Map";
+    readonly value: 32;
+}, {
+    readonly label: "Env Refraction";
+    readonly value: 40;
+}, {
+    readonly label: "Env Reflection";
+    readonly value: 41;
+}, {
+    readonly label: "Env Clear Coat";
+    readonly value: 42;
+}, {
+    readonly label: "Direct Diffuse";
+    readonly value: 50;
+}, {
+    readonly label: "Direct Specular";
+    readonly value: 51;
+}, {
+    readonly label: "Direct Clear Coat";
+    readonly value: 52;
+}, {
+    readonly label: "Direct Sheen";
+    readonly value: 53;
+}, {
+    readonly label: "Env Irradiance";
+    readonly value: 54;
+}, {
+    readonly label: "Surface Albedo";
+    readonly value: 60;
+}, {
+    readonly label: "Reflectance 0";
+    readonly value: 61;
+}, {
+    readonly label: "Metallic";
+    readonly value: 62;
+}, {
+    readonly label: "Metallic F0";
+    readonly value: 71;
+}, {
+    readonly label: "Roughness";
+    readonly value: 63;
+}, {
+    readonly label: "AlphaG";
+    readonly value: 64;
+}, {
+    readonly label: "NdotV";
+    readonly value: 65;
+}, {
+    readonly label: "ClearCoat Color";
+    readonly value: 66;
+}, {
+    readonly label: "ClearCoat Roughness";
+    readonly value: 67;
+}, {
+    readonly label: "ClearCoat NdotV";
+    readonly value: 68;
+}, {
+    readonly label: "Transmittance";
+    readonly value: 69;
+}, {
+    readonly label: "Refraction Transmittance";
+    readonly value: 70;
+}, {
+    readonly label: "Glossiness";
+    readonly value: 72;
+}, {
+    readonly label: "Base Color";
+    readonly value: 73;
+}, {
+    readonly label: "Specular Color";
+    readonly value: 74;
+}, {
+    readonly label: "Emissive Color";
+    readonly value: 75;
+}, {
+    readonly label: "SEO";
+    readonly value: 80;
+}, {
+    readonly label: "EHO";
+    readonly value: 81;
+}, {
+    readonly label: "Energy Factor";
+    readonly value: 82;
+}, {
+    readonly label: "Specular Reflectance";
+    readonly value: 83;
+}, {
+    readonly label: "Clear Coat Reflectance";
+    readonly value: 84;
+}, {
+    readonly label: "Sheen Reflectance";
+    readonly value: 85;
+}, {
+    readonly label: "Luminance Over Alpha";
+    readonly value: 86;
+}, {
+    readonly label: "Alpha";
+    readonly value: 87;
+}, {
+    readonly label: "Albedo Alpha";
+    readonly value: 88;
+}, {
+    readonly label: "Ambient occlusion color";
+    readonly value: 89;
+}];
+export declare const PBRBaseMaterialGeneralProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+}>;
+export declare const PBRBaseMaterialTransparencyProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+}>;
+export declare const PBRBaseMaterialChannelsProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+    selectionService: ISelectionService;
+}>;
+export declare const PBRBaseMaterialLightingAndColorProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+}>;
+export declare const PBRBaseMaterialMetallicWorkflowProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+    selectionService: ISelectionService;
+}>;
+export declare const PBRBaseMaterialClearCoatProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+    selectionService: ISelectionService;
+}>;
+export declare const PBRBaseMaterialIridescenceProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+    selectionService: ISelectionService;
+}>;
+export declare const PBRBaseMaterialAnisotropicProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+    selectionService: ISelectionService;
+}>;
+export declare const PBRBaseMaterialSheenProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+    selectionService: ISelectionService;
+}>;
+export declare const PBRBaseMaterialSubSurfaceProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+    selectionService: ISelectionService;
+}>;
+export declare const PBRBaseMaterialLevelProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+}>;
+export declare const PBRBaseMaterialRenderingProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+}>;
+export declare const PBRBaseMaterialAdvancedProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+}>;
+export declare const PBRBaseMaterialDebugProperties: FunctionComponent<{
+    material: PBRBaseMaterial;
+}>;

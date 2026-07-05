@@ -1,0 +1,25 @@
+import { _installAnimationMaskResolver } from '../skeleton/skeleton-updater.js';
+
+var AnimationGroupMaskMode = /* @__PURE__ */ ((AnimationGroupMaskMode2) => {
+  AnimationGroupMaskMode2[AnimationGroupMaskMode2["Include"] = 0] = "Include";
+  AnimationGroupMaskMode2[AnimationGroupMaskMode2["Exclude"] = 1] = "Exclude";
+  return AnimationGroupMaskMode2;
+})(AnimationGroupMaskMode || {});
+function animationGroupMaskRetainsTarget(mask, name) {
+  if (mask.disabled) {
+    return true;
+  }
+  return mask.names.indexOf(name) !== -1 === (mask.mode === 0 /* Include */);
+}
+function resolveAnimationMask(mask, nodeNames, out, numNodes) {
+  for (let i = 0; i < numNodes; i++) {
+    out[i] = animationGroupMaskRetainsTarget(mask, nodeNames[i] ?? "") ? 0 : 1;
+  }
+}
+function createAnimationGroupMask(names = [], mode = 0 /* Include */) {
+  _installAnimationMaskResolver(resolveAnimationMask);
+  return { mode, names: names.slice(), disabled: false };
+}
+
+export { AnimationGroupMaskMode, animationGroupMaskRetainsTarget, createAnimationGroupMask };
+//# sourceMappingURL=animation-group-mask.js.map

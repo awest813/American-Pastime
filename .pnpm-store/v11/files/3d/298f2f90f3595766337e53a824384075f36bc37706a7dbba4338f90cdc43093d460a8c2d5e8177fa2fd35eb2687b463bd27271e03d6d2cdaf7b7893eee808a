@@ -1,0 +1,5 @@
+import { type PointLight } from "@babylonjs/core/index.js";
+import { type FunctionComponent } from "react";
+export declare const PointLightSetupProperties: FunctionComponent<{
+    context: PointLight;
+}>;

@@ -1,0 +1,6 @@
+const NODE_NO_COLOR_OUTPUT = 1 << 0;
+const NODE_ESM_SHADOW_OUTPUT = 1 << 1;
+const NODE_GEOMETRY_OUTPUT = 1 << 2;
+
+export { NODE_ESM_SHADOW_OUTPUT, NODE_GEOMETRY_OUTPUT, NODE_NO_COLOR_OUTPUT };
+//# sourceMappingURL=node-flags.js.map

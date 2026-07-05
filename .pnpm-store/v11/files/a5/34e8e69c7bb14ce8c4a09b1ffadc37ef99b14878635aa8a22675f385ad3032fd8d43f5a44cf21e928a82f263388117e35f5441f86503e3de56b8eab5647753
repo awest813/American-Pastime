@@ -1,0 +1,3 @@
+import { type IWatcherService } from "../services/watcherService";
+export declare const WatcherContext: import("react").Context<IWatcherService>;
+export declare function useWatcher(): IWatcherService;

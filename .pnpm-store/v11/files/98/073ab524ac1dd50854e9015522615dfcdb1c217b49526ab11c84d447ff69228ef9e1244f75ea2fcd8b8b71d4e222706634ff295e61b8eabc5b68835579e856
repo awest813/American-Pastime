@@ -1,0 +1,19 @@
+import { createMaterialView } from '../material-view.js';
+import { NODE_GEOMETRY_OUTPUT } from './node-flags.js';
+import { getNodeGeometryGroupBuilder } from './node-geometry-renderable.js';
+
+function createNodeGeometryMaterialView(source, config) {
+  if (config.emitColor) {
+    throw new Error("NodeMaterial geometry view: emitColor (real-color target) is not supported — omit targetTexture on the geometry task.");
+  }
+  const baseFeatures = source._renderFeatures?.features ?? 0;
+  const view = createMaterialView(source, { features: baseFeatures | NODE_GEOMETRY_OUTPUT });
+  Object.defineProperty(view, "_geometryAttachments", { value: config.attachments, enumerable: false });
+  Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
+  Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
+  Object.defineProperty(view, "_buildGroup", { value: getNodeGeometryGroupBuilder(), enumerable: false });
+  return view;
+}
+
+export { createNodeGeometryMaterialView };
+//# sourceMappingURL=node-geometry-view.js.map

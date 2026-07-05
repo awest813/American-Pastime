@@ -1,0 +1,3 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISettingsService } from "@babylonjs/shared-ui-components/modularTool/services/settingsService.js";
+export declare const InspectorSettingsServiceDefinition: ServiceDefinition<[], [ISettingsService]>;

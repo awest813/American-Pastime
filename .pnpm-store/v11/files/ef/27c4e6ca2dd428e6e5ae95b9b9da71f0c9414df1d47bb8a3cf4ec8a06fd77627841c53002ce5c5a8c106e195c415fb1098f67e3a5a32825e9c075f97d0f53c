@@ -1,0 +1,4 @@
+const skyboxVertSrc = "struct e{world:mat4x4<f32>}@group(1) @binding(0) var<uniform> mesh:e;struct d{@builtin(position) clipPos:vec4<f32>,@location(0) positionUVW:vec3<f32>,@location(1) positionW:vec3<f32>}@vertex fn main(@location(0) b:vec3<f32>)->d{var a:d;a.positionUVW=b;let c=(mesh.world*vec4<f32>(b,0.0)).xyz+scene.vEyePosition.xyz;a.positionW=c;a.clipPos=scene.viewProjection*vec4<f32>(c,1.0);return a;}";
+
+export { skyboxVertSrc as s };
+//# sourceMappingURL=skybox.vertex-Ban7q6IM.js.map

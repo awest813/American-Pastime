@@ -1,0 +1,53 @@
+import { type IDisposable, type IReadonlyObservable } from "@babylonjs/core/index.js";
+import { type DynamicAccordionSection, type DynamicAccordionSectionContent } from "@babylonjs/shared-ui-components/modularTool/components/extensibleAccordion.js";
+import { type PropertyChangeInfo } from "../../../contexts/propertyContext";
+import { type IService, type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISelectionService } from "../../selectionService";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+/**
+ * The unique identity symbol for the properties service.
+ */
+export declare const PropertiesServiceIdentity: unique symbol;
+type PropertiesSectionContent<EntityT> = {
+    /**
+     * A unique key for the the content.
+     */
+    key: string;
+    /**
+     * A predicate function to determine if the content applies to the given entity.
+     */
+    predicate: (entity: unknown) => entity is EntityT;
+} & {
+    content: readonly Omit<DynamicAccordionSectionContent<EntityT>, "key">[];
+};
+/**
+ * Allows new sections or content to be added to the properties pane.
+ */
+export interface IPropertiesService extends IService<typeof PropertiesServiceIdentity> {
+    /**
+     * Adds a new section (e.g. "General", "Transforms", etc.).
+     * @param section A description of the section to add.
+     */
+    addSection(section: DynamicAccordionSection): IDisposable;
+    /**
+     * Adds content to one or more sections.
+     * @param content A description of the content to add.
+     */
+    addSectionContent<EntityT>(content: PropertiesSectionContent<EntityT>): IDisposable;
+    /**
+     * Highlights the specified sections temporarily to draw the user's attention to them.
+     * @remarks All other sections are collapsed (but can be expanded by the user) until a different entity is selected.
+     * @param sectionIds The identities of the sections to highlight.
+     */
+    highlightSections(sectionIds: readonly string[]): void;
+    /**
+     * An observable that notifies when a property has been changed by the user.
+     * @remarks This observable only fires for changes made through the properties pane.
+     */
+    readonly onPropertyChanged: IReadonlyObservable<PropertyChangeInfo>;
+}
+/**
+ * Provides a properties pane that enables displaying and editing properties of an entity such as a mesh or a texture.
+ */
+export declare const PropertiesServiceDefinition: ServiceDefinition<[IPropertiesService], [IShellService, ISelectionService]>;
+export {};

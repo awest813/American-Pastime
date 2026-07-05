@@ -1,0 +1,15 @@
+import '../../engine/typed-arrays.js';
+import '../../render/lights-ubo.js';
+import '../../resource/gpu-buffers.js';
+import '../../resource/gpu-pool.js';
+import '../../engine/render-target.js';
+import '../../math/pack-mat4-into-f32.js';
+import '../mesh-features.js';
+import '../../render/scene-helpers.js';
+import './pbr-material.js';
+import './pbr-flag-bits.js';
+import './pbr-pipeline.js';
+import './pbr-renderable.js';
+import './pbr-geometry-output-shader.js';
+export { b as buildPbrGeometryRenderable, g as getPbrGeometryGroupBuilder } from './pbr-geometry-view.js';
+//# sourceMappingURL=pbr-geometry-renderable.js.map

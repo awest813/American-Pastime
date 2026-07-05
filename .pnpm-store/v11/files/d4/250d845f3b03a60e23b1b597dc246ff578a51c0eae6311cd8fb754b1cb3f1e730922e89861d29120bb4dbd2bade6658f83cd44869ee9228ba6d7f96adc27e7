@@ -1,0 +1,7 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+import { type ISceneContext } from "./sceneContext";
+/**
+ * Registers the Inspector Smart Asset missing-file prompt host.
+ */
+export declare const SmartAssetPromptServiceDefinition: ServiceDefinition<[], [IShellService, ISceneContext]>;

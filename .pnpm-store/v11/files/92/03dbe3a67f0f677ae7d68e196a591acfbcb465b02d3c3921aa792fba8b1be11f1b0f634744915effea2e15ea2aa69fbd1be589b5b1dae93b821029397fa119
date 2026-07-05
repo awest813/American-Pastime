@@ -1,0 +1,72 @@
+import { createStandardMaterial } from '../material/standard/create-standard-material.js';
+import { onBeforeRender } from '../scene/scene-core.js';
+
+function createGizmoMaterials(color, hoverColor = [1, 1, 0], disableColor = [0.5, 0.5, 0.5]) {
+  const colored = createStandardMaterial();
+  colored.diffuseColor = color;
+  colored.specularColor = [color[0] - 0.1, color[1] - 0.1, color[2] - 0.1];
+  const hover = createStandardMaterial();
+  hover.diffuseColor = hoverColor;
+  const disabled = createStandardMaterial();
+  disabled.diffuseColor = disableColor;
+  disabled.alpha = 0.4;
+  return { colored, hover, disabled };
+}
+function setMeshesMaterial(meshes, material) {
+  for (const m of meshes) {
+    m.material = material;
+  }
+}
+function attachFollowTarget(scene, gizmoRoot, getTarget, scaleRatio = null, onAfterFollow) {
+  let stopped = false;
+  onBeforeRender(scene, () => {
+    if (stopped) {
+      return;
+    }
+    const t = getTarget();
+    if (!t) {
+      return;
+    }
+    const wm = t.worldMatrix;
+    const tx = wm[12], ty = wm[13], tz = wm[14];
+    gizmoRoot.position.set(tx, ty, tz);
+    if (scaleRatio !== null && scene.camera) {
+      const cw = scene.camera.worldMatrix;
+      const ox = tx - cw[12];
+      const oy = ty - cw[13];
+      const oz = tz - cw[14];
+      const fx = cw[8], fy = cw[9], fz = cw[10];
+      const dist = (ox * fx + oy * fy + oz * fz) * scaleRatio;
+      gizmoRoot.scaling.set(dist, dist, dist);
+    }
+    if (onAfterFollow) {
+      onAfterFollow(t, wm);
+    }
+  });
+  return () => {
+    stopped = true;
+  };
+}
+class GizmoObservable {
+  _subs = [];
+  add(cb) {
+    this._subs.push(cb);
+    return () => {
+      const i = this._subs.indexOf(cb);
+      if (i >= 0) {
+        this._subs.splice(i, 1);
+      }
+    };
+  }
+  notify(arg) {
+    for (const s of this._subs) {
+      s(arg);
+    }
+  }
+  clear() {
+    this._subs.length = 0;
+  }
+}
+
+export { GizmoObservable, attachFollowTarget, createGizmoMaterials, setMeshesMaterial };
+//# sourceMappingURL=gizmo-core.js.map

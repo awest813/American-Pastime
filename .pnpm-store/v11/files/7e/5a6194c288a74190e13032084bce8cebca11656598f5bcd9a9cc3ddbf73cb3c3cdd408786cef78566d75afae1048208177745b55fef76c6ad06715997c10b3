@@ -1,0 +1,33 @@
+import { onPhysicsAfterStep } from './havok.js';
+
+function setPhysicsBodyCollisionEventsEnabled(world, body, enabled) {
+  const hknp = world._hknp;
+  const mask = hknp.EventType.COLLISION_STARTED.value | hknp.EventType.COLLISION_CONTINUED.value | hknp.EventType.COLLISION_FINISHED.value;
+  hknp.HP_Body_SetEventMask(body._hkBody, enabled ? mask : 0);
+}
+function onPhysicsCollision(world, cb) {
+  const hknp = world._hknp;
+  const startedValue = hknp.EventType.COLLISION_STARTED.value;
+  const continuedValue = hknp.EventType.COLLISION_CONTINUED.value;
+  onPhysicsAfterStep(world, () => {
+    let addr = hknp.HP_World_GetCollisionEvents(world._hkWorld)[1];
+    while (addr) {
+      const intBuf = new Int32Array(hknp.HEAPU8.buffer, addr);
+      const floatBuf = new Float32Array(hknp.HEAPU8.buffer, addr);
+      const type = intBuf[0];
+      const offA = 2;
+      const offB = 18;
+      const info = {
+        type: type === startedValue ? "STARTED" : type === continuedValue ? "CONTINUED" : "FINISHED",
+        point: { x: floatBuf[offA + 8], y: floatBuf[offA + 9], z: floatBuf[offA + 10] },
+        normal: { x: floatBuf[offA + 11], y: floatBuf[offA + 12], z: floatBuf[offA + 13] },
+        impulse: floatBuf[offB + 13 + 3]
+      };
+      cb(info);
+      addr = hknp.HP_World_GetNextCollisionEvent(world._hkWorld, addr);
+    }
+  });
+}
+
+export { onPhysicsCollision, setPhysicsBodyCollisionEventsEnabled };
+//# sourceMappingURL=havok-collision.js.map

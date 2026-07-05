@@ -1,0 +1,18 @@
+import { addDeferredSceneRenderables } from '../scene/scene-core.js';
+
+function addBillboardSystem(scene, system) {
+  addDeferredSceneRenderables(scene, async (engine) => {
+    const { buildBillboardRenderable } = await import('./billboard-renderable.js');
+    const built = buildBillboardRenderable(engine, system);
+    return { renderables: [built.renderable], dispose: built.dispose };
+  });
+}
+function addFacingBillboardSystem(scene, system) {
+  addBillboardSystem(scene, system);
+}
+function addAxisLockedBillboardSystem(scene, system) {
+  addBillboardSystem(scene, system);
+}
+
+export { addAxisLockedBillboardSystem, addFacingBillboardSystem };
+//# sourceMappingURL=billboard-scene.js.map

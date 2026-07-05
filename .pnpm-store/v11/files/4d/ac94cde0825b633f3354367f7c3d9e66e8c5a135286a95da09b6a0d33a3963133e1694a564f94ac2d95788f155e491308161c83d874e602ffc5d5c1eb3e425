@@ -1,0 +1,211 @@
+import { F32 } from '../../engine/typed-arrays.js';
+import { _standardFeatureKey } from './standard-material.js';
+import { getSceneBindGroupLayout, clearSceneBGLCache } from '../../render/scene-helpers.js';
+import { createStandardTemplate } from './standard-template.js';
+import { composeShader } from '../../shader/shader-composer.js';
+import { createUniformBuffer } from '../../resource/gpu-buffers.js';
+import { targetSignatureKey, REVERSE_DEPTH_COMPARE } from '../../engine/render-target.js';
+import { _getStdExtsSorted, DOUBLE_SIDED, HAS_DIFFUSE_TEXTURE, NEEDS_UV, ESM_SHADOW_OUTPUT, NO_COLOR_OUTPUT, HAS_OPACITY_TEXTURE, MATERIAL_ALPHA_BLEND, DISABLE_LIGHTING, DIFFUSE_USES_UV2, NEEDS_UV2 } from './standard-flags.js';
+import { MSH_RECEIVE_SHADOWS } from '../mesh-features.js';
+
+let _stencilResolver = null;
+function _installStandardStencilResolver(resolve) {
+  _stencilResolver = resolve;
+}
+function composeStandardShader(features, _meshFeatures = 0, fragments = [], esmShadowDepthCode = "") {
+  const has = (bit) => (features & bit) !== 0;
+  const pc = fragments[0]?._pc;
+  const template = createStandardTemplate(
+    {
+      _diffuse: has(HAS_DIFFUSE_TEXTURE),
+      _needsUV: has(NEEDS_UV),
+      _needsUV2: has(NEEDS_UV2),
+      _diffuseUsesUV2: has(DIFFUSE_USES_UV2),
+      _disableLighting: has(DISABLE_LIGHTING),
+      _noColorOutput: has(NO_COLOR_OUTPUT),
+      _esmShadowOutput: has(ESM_SHADOW_OUTPUT),
+      _hasMorph: !!pc
+    },
+    esmShadowDepthCode
+  );
+  let composed = composeShader(template, fragments);
+  pc && (composed = pc(composed));
+  return composed;
+}
+const _bindingsCache = /* @__PURE__ */ new Map();
+let _composedCache = null;
+let _cachedDevice = null;
+function getComposedCache() {
+  if (!_composedCache) {
+    _composedCache = /* @__PURE__ */ new Map();
+  }
+  return _composedCache;
+}
+function ensureDevice(engine) {
+  if (_cachedDevice !== engine._device) {
+    _bindingsCache.clear();
+    _composedCache?.clear();
+    clearSceneBGLCache();
+    _cachedDevice = engine._device;
+  }
+}
+function clearStandardPipelineCache() {
+  _bindingsCache.clear();
+  _composedCache?.clear();
+  clearSceneBGLCache();
+  _cachedDevice = null;
+}
+function getOrCreateStandardBindings(engine, features, meshFeatures, fragments = [], shaderKey = "", esmShadowDepthCode = "", stencil = null) {
+  ensureDevice(engine);
+  const resolvedStencil = stencil && _stencilResolver ? _stencilResolver(stencil) : null;
+  const key = _standardFeatureKey(features, meshFeatures, shaderKey) + (resolvedStencil ? resolvedStencil._key : "");
+  const cached = _bindingsCache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const cc = getComposedCache();
+  let composed = cc.get(key);
+  if (!composed) {
+    composed = composeStandardShader(features, meshFeatures, fragments, esmShadowDepthCode);
+    cc.set(key, composed);
+  }
+  const device = engine._device;
+  const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
+  let shadowBGL = null;
+  const hasShadow = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
+  if (hasShadow && composed._shadowBGLDescriptor) {
+    shadowBGL = device.createBindGroupLayout(composed._shadowBGLDescriptor);
+  }
+  const bindings = {
+    _features: features,
+    _meshFeatures: meshFeatures,
+    _meshBGL: meshBGL,
+    _shadowBGL: shadowBGL,
+    _composed: composed,
+    _pipelines: /* @__PURE__ */ new Map()
+  };
+  if (resolvedStencil) {
+    bindings._stencil = resolvedStencil._desc;
+  }
+  _bindingsCache.set(key, bindings);
+  return bindings;
+}
+function getOrCreateStandardPipeline(engine, sig, bindings) {
+  ensureDevice(engine);
+  const key = targetSignatureKey(sig);
+  const cached = bindings._pipelines.get(key);
+  if (cached) {
+    return cached;
+  }
+  const device = engine._device;
+  const composed = bindings._composed;
+  const features = bindings._features;
+  const sceneBGL = getSceneBindGroupLayout(engine);
+  const bgls = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
+  const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
+  const noColorOutput = (features & NO_COLOR_OUTPUT) !== 0;
+  const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
+  const fragModule = !sig._colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+  const needsBlend = !esmShadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0);
+  const colorTarget = noColorOutput ? null : needsBlend ? {
+    format: sig._colorFormat,
+    blend: {
+      color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
+      alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" }
+    }
+  } : { format: sig._colorFormat };
+  const pipeline = device.createRenderPipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
+    vertex: { module: vertModule, entryPoint: "main", buffers: composed._vertexBufferLayouts },
+    ...fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: colorTarget ? [colorTarget] : [] } } : {},
+    ...sig._depthStencilFormat ? {
+      depthStencil: {
+        format: sig._depthStencilFormat,
+        depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE,
+        depthWriteEnabled: noColorOutput || esmShadowOutput || !needsBlend,
+        // Pre-baked stencil sub-fields, applied only on a stencil-capable target — the same
+        // material in the depth32float shadow/depth pass keeps plain depth state (no stencil → no
+        // format mismatch). Gated on `_stencilResolver` (the opt-in hook) so the entire branch —
+        // including the `bindings._stencil` reads — folds out of stencil-free bundles.
+        ..._stencilResolver && bindings._stencil && sig._depthStencilFormat.includes("stencil") ? bindings._stencil : {}
+      }
+    } : {},
+    multisample: { count: sig._sampleCount },
+    primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" }
+  });
+  bindings._pipelines.set(key, pipeline);
+  return pipeline;
+}
+function createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, material, morphTargets = null) {
+  const device = engine._device;
+  const features = bindings._features;
+  const needsUV = (features & NEEDS_UV) !== 0;
+  const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;
+  const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
+  let nextBinding = 0;
+  const entries = [{ binding: nextBinding++, resource: { buffer: meshUBO } }];
+  if (morphTargets) {
+    entries.push({ binding: nextBinding++, resource: { buffer: morphTargets.deltasBuffer } }, { binding: nextBinding++, resource: { buffer: morphTargets.weightsBuffer } });
+  }
+  entries.push({ binding: nextBinding++, resource: { buffer: materialUBO } });
+  if (hasDiffuseTex) {
+    const tex = material.diffuseTexture;
+    entries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
+  }
+  if (needsUV) {
+    const uvData = new F32(4);
+    const scaleX = material.uvScale[0];
+    let scaleY = material.uvScale[1];
+    let offsetY = 0;
+    if (material.diffuseTexture?.invertY) {
+      offsetY = scaleY;
+      scaleY = -scaleY;
+    }
+    uvData[0] = scaleX;
+    uvData[1] = scaleY;
+    uvData[2] = 0;
+    uvData[3] = offsetY;
+    entries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
+  }
+  if (esmShadowOutput) {
+    entries.push({
+      binding: nextBinding++,
+      resource: { buffer: material._esmShadowParamsUBO }
+    });
+  }
+  const sortedExts = _getStdExtsSorted();
+  for (const ext of sortedExts) {
+    if (features & ext._feature && ext._bind) {
+      nextBinding = ext._bind(material, entries, nextBinding);
+    }
+  }
+  return device.createBindGroup({ layout: bindings._meshBGL, entries });
+}
+function writeStdMaterialData(data, mat, textureLevel) {
+  const { diffuseColor: dc, specularColor: sc, emissiveColor: ec, ambientColor: ac } = mat;
+  data[0] = dc[0];
+  data[1] = dc[1];
+  data[2] = dc[2];
+  data[3] = mat.alpha;
+  data[4] = sc[0];
+  data[5] = sc[1];
+  data[6] = sc[2];
+  data[7] = mat.specularPower;
+  data[8] = ec[0];
+  data[9] = ec[1];
+  data[10] = ec[2];
+  data[11] = 1 / mat.bumpLevel;
+  data[12] = ac[0];
+  data[13] = ac[1];
+  data[14] = ac[2];
+  data[15] = textureLevel;
+  data[16] = mat.ambientTexLevel;
+  data[17] = mat.lightmapLevel;
+  data[18] = mat.opacityLevel;
+  data[19] = mat.alphaCutOff;
+  data[20] = mat.reflectionLevel;
+  data[21] = mat.reflectionCoordMode;
+}
+
+export { _installStandardStencilResolver, clearStandardPipelineCache, composeStandardShader, createStandardMeshBindGroup, getOrCreateStandardBindings, getOrCreateStandardPipeline, writeStdMaterialData };
+//# sourceMappingURL=standard-pipeline.js.map

@@ -1,0 +1,8 @@
+import { type FrameGraph } from "@babylonjs/core/index.js";
+import { type FunctionComponent } from "react";
+export declare const FrameGraphTaskProperties: FunctionComponent<{
+    frameGraph: FrameGraph;
+}>;
+export declare const FrameGraphGeneralProperties: FunctionComponent<{
+    frameGraph: FrameGraph;
+}>;

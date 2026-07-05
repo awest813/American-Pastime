@@ -1,0 +1,96 @@
+const CurveLength = 100;
+const MinRampDuration = 1e-6;
+let TmpCurveValues = null;
+let ExpCurve = null;
+let LogCurve = null;
+const TmpLineValues = new Float32Array([0, 0]);
+function getExpCurve() {
+  if (!ExpCurve) {
+    ExpCurve = new Float32Array(CurveLength);
+    const increment = 1 / (CurveLength - 1);
+    let x = increment;
+    for (let i = 1; i < CurveLength; i++) {
+      ExpCurve[i] = Math.exp(-11.512925464970227 * (1 - x));
+      x += increment;
+    }
+  }
+  return ExpCurve;
+}
+function getLogCurve() {
+  if (!LogCurve) {
+    LogCurve = new Float32Array(CurveLength);
+    const increment = 1 / CurveLength;
+    let x = increment;
+    for (let i = 0; i < CurveLength; i++) {
+      LogCurve[i] = 1 + Math.log10(x) / Math.log10(CurveLength);
+      x += increment;
+    }
+  }
+  return LogCurve;
+}
+function getRampCurveValues(shape, from, to) {
+  if (shape === "linear") {
+    TmpLineValues[0] = from;
+    TmpLineValues[1] = to;
+    return TmpLineValues;
+  }
+  if (!TmpCurveValues) {
+    TmpCurveValues = new Float32Array(CurveLength);
+  }
+  const normalizedCurve = shape === "exponential" ? getExpCurve() : getLogCurve();
+  const direction = Math.sign(to - from);
+  const range = Math.abs(to - from);
+  if (direction === 1) {
+    for (let i = 0; i < normalizedCurve.length; i++) {
+      TmpCurveValues[i] = from + range * normalizedCurve[i];
+    }
+  } else {
+    let j = CurveLength - 1;
+    for (let i = 0; i < normalizedCurve.length; i++, j--) {
+      TmpCurveValues[i] = from - range * (1 - normalizedCurve[j]);
+    }
+  }
+  return TmpCurveValues;
+}
+function createRampParam(param, clock) {
+  return { _param: param, _clock: clock, _targetValue: param.value, _rampEndTime: 0 };
+}
+function isRamping(rp) {
+  return rp._clock._currentTime < rp._rampEndTime;
+}
+let warnedRampFailure = false;
+function setRampTarget(rp, value, options) {
+  if (!Number.isFinite(value)) {
+    console.warn(`Attempted to set audio parameter to non-finite value: ${value}`);
+    return;
+  }
+  rp._param.cancelScheduledValues(0);
+  const shape = typeof options?.shape === "string" ? options.shape : "linear";
+  const startTime = rp._clock._currentTime;
+  if (shape === "none") {
+    rp._param.value = rp._targetValue = value;
+    rp._rampEndTime = startTime;
+    return;
+  }
+  rp._targetValue = value;
+  const rampDuration = rp._clock._rampDuration;
+  let duration = typeof options?.duration === "number" ? Math.max(options.duration, rampDuration) : rampDuration;
+  duration = Math.max(rampDuration, duration);
+  if (duration < MinRampDuration) {
+    rp._param.setValueAtTime(value, startTime);
+    return;
+  }
+  try {
+    const from = Number.isFinite(rp._param.value) ? rp._param.value : 0;
+    rp._param.setValueCurveAtTime(getRampCurveValues(shape, from, value), startTime, duration);
+    rp._rampEndTime = startTime + duration;
+  } catch (e) {
+    if (!warnedRampFailure) {
+      console.warn(`Audio parameter ramping failed: ${e.message}`);
+      warnedRampFailure = true;
+    }
+  }
+}
+
+export { createRampParam, getRampCurveValues, isRamping, setRampTarget };
+//# sourceMappingURL=audio-param.js.map

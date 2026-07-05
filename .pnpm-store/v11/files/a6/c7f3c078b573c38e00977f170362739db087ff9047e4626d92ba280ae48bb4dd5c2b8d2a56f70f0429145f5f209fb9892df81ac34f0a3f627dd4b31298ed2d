@@ -1,0 +1,33 @@
+{
+  "name": "@fluentui-contrib/react-resize-handle",
+  "version": "0.8.4",
+  "peerDependencies": {
+    "@types/react": ">=16.8.0 <20.0.0",
+    "@types/react-dom": ">=16.8.0 <20.0.0",
+    "react": ">=16.8.0 <20.0.0",
+    "react-dom": ">=16.8.0 <20.0.0",
+    "@fluentui/react-components": ">=9.70.0 <10.0.0"
+  },
+  "dependencies": {
+    "@swc/helpers": "~0.5.11",
+    "@fluentui/react-utilities": "^9.16.0"
+  },
+  "typings": "./src/index.d.ts",
+  "main": "./lib-commonjs/index.js",
+  "module": "./lib/index.js",
+  "sideEffects": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/microsoft/fluentui-contrib"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "node": "./lib-commonjs/index.js",
+      "import": "./lib/index.js",
+      "require": "./lib-commonjs/index.js"
+    },
+    "./package.json": "./package.json"
+  }
+}

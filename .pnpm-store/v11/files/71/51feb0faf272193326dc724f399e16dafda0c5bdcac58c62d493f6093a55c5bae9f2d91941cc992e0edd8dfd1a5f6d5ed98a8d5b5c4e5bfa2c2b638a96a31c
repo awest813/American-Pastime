@@ -1,0 +1,4 @@
+/** Pure barrel — re-exports only side-effect-free modules */
+export * from "./core/pure.js";
+export * from "./3mfSerializer.js";
+export * from "./3mfSerializer.configuration.js";

@@ -1,0 +1,93 @@
+import { type FunctionComponent } from "react";
+import { type AudioEngineV2 } from "@babylonjs/core/AudioV2/abstractAudio/audioEngineV2.js";
+import { type AbstractAudioBus } from "@babylonjs/core/AudioV2/abstractAudio/abstractAudioBus.js";
+import { type AudioBus } from "@babylonjs/core/AudioV2/abstractAudio/audioBus.js";
+import { type AbstractSound } from "@babylonjs/core/AudioV2/abstractAudio/abstractSound.js";
+import { type AbstractSoundSource } from "@babylonjs/core/AudioV2/abstractAudio/abstractSoundSource.js";
+import { type StaticSound } from "@babylonjs/core/AudioV2/abstractAudio/staticSound.js";
+import { type StreamingSound } from "@babylonjs/core/AudioV2/abstractAudio/streamingSound.js";
+import { type ISelectionService } from "../../../services/selectionService";
+/**
+ * Setup / playback properties for an {@link AudioEngineV2}.
+ * @returns The rendered component.
+ */
+export declare const AudioV2EngineGeneralProperties: FunctionComponent<{
+    engine: AudioEngineV2;
+}>;
+/**
+ * Resume / pause controls for an {@link AudioEngineV2}.
+ *
+ * No separate Unlock button — `engine.unlockAsync()` is just a thin wrapper around
+ * `engine.resumeAsync()` on the base class, so Resume already covers the autoplay-blocked path.
+ * @returns The rendered component.
+ */
+export declare const AudioV2EngineCommandsProperties: FunctionComponent<{
+    engine: AudioEngineV2;
+}>;
+/**
+ * Listener spatial-attachment property line for an {@link AudioEngineV2}.
+ * @returns The rendered component.
+ */
+export declare const AudioV2EngineListenerProperties: FunctionComponent<{
+    engine: AudioEngineV2;
+    selectionService: ISelectionService;
+}>;
+/**
+ * General properties shared by all v2 audio buses (main and regular).
+ * @returns The rendered component.
+ */
+export declare const AudioV2BusGeneralProperties: FunctionComponent<{
+    bus: AbstractAudioBus;
+}>;
+/**
+ * Additional properties specific to {@link AudioBus} (a non-main bus that can be routed to another bus).
+ * @returns The rendered component.
+ */
+export declare const AudioV2AudioBusGeneralProperties: FunctionComponent<{
+    bus: AudioBus;
+    selectionService: ISelectionService;
+}>;
+/**
+ * General properties for any v2 sound.
+ * @returns The rendered component.
+ */
+export declare const AudioV2SoundGeneralProperties: FunctionComponent<{
+    sound: AbstractSound;
+    selectionService: ISelectionService;
+}>;
+/**
+ * Playback properties shared by all v2 sounds (loop, start offset, current time).
+ * @returns The rendered component.
+ */
+export declare const AudioV2SoundPlaybackProperties: FunctionComponent<{
+    sound: AbstractSound;
+}>;
+/**
+ * Additional playback properties specific to {@link StaticSound} (duration, loop range, pitch, playback rate).
+ * @returns The rendered component.
+ */
+export declare const AudioV2StaticSoundPlaybackProperties: FunctionComponent<{
+    sound: StaticSound;
+}>;
+/**
+ * Preload status display for {@link StreamingSound}.
+ * @returns The rendered component.
+ */
+export declare const AudioV2StreamingSoundPreloadProperties: FunctionComponent<{
+    sound: StreamingSound;
+}>;
+/**
+ * Play / pause / stop controls for any v2 sound.
+ * @returns The rendered component.
+ */
+export declare const AudioV2SoundCommandsProperties: FunctionComponent<{
+    sound: AbstractSound;
+}>;
+/**
+ * General properties for a v2 sound source that is not a sound (e.g. microphone).
+ * @returns The rendered component.
+ */
+export declare const AudioV2SoundSourceGeneralProperties: FunctionComponent<{
+    source: AbstractSoundSource;
+    selectionService: ISelectionService;
+}>;

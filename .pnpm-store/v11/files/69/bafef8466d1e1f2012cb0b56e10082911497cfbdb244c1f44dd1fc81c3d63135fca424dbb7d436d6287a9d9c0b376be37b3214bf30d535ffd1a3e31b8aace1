@@ -1,0 +1,75 @@
+import { tickAnimation } from './animation-group.js';
+import { createAnimationTask, addAnimationTask, removeAnimationTask } from './animation-manager.js';
+
+const ANIMATION_GROUP_TASK_CATEGORY = "animation-group";
+function getMutableAnimationGroups(manager) {
+  const managerInternal = manager;
+  let groups = managerInternal._animationGroups;
+  if (!groups) {
+    groups = [];
+    managerInternal._animationGroups = groups;
+  }
+  return groups;
+}
+function getAnimationGroups(manager) {
+  return manager._animationGroups ?? [];
+}
+function getAnimationGroupOwner(group) {
+  return group._animationManager;
+}
+function addAnimationGroup(manager, group) {
+  const groupInternal = group;
+  const owner = groupInternal._animationManager;
+  if (owner && owner !== manager) {
+    throw new Error(`AnimationGroup "${group.name}" is already attached to another AnimationManager`);
+  }
+  if (owner === manager) {
+    return;
+  }
+  const task = groupInternal._animationTask ?? createAnimationTask(
+    (taskManager, deltaMs) => {
+      tickAnimation(group, deltaMs, taskManager.engine);
+    },
+    {
+      category: ANIMATION_GROUP_TASK_CATEGORY,
+      dispose: (ownerManager) => {
+        const groups = ownerManager._animationGroups;
+        const index = groups?.indexOf(group) ?? -1;
+        if (groups && index !== -1) {
+          groups.splice(index, 1);
+        }
+        if (groupInternal._animationManager === ownerManager) {
+          groupInternal._animationManager = void 0;
+        }
+      }
+    }
+  );
+  getMutableAnimationGroups(manager).push(group);
+  groupInternal._animationManager = manager;
+  groupInternal._animationTask = task;
+  addAnimationTask(manager, task);
+}
+function addAnimationGroups(manager, groups) {
+  for (const group of groups) {
+    addAnimationGroup(manager, group);
+  }
+}
+function removeAnimationGroup(manager, group) {
+  const groupInternal = group;
+  const task = groupInternal._animationTask;
+  if (task && groupInternal._animationManager === manager) {
+    removeAnimationTask(manager, task);
+    return;
+  }
+  const groups = manager._animationGroups;
+  const index = groups?.indexOf(group) ?? -1;
+  if (groups && index !== -1) {
+    groups.splice(index, 1);
+  }
+  if (groupInternal._animationManager === manager) {
+    groupInternal._animationManager = void 0;
+  }
+}
+
+export { ANIMATION_GROUP_TASK_CATEGORY, addAnimationGroup, addAnimationGroups, getAnimationGroupOwner, getAnimationGroups, removeAnimationGroup };
+//# sourceMappingURL=animation-group-task.js.map

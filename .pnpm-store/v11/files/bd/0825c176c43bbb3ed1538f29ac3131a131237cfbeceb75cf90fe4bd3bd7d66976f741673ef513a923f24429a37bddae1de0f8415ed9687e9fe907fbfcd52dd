@@ -1,0 +1,61 @@
+import { extractGlyphCurves } from './glyph-extraction.js';
+import { createGlyphStorage, disposeGlyphStorage, updateGlyphStorage } from './glyph-storage.js';
+import { createTextData, disposeTextData, updateTextData } from './text-data.js';
+import { layoutText } from './layout.js';
+import { Q as Q_ } from '../_chunks/vendor/text-shaper-CsjRQ393.js';
+
+function familyCurveSetId(font) {
+  return font._font.name && Q_(font._font.name) || "font";
+}
+function createDefaultTextData(font, fontSizePx, text, textColor, options) {
+  const laid = layoutText(font, text, fontSizePx, options);
+  const innerCurves = /* @__PURE__ */ new Map();
+  const ids = /* @__PURE__ */ new Set();
+  for (const g of laid.glyphs) {
+    ids.add(g.glyphId);
+  }
+  extractGlyphCurves(font, ids, innerCurves);
+  const curveSetId = familyCurveSetId(font);
+  const storage = createGlyphStorage(/* @__PURE__ */ new Map([[curveSetId, innerCurves]]));
+  const run = {
+    curveSet: curveSetId,
+    glyphs: laid.glyphs,
+    pixelsPerFontUnit: laid.pixelsPerFontUnit,
+    defaultColor: textColor
+  };
+  return Object.assign(createTextData(storage, [run]), {
+    width: laid.width,
+    height: laid.height,
+    _font: font,
+    _fontSizePx: fontSizePx,
+    _options: options,
+    _curveSetId: curveSetId,
+    _storage: storage
+  });
+}
+function updateDefaultTextData(data, text, textColor) {
+  const laid = layoutText(data._font, text, data._fontSizePx, data._options);
+  const innerCurves = /* @__PURE__ */ new Map();
+  const ids = /* @__PURE__ */ new Set();
+  for (const g of laid.glyphs) {
+    ids.add(g.glyphId);
+  }
+  extractGlyphCurves(data._font, ids, innerCurves);
+  updateGlyphStorage(data._storage, data._curveSetId, innerCurves);
+  const previousRun = data.runs[0];
+  const newRun = {
+    curveSet: data._curveSetId,
+    glyphs: laid.glyphs,
+    pixelsPerFontUnit: laid.pixelsPerFontUnit,
+    defaultColor: textColor ?? previousRun.defaultColor
+  };
+  updateTextData(data, { update: "replaceRun", previous: previousRun, run: newRun });
+  Object.assign(data, { width: laid.width, height: laid.height });
+}
+function disposeDefaultTextData(data) {
+  disposeTextData(data);
+  disposeGlyphStorage(data._storage);
+}
+
+export { createDefaultTextData, disposeDefaultTextData, updateDefaultTextData };
+//# sourceMappingURL=default-text-data.js.map

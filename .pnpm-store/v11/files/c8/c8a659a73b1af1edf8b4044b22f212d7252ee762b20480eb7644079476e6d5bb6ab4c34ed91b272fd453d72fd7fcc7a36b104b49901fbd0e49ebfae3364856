@@ -1,0 +1,352 @@
+import { F32 } from '../../engine/typed-arrays.js';
+import { writeMeshLightSelection } from '../../render/lights-ubo.js';
+import { createUniformBuffer } from '../../resource/gpu-buffers.js';
+import { acquireTexture, releaseTexture } from '../../resource/gpu-pool.js';
+import { targetSignatureKey, REVERSE_DEPTH_COMPARE } from '../../engine/render-target.js';
+import { packMat4IntoF32 } from '../../math/pack-mat4-into-f32.js';
+import { _computeMeshFeatures, MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_INSTANCE_COLOR } from '../mesh-features.js';
+import { getSceneBindGroupLayout } from '../../render/scene-helpers.js';
+import { _computePbrMaterialFeatures, collectPbrBoundTextures } from './pbr-material.js';
+import { PBR2_GEOMETRY_OUTPUT, PBR_HAS_ALPHA_BLEND, PBR_HAS_NORMAL_MAP, PBR2_HAS_UV2, PBR_HAS_DOUBLE_SIDED } from './pbr-flag-bits.js';
+import { createPbrMeshBindGroup } from './pbr-pipeline.js';
+import { _writeMaterialData } from './pbr-renderable.js';
+import { _ensurePbrGeometryExt, composePbrGeometryShader } from './pbr-geometry-output-shader.js';
+import { createMaterialView } from '../material-view.js';
+
+let _activeAttachments;
+function _setActivePbrGeometryAttachments(att) {
+  const prev = _activeAttachments;
+  _activeAttachments = att;
+  return prev;
+}
+function createPbrGeometryMaterialView(source, config) {
+  _ensurePbrGeometryExt(() => _activeAttachments);
+  const baseFeatures = source._renderFeatures?.features ?? 0;
+  const baseFeatures2 = source._renderFeatures?.features2 ?? 0;
+  const view = createMaterialView(source, {
+    features: baseFeatures & ~PBR_HAS_ALPHA_BLEND,
+    features2: baseFeatures2 | PBR2_GEOMETRY_OUTPUT
+  });
+  Object.defineProperty(view, "_geometryAttachments", { value: config.attachments, enumerable: false });
+  Object.defineProperty(view, "_emitColor", { value: config.emitColor, enumerable: false });
+  Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
+  Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
+  Object.defineProperty(view, "_buildGroup", { value: getPbrGeometryGroupBuilder(), enumerable: false });
+  return view;
+}
+
+let _pbrGeometryGroupBuilder = null;
+function getPbrGeometryGroupBuilder() {
+  if (_pbrGeometryGroupBuilder) {
+    return _pbrGeometryGroupBuilder;
+  }
+  const builder = (async () => {
+    throw new Error("pbr-geometry view does not support scene group building");
+  });
+  builder._materialFamily = "pbr";
+  builder._rebuildSingle = (scene, mesh, materialOverride) => {
+    const view = materialOverride ?? mesh.material;
+    return buildPbrGeometryRenderable(scene, mesh, view);
+  };
+  return _pbrGeometryGroupBuilder = builder;
+}
+function _variantKey(meshFeatures, lightMode, singleLightType) {
+  return `${meshFeatures}:${lightMode}:${singleLightType}`;
+}
+function buildPbrGeometryRenderable(scene, mesh, view) {
+  const engine = scene.surface.engine;
+  const device = engine._device;
+  const ctx = scene._pbrGeomContext;
+  if (!ctx) {
+    throw new Error("buildPbrGeometryRenderable: scene has no PBR context. Ensure regular PBR meshes have been built before recording the geometry task.");
+  }
+  const source = view.source;
+  if (!source._renderFeatures) {
+    source._renderFeatures = _computePbrMaterialFeatures(source);
+  }
+  const lr = writeMeshLightSelection(mesh, scene.lights);
+  const lightCount = lr > 0 ? 1 : -lr;
+  const hasSomeShadows = ctx._shadowLights.length > 0;
+  const receiveShadows = mesh.receiveShadows && hasSomeShadows;
+  const lightMode = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
+  const singleLightType = lightMode === 1 ? _getPackedSingleLightType(scene.lights, lr - 1) : "";
+  const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
+  const variantKey = _variantKey(meshFeatures, lightMode, singleLightType);
+  const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, variantKey);
+  const features = res._features;
+  const features2 = res._features2;
+  const composed = res._composed;
+  const meshUboData = new F32(composed._meshUboSpec._totalBytes / 4);
+  const _packMeshWorld = engine._makePackMeshWorld?.(scene) ?? packMat4IntoF32;
+  _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
+  writeMeshLightSelection(mesh, scene.lights, meshUboData);
+  const meshUBO = createUniformBuffer(engine, meshUboData);
+  const materialSpec = composed._materialUboSpec;
+  const matInitData = new F32(materialSpec._totalBytes / 4);
+  _writePbrMaterialData(matInitData, source, materialSpec);
+  const materialUBO = createUniformBuffer(engine, matInitData);
+  const prev = _setActivePbrGeometryAttachments(view._geometryAttachments);
+  let materialBindGroupStatic;
+  try {
+    materialBindGroupStatic = createPbrMeshBindGroup(engine, _wrapBindings(res), composed, meshUBO, materialUBO, view, ctx._envTextures, mesh);
+  } finally {
+    _setActivePbrGeometryAttachments(prev);
+  }
+  let shadowBindGroup = null;
+  if (receiveShadows && res._shadowBGL) {
+    const entries = [];
+    let b = 0;
+    for (const sl of ctx._shadowLights) {
+      const sg = sl.gen;
+      entries.push({ binding: b++, resource: sg._depthTexture.createView() });
+      entries.push({ binding: b++, resource: sg._depthSampler });
+      entries.push({ binding: b++, resource: { buffer: sg._shadowUBO } });
+    }
+    shadowBindGroup = device.createBindGroup({ layout: res._shadowBGL, entries });
+  }
+  const boundTextures = collectPbrBoundTextures(source);
+  for (const t of boundTextures) {
+    acquireTexture(t);
+  }
+  const prevDisposables = scene._meshDisposables.get(mesh) ?? [];
+  scene._meshDisposables.set(mesh, [
+    ...prevDisposables,
+    () => {
+      meshUBO.destroy();
+      materialUBO.destroy();
+    },
+    () => {
+      for (const t of boundTextures) {
+        releaseTexture(t);
+      }
+    }
+  ]);
+  const hasNormalMap = (features & PBR_HAS_NORMAL_MAP) !== 0 && (meshFeatures & MSH_HAS_TANGENTS) !== 0;
+  const hasUV2 = (features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0;
+  const hasVertexColor = (meshFeatures & MSH_HAS_VERTEX_COLOR) !== 0;
+  const hasTI = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
+  const hasTIColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
+  const syncThinInstanceBuffers = ctx._syncThinInstanceBuffers;
+  const isAlphaBlend = res._alphaBlend;
+  const sortCenter = [mesh.worldMatrix[12], mesh.worldMatrix[13], mesh.worldMatrix[14]];
+  let _lastWorldVersion = mesh.worldMatrixVersion;
+  let _lastLightsCount = scene.lights.length;
+  let _lastUboVersion = source._uboVersion;
+  const matScratch = new F32(materialSpec._totalBytes / 4);
+  const _baseUpdate = () => {
+    if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount) {
+      sortCenter[0] = mesh.worldMatrix[12];
+      sortCenter[1] = mesh.worldMatrix[13];
+      sortCenter[2] = mesh.worldMatrix[14];
+      _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
+      writeMeshLightSelection(mesh, scene.lights, meshUboData);
+      device.queue.writeBuffer(meshUBO, 0, meshUboData);
+      _lastWorldVersion = mesh.worldMatrixVersion;
+      _lastLightsCount = scene.lights.length;
+    }
+    if (source._uboVersion !== _lastUboVersion) {
+      _lastUboVersion = source._uboVersion;
+      matScratch.fill(0);
+      _writePbrMaterialData(matScratch, source, materialSpec);
+      device.queue.writeBuffer(materialUBO, 0, matScratch.buffer, 0, matScratch.byteLength);
+    }
+  };
+  const _invalidate = () => {
+    _lastWorldVersion = -1;
+  };
+  const update = engine._wrapRenderableForFO?.(_baseUpdate, scene, _invalidate) ?? _baseUpdate;
+  const draw = (pass) => {
+    if (mesh.visible === false) {
+      return 0;
+    }
+    const gpu = mesh._gpu;
+    pass.setBindGroup(1, materialBindGroupStatic);
+    if (shadowBindGroup) {
+      pass.setBindGroup(2, shadowBindGroup);
+    }
+    let slot = 0;
+    pass.setVertexBuffer(slot++, gpu.positionBuffer);
+    pass.setVertexBuffer(slot++, gpu.normalBuffer);
+    if (hasNormalMap && gpu.tangentBuffer) {
+      pass.setVertexBuffer(slot++, gpu.tangentBuffer);
+    }
+    pass.setVertexBuffer(slot++, gpu.uvBuffer);
+    if (hasUV2 && gpu.uv2Buffer) {
+      pass.setVertexBuffer(slot++, gpu.uv2Buffer);
+    }
+    if (hasVertexColor && gpu.colorBuffer) {
+      pass.setVertexBuffer(slot++, gpu.colorBuffer);
+    }
+    const skin = mesh.skeleton ?? mesh.vat;
+    if (skin) {
+      pass.setVertexBuffer(slot++, skin.jointsBuffer);
+      pass.setVertexBuffer(slot++, skin.weightsBuffer);
+      if (skin.joints1Buffer && skin.weights1Buffer) {
+        pass.setVertexBuffer(slot++, skin.joints1Buffer);
+        pass.setVertexBuffer(slot++, skin.weights1Buffer);
+      }
+    }
+    const ti = hasTI ? mesh.thinInstances : null;
+    if (ti && syncThinInstanceBuffers) {
+      slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor);
+    }
+    pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
+    if (ti && ti.count > 0) {
+      pass.drawIndexed(gpu.indexCount, ti.count);
+    } else {
+      pass.drawIndexed(gpu.indexCount);
+    }
+    return 1;
+  };
+  const r = {
+    order: mesh.renderOrder ?? (isAlphaBlend ? 200 : 100),
+    isTransparent: isAlphaBlend,
+    mesh,
+    bind(eng, sig) {
+      return {
+        renderable: r,
+        pipeline: _getOrCreateGeometryPipeline(eng, sig, view, res),
+        update,
+        draw
+      };
+    }
+  };
+  r._worldCenter = sortCenter;
+  return r;
+}
+function _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, variantKey) {
+  let cache = view._geometry;
+  if (!cache) {
+    cache = /* @__PURE__ */ new Map();
+    Object.defineProperty(view, "_geometry", { value: cache, enumerable: false, configurable: true });
+  }
+  const cached = cache.get(variantKey);
+  if (cached) {
+    return cached;
+  }
+  _ensurePbrGeometryExt(() => view._geometryAttachments);
+  const features = view._renderFeatures.features;
+  const features2 = view._renderFeatures.features2 ?? 0;
+  const sceneFeatures = ctx._sceneFeatures;
+  const source = view.source;
+  const vbLayout = source._vbLayout;
+  const vbKey = "";
+  const prev = _setActivePbrGeometryAttachments(view._geometryAttachments);
+  let composed;
+  try {
+    composed = composePbrGeometryShader(
+      ctx._composePbr,
+      features,
+      features2,
+      meshFeatures,
+      sceneFeatures,
+      lightMode,
+      singleLightType,
+      "",
+      vbLayout,
+      vbKey,
+      view._geometryAttachments,
+      view._emitColor
+    );
+  } finally {
+    _setActivePbrGeometryAttachments(prev);
+  }
+  const device = engine._device;
+  const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
+  const shadowBGL = composed._shadowBGLDescriptor ? device.createBindGroupLayout(composed._shadowBGLDescriptor) : null;
+  const sceneBGL = engine._getSceneBGL?.() ?? _getSceneBindGroupLayoutLocal(engine);
+  const bgls = shadowBGL ? [sceneBGL, meshBGL, shadowBGL] : [sceneBGL, meshBGL];
+  const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: bgls });
+  const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
+  const fragModule = device.createShaderModule({ code: composed._fragmentWGSL });
+  const sourceFeatures = source._renderFeatures?.features ?? 0;
+  const alphaBlend = (sourceFeatures & PBR_HAS_ALPHA_BLEND) !== 0;
+  const res = {
+    _composed: composed,
+    _features: features,
+    _features2: features2,
+    _meshFeatures: meshFeatures,
+    _sceneFeatures: sceneFeatures,
+    _meshBGL: meshBGL,
+    _shadowBGL: shadowBGL,
+    _pipelineLayout: pipelineLayout,
+    _vertModule: vertModule,
+    _fragModule: fragModule,
+    _pipelines: /* @__PURE__ */ new Map(),
+    _alphaBlend: alphaBlend
+  };
+  cache.set(variantKey, res);
+  return res;
+}
+function _wrapBindings(res) {
+  return {
+    _features: res._features,
+    _features2: res._features2,
+    _meshFeatures: res._meshFeatures,
+    _meshBGL: res._meshBGL,
+    _shadowBGL: res._shadowBGL,
+    _composed: res._composed,
+    _pipelines: res._pipelines
+  };
+}
+function _getSceneBindGroupLayoutLocal(engine, _composed) {
+  return getSceneBindGroupLayout(engine);
+}
+function _getOrCreateGeometryPipeline(engine, sig, view, res) {
+  const key = targetSignatureKey(sig);
+  const cached = res._pipelines.get(key);
+  if (cached) {
+    return cached;
+  }
+  const device = engine._device;
+  const formats = sig._colorFormats ?? (sig._colorFormat ? [sig._colorFormat] : []);
+  if (formats.length === 0) {
+    throw new Error("pbr-geometry: render target has no color attachments");
+  }
+  const alphaBlend = res._alphaBlend;
+  const blendState = alphaBlend ? {
+    color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+    alpha: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" }
+  } : void 0;
+  const colorTargets = formats.map((fmt) => blendState ? { format: fmt, blend: blendState } : { format: fmt });
+  const sourceFeatures = view.source._renderFeatures?.features ?? 0;
+  const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
+  const cullMode = hasDoubleSided ? "none" : view._reverseCulling ? "front" : "back";
+  const pipeline = device.createRenderPipeline({
+    layout: res._pipelineLayout,
+    vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
+    fragment: { module: res._fragModule, entryPoint: "main", targets: colorTargets },
+    depthStencil: sig._depthStencilFormat ? {
+      format: sig._depthStencilFormat,
+      depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE,
+      // Disable depth-write for alpha-blended meshes so background
+      // depth survives partially-transparent pixels. Matches the
+      // Standard geometry-renderable behaviour.
+      depthWriteEnabled: !alphaBlend
+    } : void 0,
+    multisample: { count: sig._sampleCount },
+    primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" }
+  });
+  res._pipelines.set(key, pipeline);
+  return pipeline;
+}
+function _getPackedSingleLightType(lights, packedIndex) {
+  let packed = 0;
+  for (const light of lights) {
+    if (!light._writeLightUbo) {
+      continue;
+    }
+    if (packed === packedIndex) {
+      const t = light.lightType;
+      return t === "hemispheric" || t === "directional" || t === "spot" ? t : "point";
+    }
+    packed++;
+  }
+  return "point";
+}
+function _writePbrMaterialData(data, mat, spec) {
+  _writeMaterialData(data, mat, spec);
+}
+
+export { _setActivePbrGeometryAttachments, buildPbrGeometryRenderable as b, createPbrGeometryMaterialView, getPbrGeometryGroupBuilder as g };
+//# sourceMappingURL=pbr-geometry-view.js.map

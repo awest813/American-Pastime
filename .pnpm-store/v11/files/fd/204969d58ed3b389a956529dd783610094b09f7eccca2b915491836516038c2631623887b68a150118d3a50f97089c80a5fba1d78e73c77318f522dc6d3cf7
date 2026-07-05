@@ -1,0 +1,18 @@
+let fileExtensionRegex = null;
+function getFileExtension(url) {
+  fileExtensionRegex ??= new RegExp("\\.(\\w{3,4})($|\\?)");
+  return url.match(fileExtensionRegex)?.[1];
+}
+function cleanAudioUrl(url) {
+  return url.replace(/#/gm, "%23");
+}
+async function loadAudioArrayBuffer(url) {
+  const response = await fetch(cleanAudioUrl(url));
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} loading '${url}': ${response.statusText}`);
+  }
+  return await response.arrayBuffer();
+}
+
+export { cleanAudioUrl, getFileExtension, loadAudioArrayBuffer };
+//# sourceMappingURL=audio-fetch.js.map

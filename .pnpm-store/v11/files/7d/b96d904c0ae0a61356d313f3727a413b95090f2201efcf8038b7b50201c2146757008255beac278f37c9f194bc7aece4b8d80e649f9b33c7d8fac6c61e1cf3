@@ -1,0 +1,11 @@
+import { type FunctionComponent } from "react";
+import { type GeospatialCamera } from "@babylonjs/core/Cameras/geospatialCamera.js";
+export declare const GeospatialCameraTransformProperties: FunctionComponent<{
+    camera: GeospatialCamera;
+}>;
+export declare const GeospatialCameraCollisionProperties: FunctionComponent<{
+    camera: GeospatialCamera;
+}>;
+export declare const GeospatialCameraLimitsProperties: FunctionComponent<{
+    camera: GeospatialCamera;
+}>;

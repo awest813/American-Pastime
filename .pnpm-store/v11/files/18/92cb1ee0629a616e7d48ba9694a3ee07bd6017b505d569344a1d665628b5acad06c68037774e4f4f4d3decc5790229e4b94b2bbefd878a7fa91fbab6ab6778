@@ -1,0 +1,15 @@
+import { type PerformanceViewerCollector } from "@babylonjs/core/Misc/PerformanceViewer/performanceViewerCollector.js";
+import { type Observable } from "@babylonjs/core/Misc/observable.js";
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type FunctionComponent } from "react";
+import { type PerfLayoutSize } from "./graphSupportingTypes";
+import { type Vector2 } from "@babylonjs/core/Maths/math.vector.js";
+type PerformanceViewerProps = {
+    scene: Scene;
+    layoutObservable: Observable<PerfLayoutSize>;
+    returnToLiveObservable: Observable<void>;
+    performanceCollector: PerformanceViewerCollector;
+    initialGraphSize?: Vector2;
+};
+export declare const PerformanceViewer: FunctionComponent<PerformanceViewerProps>;
+export {};

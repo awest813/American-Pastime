@@ -1,0 +1,6 @@
+import { type FunctionComponent } from "react";
+/**
+ * Sidebar component for the curve editor with animation list and controls
+ * @returns The sidebar component
+ */
+export declare const SideBar: FunctionComponent;

@@ -1,0 +1,48 @@
+export declare const TextureFormat: ({
+    label: string;
+    normalizable: boolean;
+    value: number;
+    hideType?: undefined;
+    compressed?: undefined;
+} | {
+    label: string;
+    normalizable: boolean;
+    hideType: boolean;
+    value: number;
+    compressed?: undefined;
+} | {
+    label: string;
+    normalizable: boolean;
+    compressed: boolean;
+    value: number;
+    hideType?: undefined;
+})[];
+export declare function FindTextureFormat(format: number): {
+    label: string;
+    normalizable: boolean;
+    value: number;
+    hideType?: undefined;
+    compressed?: undefined;
+} | {
+    label: string;
+    normalizable: boolean;
+    hideType: boolean;
+    value: number;
+    compressed?: undefined;
+} | {
+    label: string;
+    normalizable: boolean;
+    compressed: boolean;
+    value: number;
+    hideType?: undefined;
+} | null;
+export declare const TextureType: {
+    label: string;
+    normalizable: boolean;
+    value: number;
+}[];
+export declare function FindTextureType(type: number): {
+    label: string;
+    normalizable: boolean;
+    value: number;
+} | null;

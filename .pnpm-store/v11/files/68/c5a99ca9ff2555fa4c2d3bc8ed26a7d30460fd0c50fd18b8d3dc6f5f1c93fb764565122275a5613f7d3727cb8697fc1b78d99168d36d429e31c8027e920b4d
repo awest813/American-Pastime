@@ -1,0 +1,20 @@
+import '../material/pbr/pbr-primitive-resolver.js';
+
+const feature = {
+  id: "_primitive",
+  async applyMesh(meshData, mesh) {
+    const mode = meshData._primitive?.mode;
+    const topo = mode === 0 ? 1 : mode === 1 ? 2 : mode === 3 ? 3 : mode === 5 ? 4 : void 0;
+    if (topo) {
+      mesh._topology = topo;
+    }
+    const wm = meshData._worldMatrix;
+    const det3 = wm[0] * (wm[5] * wm[10] - wm[6] * wm[9]) + wm[1] * (wm[6] * wm[8] - wm[4] * wm[10]) + wm[2] * (wm[4] * wm[9] - wm[5] * wm[8]);
+    if (det3 > 0) {
+      mesh._reverseWinding = true;
+    }
+  }
+};
+
+export { feature as default };
+//# sourceMappingURL=gltf-feature-primitive.js.map

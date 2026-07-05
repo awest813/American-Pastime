@@ -1,0 +1,11 @@
+const _ALPHA_BLEND_STATE = {
+  color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+  alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" }
+};
+const _PREMULTIPLIED_BLEND_STATE = {
+  color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+  alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" }
+};
+
+export { _ALPHA_BLEND_STATE, _PREMULTIPLIED_BLEND_STATE };
+//# sourceMappingURL=blend-descriptors.js.map

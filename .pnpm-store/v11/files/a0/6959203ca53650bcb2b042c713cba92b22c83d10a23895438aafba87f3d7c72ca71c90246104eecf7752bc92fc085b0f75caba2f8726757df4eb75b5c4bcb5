@@ -1,0 +1,6 @@
+export { addToScene, buildScene, createSceneContext, disposeScene, getFrameGraph, onBeforeRender, onSceneDispose, registerScene, registerSceneWithShadowSupport, unregisterScene } from './scene-core.js';
+export { processMaterialSwaps } from './scene-material-swap.js';
+export { createDefaultCamera } from './scene-camera.js';
+export { removeFromScene } from './scene-remove.js';
+export { setSubtreeVisible as setMeshVisible } from './visibility.js';
+//# sourceMappingURL=scene.js.map

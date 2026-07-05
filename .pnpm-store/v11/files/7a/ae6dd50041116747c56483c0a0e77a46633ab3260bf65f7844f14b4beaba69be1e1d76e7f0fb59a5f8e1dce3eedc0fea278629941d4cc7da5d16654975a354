@@ -1,0 +1,114 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { SS } from '../engine/gpu-flags.js';
+import { createEmptyUniformBuffer } from '../resource/gpu-buffers.js';
+
+const WGSL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const EMPTY_PARAMS = [0, 0, 0, 0];
+function validateExtraTextureNames(fnName, extras) {
+  for (const extra of extras) {
+    if (!WGSL_NAME.test(extra.name)) {
+      throw new Error(`${fnName}: extra texture name "${extra.name}" is not a valid WGSL identifier.`);
+    }
+  }
+}
+function makeExtraBindingsWgsl(group, startBinding, extras) {
+  let out = "";
+  for (let i = 0; i < extras.length; i++) {
+    const binding = startBinding + i * 2;
+    const name = extras[i].name;
+    out += `@group(${group}) @binding(${binding}) var ${name}Tex: texture_2d<f32>;
+@group(${group}) @binding(${binding + 1}) var ${name}Samp: sampler;
+`;
+  }
+  return out;
+}
+function makeFxStructWgsl(group, binding) {
+  return `struct SpriteFx {
+time: f32,
+_p0: f32,
+_p1: f32,
+_p2: f32,
+params: vec4f,
+};
+@group(${group}) @binding(${binding}) var<uniform> fx: SpriteFx;`;
+}
+let _nextKey = 0;
+function nextCustomShaderKey(prefix) {
+  return `${prefix}${_nextKey++}`;
+}
+const SPRITE_FX_UBO_BYTES = 32;
+const SPRITE_FX_UBO_FLOATS = SPRITE_FX_UBO_BYTES / 4;
+function writeSpriteFxUbo(device, fxBuffer, timeSeconds, params, scratch) {
+  scratch[0] = timeSeconds;
+  scratch[1] = 0;
+  scratch[2] = 0;
+  scratch[3] = 0;
+  scratch[4] = params[0] ?? 0;
+  scratch[5] = params[1] ?? 0;
+  scratch[6] = params[2] ?? 0;
+  scratch[7] = params[3] ?? 0;
+  device.queue.writeBuffer(fxBuffer, 0, scratch.buffer, scratch.byteOffset, SPRITE_FX_UBO_BYTES);
+}
+function makeCustomShaderLayoutEntries(extras, startBinding) {
+  const entries = [];
+  let binding = startBinding;
+  for (let i = 0; i < extras.length; i++) {
+    entries.push({ binding, visibility: SS.FRAGMENT, texture: { sampleType: "float" } });
+    entries.push({ binding: binding + 1, visibility: SS.FRAGMENT, sampler: { type: "filtering" } });
+    binding += 2;
+  }
+  entries.push({ binding, visibility: SS.FRAGMENT, buffer: { type: "uniform" } });
+  return entries;
+}
+function makeCustomShaderBindEntries(extras, startBinding, fxBuffer) {
+  const entries = [];
+  let binding = startBinding;
+  for (let i = 0; i < extras.length; i++) {
+    const texture = extras[i].texture;
+    entries.push({ binding, resource: texture.view });
+    entries.push({ binding: binding + 1, resource: texture.sampler });
+    binding += 2;
+  }
+  if (fxBuffer) {
+    entries.push({ binding, resource: { buffer: fxBuffer } });
+  }
+  return entries;
+}
+function createSpriteLayerFx(engine, label, extras) {
+  const device = engine._device;
+  const buffer = createEmptyUniformBuffer(engine, SPRITE_FX_UBO_BYTES, label);
+  const scratch = new F32(SPRITE_FX_UBO_FLOATS);
+  let elapsedMs = 0;
+  return {
+    bindEntries(startBinding) {
+      return makeCustomShaderBindEntries(extras, startBinding, buffer);
+    },
+    update(params, deltaMs) {
+      elapsedMs += deltaMs;
+      writeSpriteFxUbo(device, buffer, elapsedMs / 1e3, params, scratch);
+    },
+    destroy() {
+      buffer.destroy();
+    }
+  };
+}
+function makeShaderModuleCache() {
+  let devices = null;
+  return (engine, key, makeCode) => {
+    devices ??= /* @__PURE__ */ new WeakMap();
+    let byKey = devices.get(engine._device);
+    if (!byKey) {
+      byKey = /* @__PURE__ */ new Map();
+      devices.set(engine._device, byKey);
+    }
+    let module = byKey.get(key);
+    if (!module) {
+      module = engine._device.createShaderModule({ code: makeCode() });
+      byKey.set(key, module);
+    }
+    return module;
+  };
+}
+
+export { EMPTY_PARAMS, SPRITE_FX_UBO_BYTES, SPRITE_FX_UBO_FLOATS, createSpriteLayerFx, makeCustomShaderBindEntries, makeCustomShaderLayoutEntries, makeExtraBindingsWgsl, makeFxStructWgsl, makeShaderModuleCache, nextCustomShaderKey, validateExtraTextureNames, writeSpriteFxUbo };
+//# sourceMappingURL=custom-shader-core.js.map

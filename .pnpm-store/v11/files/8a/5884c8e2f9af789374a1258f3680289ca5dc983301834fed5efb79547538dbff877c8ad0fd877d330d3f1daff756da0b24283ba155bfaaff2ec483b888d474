@@ -1,0 +1,27 @@
+import { playSpriteTargetAnimation } from './sprite-animation.js';
+import { isBillboardSpriteHandleAlive, removeBillboardSprite, setBillboardSpriteFrame } from './billboard-sprite-handle.js';
+
+function playBillboardSpriteAnimation(manager, handle, from, to, loop, delayMs, options) {
+  return playSpriteTargetAnimation(
+    manager,
+    {
+      setFrame(frame) {
+        setBillboardSpriteFrame(handle, frame);
+      },
+      remove() {
+        removeBillboardSprite(handle);
+      },
+      isAlive() {
+        return isBillboardSpriteHandleAlive(handle);
+      }
+    },
+    from,
+    to,
+    loop,
+    delayMs,
+    options
+  );
+}
+
+export { playBillboardSpriteAnimation };
+//# sourceMappingURL=billboard-sprite-handle-animation.js.map

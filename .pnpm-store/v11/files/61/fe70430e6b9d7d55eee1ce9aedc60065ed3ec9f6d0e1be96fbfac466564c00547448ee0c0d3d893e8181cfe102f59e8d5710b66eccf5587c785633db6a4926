@@ -1,0 +1,113 @@
+import { type BaseTexture, type ISize, type Nullable, type PointerInfo } from "@babylonjs/core/index.js";
+import { type Channel } from "./channels";
+import { type IMetadata } from "./textureEditor";
+import { Vector2 } from "@babylonjs/core/Maths/math.vector.js";
+import { Scene } from "@babylonjs/core/scene.js";
+export type CanvasManagerTool = {
+    readonly is3D: boolean;
+    activate(): void;
+    deactivate(): void;
+    reset(): void;
+};
+export interface IPixelData {
+    x?: number;
+    y?: number;
+    r?: number;
+    g?: number;
+    b?: number;
+    a?: number;
+}
+export declare class TextureCanvasManager {
+    private readonly _engine;
+    private readonly _scene;
+    private readonly _camera;
+    private readonly _cameraPos;
+    private _scale;
+    private _isPanning;
+    private _mouseX;
+    private _mouseY;
+    private readonly _uiCanvas;
+    private _size;
+    /** The canvas we paint onto using the canvas API */
+    private readonly _2DCanvas;
+    /** The canvas we apply post processes to */
+    private readonly _3DCanvas;
+    /** The canvas which handles channel filtering */
+    private readonly _channelsTexture;
+    private readonly _3DEngine;
+    private readonly _3DPlane;
+    private readonly _3DCanvasTexture;
+    private readonly _3DScene;
+    private _channels;
+    private _face;
+    private _mipLevel;
+    /** The texture from the original engine that we invoked the editor on */
+    private readonly _originalTexture;
+    /** This is a hidden texture which is only responsible for holding the actual texture memory in the original engine */
+    private _target;
+    private readonly _originalTextureProperties;
+    /** Keeps track of whether we have modified the texture */
+    private _didEdit;
+    private _plane;
+    private readonly _planeMaterial;
+    /** Tracks which keys are currently pressed */
+    private _keyMap;
+    /** Tracks which mouse buttons are currently pressed */
+    private _buttonsPressed;
+    private readonly ZOOM_MOUSE_SPEED;
+    private readonly ZOOM_KEYBOARD_SPEED;
+    private readonly ZOOM_IN_KEY;
+    private readonly ZOOM_OUT_KEY;
+    private readonly PAN_SPEED;
+    private readonly PAN_KEY;
+    private readonly MIN_SCALE;
+    private readonly GRID_SCALE;
+    private readonly MAX_SCALE;
+    private readonly SELECT_ALL_KEY;
+    private readonly SAVE_KEY;
+    private readonly RESET_KEY;
+    private readonly DESELECT_KEY;
+    /** The number of milliseconds between texture updates */
+    private readonly PUSH_FREQUENCY;
+    private _tool;
+    private _setPixelData;
+    private _setMipLevel;
+    private readonly _window;
+    private _metadata;
+    private _editing3D;
+    private readonly _onUpdate;
+    private _setMetadata;
+    private _imageData;
+    private _canPush;
+    private _shouldPush;
+    private readonly _paintCanvas;
+    constructor(texture: BaseTexture, window: Window, canvasUI: HTMLCanvasElement, canvas2D: HTMLCanvasElement, canvas3D: HTMLCanvasElement, setPixelData: (pixelData: IPixelData) => void, metadata: IMetadata, onUpdate: () => void, setMetadata: (metadata: any) => void, setMipLevel: (level: number) => void);
+    updateTexture(): Promise<void>;
+    private pushTexture;
+    startPainting(): Promise<CanvasRenderingContext2D>;
+    updatePainting(): void;
+    stopPainting(): void;
+    private updateDisplay;
+    set channels(channels: Channel[]);
+    paintPixelsOnCanvas(pixelData: Uint8Array, canvas: HTMLCanvasElement): void;
+    grabOriginalTexture(): Promise<Uint8Array<ArrayBufferLike>>;
+    getMouseCoordinates(pointerInfo: PointerInfo): Vector2;
+    get scene(): Scene;
+    get canvas2D(): HTMLCanvasElement;
+    get size(): ISize;
+    set tool(tool: Nullable<CanvasManagerTool>);
+    get tool(): Nullable<CanvasManagerTool>;
+    set face(face: number);
+    set mipLevel(mipLevel: number);
+    /** Returns the 3D scene used for postprocesses */
+    get scene3D(): Scene;
+    set metadata(metadata: IMetadata);
+    private makePlane;
+    reset(): void;
+    resize(newSize: ISize): Promise<void>;
+    setSize(size: ISize): void;
+    upload(file: File): void;
+    saveTexture(): void;
+    toolInteractionEnabled(): boolean;
+    dispose(): void;
+}

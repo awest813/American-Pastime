@@ -1,0 +1,59 @@
+import { isAudioFormatValid } from './audio-engine.js';
+import { getFileExtension, loadAudioArrayBuffer } from './audio-fetch.js';
+
+function wrapAudioBuffer(audioBuffer) {
+  return {
+    _audioBuffer: audioBuffer,
+    get duration() {
+      return audioBuffer.duration;
+    },
+    get sampleRate() {
+      return audioBuffer.sampleRate;
+    },
+    get channelCount() {
+      return audioBuffer.numberOfChannels;
+    },
+    get length() {
+      return audioBuffer.length;
+    }
+  };
+}
+async function decodeUrl(engine, url) {
+  const data = await loadAudioArrayBuffer(url);
+  return await engine._ctx.decodeAudioData(data);
+}
+async function createSoundBufferAsync(engine, source, options = {}) {
+  if (typeof source === "object" && source !== null && "_audioBuffer" in source) {
+    return source;
+  }
+  if (typeof AudioBuffer !== "undefined" && source instanceof AudioBuffer) {
+    return wrapAudioBuffer(source);
+  }
+  if (source instanceof ArrayBuffer) {
+    return wrapAudioBuffer(await engine._ctx.decodeAudioData(source));
+  }
+  if (typeof source === "string") {
+    return wrapAudioBuffer(await decodeUrl(engine, source));
+  }
+  if (Array.isArray(source)) {
+    const skipCodecCheck = options.skipCodecCheck ?? false;
+    for (const url of source) {
+      const format = getFileExtension(url);
+      if (!skipCodecCheck && (!format || !isAudioFormatValid(engine, format))) {
+        continue;
+      }
+      try {
+        return wrapAudioBuffer(await decodeUrl(engine, url));
+      } catch {
+        if (format) {
+          engine._invalidFormats.add(format);
+        }
+      }
+    }
+    throw new Error("No decodable audio source found in URL list.");
+  }
+  return wrapAudioBuffer(source);
+}
+
+export { createSoundBufferAsync };
+//# sourceMappingURL=sound-buffer.js.map

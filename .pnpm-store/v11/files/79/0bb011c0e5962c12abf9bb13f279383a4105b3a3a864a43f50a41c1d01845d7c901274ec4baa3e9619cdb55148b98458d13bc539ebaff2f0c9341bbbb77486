@@ -1,0 +1,12 @@
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../../services/selectionService";
+import { type ParticleSystem } from "@babylonjs/core/Particles/particleSystem.js";
+/**
+ * Display the NPE blocks that are marked as visible in the inspector.
+ * @param props Component props.
+ * @returns Render property lines.
+ */
+export declare const ParticleSystemNodeEditorProperties: FunctionComponent<{
+    particleSystem: ParticleSystem;
+    selectionService: ISelectionService;
+}>;

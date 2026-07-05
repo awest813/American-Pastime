@@ -1,0 +1,16 @@
+import { type PerformanceViewerCollector } from "@babylonjs/core/Misc/PerformanceViewer/performanceViewerCollector.js";
+/**
+ * The strategy parameter type accepted by {@link PerformanceViewerCollector.addCollectionStrategies}.
+ */
+export type PerfStrategyParameter = Parameters<PerformanceViewerCollector["addCollectionStrategies"]>[number];
+/**
+ * Performance metadata categories for grouping strategies.
+ */
+export declare const enum PerfMetadataCategory {
+    Count = "Count",
+    FrameSteps = "Frame Steps Duration"
+}
+/**
+ * Default list of performance collection strategies used by the performance viewer and CLI perf trace.
+ */
+export declare const DefaultPerfStrategies: readonly PerfStrategyParameter[];

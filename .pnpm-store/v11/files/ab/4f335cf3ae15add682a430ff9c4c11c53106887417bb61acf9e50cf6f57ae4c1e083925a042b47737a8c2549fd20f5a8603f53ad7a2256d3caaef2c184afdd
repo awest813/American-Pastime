@@ -1,0 +1,44 @@
+function processMaterialSwaps(scene) {
+  const q = scene._materialSwapQueue;
+  if (q.length === 0) {
+    return;
+  }
+  const device = scene.surface.engine._device;
+  for (const mesh of q) {
+    const old = scene._meshDisposables.get(mesh);
+    if (old) {
+      scene._meshDisposables.delete(mesh);
+      void device.queue.onSubmittedWorkDone().then(() => {
+        try {
+          for (const fn of old) {
+            fn();
+          }
+        } catch {
+        }
+      }).catch(() => {
+      });
+    }
+    const mat = mesh.material;
+    const builder = mat?._buildGroup;
+    if (!builder) {
+      continue;
+    }
+    const rebuild = builder._rebuildSingle;
+    if (!rebuild) {
+      continue;
+    }
+    mat._csmGen = (mat._csmGen ?? 0) + 1;
+    const renderable = rebuild(scene, mesh);
+    let i = scene._renderables.length;
+    while (i > 0 && scene._renderables[i - 1].order > renderable.order) {
+      i--;
+    }
+    scene._renderables.splice(i, 0, renderable);
+  }
+  q.length = 0;
+  scene._renderableVersion++;
+  scene._materialEpoch++;
+}
+
+export { processMaterialSwaps };
+//# sourceMappingURL=scene-material-swap.js.map

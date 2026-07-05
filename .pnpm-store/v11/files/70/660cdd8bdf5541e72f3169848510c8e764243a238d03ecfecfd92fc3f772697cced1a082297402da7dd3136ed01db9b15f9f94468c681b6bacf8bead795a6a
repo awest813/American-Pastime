@@ -1,0 +1,10 @@
+import { createMaterialView } from '../material-view.js';
+import { NODE_NO_COLOR_OUTPUT } from './node-flags.js';
+
+function createNodeNoColorMaterialView(source) {
+  const features = source._renderFeatures ?? { features: 0 };
+  return createMaterialView(source, { features: features.features | NODE_NO_COLOR_OUTPUT });
+}
+
+export { createNodeNoColorMaterialView };
+//# sourceMappingURL=no-color-view.js.map

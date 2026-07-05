@@ -1,0 +1,11 @@
+import { type FunctionComponent } from "react";
+import { type Nullable, type Scene } from "@babylonjs/core/index.js";
+import { type IGizmoService } from "../services/gizmoService";
+export declare const PickingToolbar: FunctionComponent<{
+    scene: Scene;
+    selectEntity: (entity: Nullable<object>) => void;
+    gizmoService: IGizmoService;
+    ignoreBackfaces?: boolean;
+    highlightSelectedEntity?: boolean;
+    onHighlightSelectedEntityChange?: (value: boolean) => void;
+}>;

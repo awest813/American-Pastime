@@ -1,0 +1,43 @@
+import { _appendTask } from './frame-graph.js';
+import { createRenderPass } from './render-pass.js';
+
+function isFrameGraph(value) {
+  return typeof value === "object" && value !== null && "_tasks" in value;
+}
+function resolveFg(target) {
+  if (isFrameGraph(target)) {
+    return target;
+  }
+  if ("_frameGraph" in target && isFrameGraph(target._frameGraph)) {
+    return target._frameGraph;
+  }
+  throw new Error("FrameGraph target does not expose a frame graph.");
+}
+function addTask(target, task) {
+  _appendTask(resolveFg(target), task);
+}
+function addTaskAtStart(target, task) {
+  const fg = resolveFg(target);
+  const firstUserTask = fg._tasks[0]?.name === "shadow" ? 1 : 0;
+  fg._tasks.splice(firstUserTask, 0, task);
+}
+function addTaskBefore(target, task, before) {
+  const fg = resolveFg(target);
+  const i = fg._tasks.indexOf(before);
+  if (i < 0) {
+    fg._tasks.push(task);
+  } else {
+    fg._tasks.splice(i, 0, task);
+  }
+}
+function addRenderPass(target, name) {
+  const fg = resolveFg(target);
+  const task = fg._currentProcessedTask;
+  if (!task) {
+    throw new Error(`addRenderPass("${name}"): no task is currently recording (called outside Task.record?)`);
+  }
+  return createRenderPass(name, task);
+}
+
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore };
+//# sourceMappingURL=frame-graph-actions.js.map

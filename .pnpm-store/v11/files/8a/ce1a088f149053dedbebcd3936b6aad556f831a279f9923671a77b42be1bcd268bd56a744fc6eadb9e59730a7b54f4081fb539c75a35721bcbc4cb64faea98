@@ -1,0 +1,3 @@
+import { type Mesh, type NodeGeometry, type Nullable, type Scene } from "@babylonjs/core/index.js";
+export declare function GetNodeGeometry(mesh: Mesh): Nullable<NodeGeometry>;
+export declare function EditNodeGeometry(nodeGeometry: NodeGeometry, hostScene: Scene): Promise<void>;

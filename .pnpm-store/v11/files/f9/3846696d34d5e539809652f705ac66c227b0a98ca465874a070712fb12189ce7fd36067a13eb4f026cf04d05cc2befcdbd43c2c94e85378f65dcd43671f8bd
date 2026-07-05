@@ -1,0 +1,105 @@
+import { mat4LookAtLH } from '../math/mat4-look-at-lh.js';
+import { Vec3Up } from '../math/vec3-up.js';
+import { attachWorldMatrixState, createWorldMatrixState } from '../scene/world-matrix-state.js';
+import { ObservableVec3 } from '../math/observable-vec3.js';
+import { allocateMat4 } from '../math/_matrix-allocator.js';
+
+function createArcRotateCamera(alpha, beta, radius, target) {
+  function localEyePosition() {
+    const cosA = Math.cos(cam.alpha), sinA = Math.sin(cam.alpha);
+    const cosB = Math.cos(cam.beta);
+    let sinB = Math.sin(cam.beta);
+    if (sinB === 0) {
+      sinB = 1e-4;
+    }
+    return {
+      x: cam.target.x + cam.radius * cosA * sinB,
+      y: cam.target.y + cam.radius * cosB,
+      z: cam.target.z + cam.radius * sinA * sinB
+    };
+  }
+  const _localMat = allocateMat4();
+  function cameraLocalWorldMatrix() {
+    const eye = localEyePosition();
+    const v = mat4LookAtLH(eye, cam.target, Vec3Up);
+    const m = _localMat;
+    m[0] = v[0];
+    m[1] = v[4];
+    m[2] = v[8];
+    m[3] = 0;
+    m[4] = v[1];
+    m[5] = v[5];
+    m[6] = v[9];
+    m[7] = 0;
+    m[8] = v[2];
+    m[9] = v[6];
+    m[10] = v[10];
+    m[11] = 0;
+    m[12] = eye.x;
+    m[13] = eye.y;
+    m[14] = eye.z;
+    m[15] = 1;
+    return _localMat;
+  }
+  const wm = createWorldMatrixState(cameraLocalWorldMatrix);
+  const onDirty = () => wm.markLocalDirty();
+  const scalars = { alpha, beta, radius };
+  const cam = {
+    alpha: 0,
+    // placeholder — overridden by defineProperty below
+    beta: 0,
+    radius: 0,
+    target: new ObservableVec3(target.x, target.y, target.z, onDirty),
+    fov: 0.8,
+    nearPlane: 0.1,
+    farPlane: 1e3,
+    children: [],
+    inertia: 0.9,
+    panningInertia: 0.9,
+    angularSensibility: 1e3,
+    panningSensibility: 50,
+    wheelPrecision: 3,
+    inertialAlphaOffset: 0,
+    inertialBetaOffset: 0,
+    inertialRadiusOffset: 0,
+    inertialPanningX: 0,
+    inertialPanningY: 0,
+    // Matrix caches use the process-global allocator — F32 by default,
+    // F64 after an HPM engine is created. Same backing as the camera world
+    // matrix above, so the camera's storage precision is uniform.
+    _viewCache: allocateMat4(),
+    _projCache: allocateMat4(),
+    _vpCache: allocateMat4(),
+    get parent() {
+      return wm.parent;
+    },
+    set parent(v) {
+      wm.parent = v;
+    },
+    get worldMatrix() {
+      return wm.getWorldMatrix();
+    },
+    get worldMatrixVersion() {
+      return wm.getWorldMatrixVersion();
+    }
+  };
+  for (const key of ["alpha", "beta", "radius"]) {
+    Object.defineProperty(cam, key, {
+      get: () => scalars[key],
+      set: (v) => {
+        if (scalars[key] !== v) {
+          scalars[key] = v;
+          onDirty();
+          cam._clampToLimits?.();
+        }
+      },
+      configurable: true,
+      enumerable: true
+    });
+  }
+  attachWorldMatrixState(cam, wm);
+  return cam;
+}
+
+export { createArcRotateCamera };
+//# sourceMappingURL=arc-rotate.js.map

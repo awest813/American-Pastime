@@ -1,0 +1,188 @@
+import { createAudioSignal } from './audio-signal.js';
+import { createMainOut, setMainOutVolume, createMainBus, disposeMainBus, disposeMainOut } from './bus.js';
+
+const FormatMimeTypes = {
+  aac: "audio/aac",
+  ac3: "audio/ac3",
+  flac: "audio/flac",
+  m4a: "audio/mp4",
+  mp3: 'audio/mpeg; codecs="mp3"',
+  mp4: "audio/mp4",
+  ogg: 'audio/ogg; codecs="vorbis"',
+  wav: "audio/wav",
+  webm: 'audio/webm; codecs="vorbis"'
+};
+function isOfflineContext(ctx) {
+  return typeof OfflineAudioContext !== "undefined" && ctx instanceof OfflineAudioContext;
+}
+async function createAudioEngineAsync(options = {}) {
+  const ctx = options.audioContext ?? new AudioContext();
+  const isOffline = isOfflineContext(ctx);
+  const onStateChanged = createAudioSignal();
+  const onUserGesture = createAudioSignal();
+  let resolveReady;
+  const isReady = new Promise((resolve) => {
+    resolveReady = resolve;
+  });
+  const engine = {
+    get state() {
+      return isOffline ? "running" : ctx.state;
+    },
+    get currentTime() {
+      return ctx.currentTime ?? 0;
+    },
+    get _currentTime() {
+      return ctx.currentTime ?? 0;
+    },
+    get onStateChanged() {
+      return onStateChanged;
+    },
+    get onUserGesture() {
+      return onUserGesture;
+    },
+    _ctx: ctx,
+    _isOffline: isOffline,
+    _rampDuration: typeof options.parameterRampDuration === "number" ? Math.max(0, options.parameterRampDuration) : 0.01,
+    _volume: options.volume ?? 1,
+    // Assigned just below once the engine (the ramp clock) exists.
+    _mainOut: void 0,
+    _mainBus: void 0,
+    _validFormats: /* @__PURE__ */ new Set(),
+    _invalidFormats: /* @__PURE__ */ new Set(),
+    _sounds: /* @__PURE__ */ new Set(),
+    _buses: /* @__PURE__ */ new Set(),
+    _listener: null,
+    _spatialUpdaters: /* @__PURE__ */ new Set(),
+    _spatialAutoStop: null,
+    _disposers: [],
+    _onStateChanged: onStateChanged,
+    _onUserGesture: onUserGesture,
+    _isReady: isReady
+  };
+  engine._mainOut = createMainOut(ctx, engine);
+  setMainOutVolume(engine._mainOut, engine._volume);
+  engine._mainBus = createMainBus("default", ctx, engine, engine._mainOut);
+  _wireStateAndResume(engine, options);
+  _wireUserGesture(engine, options);
+  resolveReady();
+  await isReady;
+  return engine;
+}
+function _wireStateAndResume(engine, options) {
+  const ctx = engine._ctx;
+  if (engine._isOffline || typeof ctx.addEventListener !== "function") {
+    return;
+  }
+  const resumeOnPause = options.resumeOnPause !== false;
+  const retryInterval = options.resumeOnPauseRetryInterval ?? 1e3;
+  let started = false;
+  let resumeTimer = null;
+  const clearResumeTimer = () => {
+    if (resumeTimer !== null) {
+      clearInterval(resumeTimer);
+      resumeTimer = null;
+    }
+  };
+  const onStateChange = () => {
+    const state = engine.state;
+    if (state === "running") {
+      clearResumeTimer();
+      started = true;
+    } else if ((state === "suspended" || state === "interrupted") && started && resumeOnPause) {
+      clearResumeTimer();
+      resumeTimer = setInterval(() => {
+        void ctx.resume();
+      }, retryInterval);
+    }
+    engine._onStateChanged._notify(state);
+  };
+  ctx.addEventListener("statechange", onStateChange);
+  engine._disposers.push(() => {
+    clearResumeTimer();
+    ctx.removeEventListener("statechange", onStateChange);
+  });
+}
+function _wireUserGesture(engine, options) {
+  const resumeOnInteraction = options.resumeOnInteraction !== false;
+  if (engine._isOffline || typeof document === "undefined" || typeof document.addEventListener !== "function") {
+    return;
+  }
+  const onGesture = () => {
+    if (resumeOnInteraction) {
+      void engine._ctx.resume();
+    }
+    engine._onUserGesture._notify();
+  };
+  document.addEventListener("click", onGesture);
+  engine._disposers.push(() => document.removeEventListener("click", onGesture));
+}
+async function unlockAudioEngineAsync(engine) {
+  if (engine._isOffline) {
+    return;
+  }
+  const ctx = engine._ctx;
+  if (ctx.state !== "running") {
+    await ctx.resume();
+  }
+}
+function setMasterVolume(engine, value, options) {
+  engine._volume = value;
+  setMainOutVolume(engine._mainOut, value, options);
+}
+function getMasterVolume(engine) {
+  return engine._volume;
+}
+function isAudioFormatValid(engine, format) {
+  if (engine._validFormats.has(format)) {
+    return true;
+  }
+  if (engine._invalidFormats.has(format)) {
+    return false;
+  }
+  const mimeType = FormatMimeTypes[format];
+  if (mimeType === void 0) {
+    return false;
+  }
+  if (typeof Audio === "undefined") {
+    return true;
+  }
+  if (new Audio().canPlayType(mimeType) === "") {
+    engine._invalidFormats.add(format);
+    return false;
+  }
+  engine._validFormats.add(format);
+  return true;
+}
+function disposeAudioEngine(engine) {
+  engine._spatialAutoStop?.();
+  engine._spatialAutoStop = null;
+  engine._spatialUpdaters.clear();
+  engine._listener?._dispose();
+  for (const sound of Array.from(engine._sounds)) {
+    sound._dispose();
+  }
+  engine._sounds.clear();
+  for (const bus of Array.from(engine._buses)) {
+    bus._dispose();
+  }
+  engine._buses.clear();
+  for (const dispose of engine._disposers) {
+    try {
+      dispose();
+    } catch (e) {
+      console.warn(`Audio disposer failed: ${e.message}`);
+    }
+  }
+  engine._disposers.length = 0;
+  disposeMainBus(engine._mainBus);
+  disposeMainOut(engine._mainOut);
+  const ctx = engine._ctx;
+  if (!engine._isOffline && ctx.state !== "closed") {
+    void ctx.close();
+  }
+  engine._onStateChanged._clear();
+  engine._onUserGesture._clear();
+}
+
+export { createAudioEngineAsync, disposeAudioEngine, getMasterVolume, isAudioFormatValid, setMasterVolume, unlockAudioEngineAsync };
+//# sourceMappingURL=audio-engine.js.map

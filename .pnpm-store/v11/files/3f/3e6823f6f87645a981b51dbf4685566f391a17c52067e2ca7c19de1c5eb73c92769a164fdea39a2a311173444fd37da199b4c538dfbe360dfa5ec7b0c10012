@@ -1,0 +1,34 @@
+import { type Nullable } from "@babylonjs/core/types.js";
+import * as React from "react";
+import { type CurveData } from "./curveData";
+/** Selection state for key points */
+export declare enum SelectionState {
+    None = 0,
+    Selected = 1,
+    Siblings = 2
+}
+/** Props for the KeyPointComponent */
+interface IKeyPointComponentProps {
+    x: number;
+    y: number;
+    getPreviousX: () => Nullable<number>;
+    getNextX: () => Nullable<number>;
+    invertX: (x: number) => number;
+    invertY: (y: number) => number;
+    convertX: (x: number) => number;
+    convertY: (y: number) => number;
+    scale: number;
+    keyId: number;
+    curve: CurveData;
+    channel: string;
+    onFrameValueChanged: (value: number) => void;
+    onKeyValueChanged: (value: number) => void;
+}
+/**
+ * KeyPointComponent - Renders a single key point on the curve editor
+ * Handles selection, dragging, and tangent manipulation
+ * @param props - The component props
+ * @returns The rendered key point SVG element
+ */
+export declare const KeyPointComponent: React.FunctionComponent<IKeyPointComponentProps>;
+export default KeyPointComponent;

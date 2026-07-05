@@ -1,0 +1,7 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IGizmoService } from "./gizmoService";
+import { type ISettingsService } from "@babylonjs/shared-ui-components/modularTool/services/settingsService.js";
+import { type ISceneContext } from "./sceneContext";
+import { type ISelectionService } from "./selectionService";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+export declare const PickingServiceDefinition: ServiceDefinition<[], [ISceneContext, IShellService, ISelectionService, IGizmoService, ISettingsService]>;

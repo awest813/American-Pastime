@@ -1,0 +1,20 @@
+import { type FunctionComponent } from "react";
+import { type Atmosphere } from "@babylonjs/addons/atmosphere/atmosphere.js";
+export declare const GeneralAtmosphereProperties: FunctionComponent<{
+    entity: Atmosphere;
+}>;
+export declare const ScatteringAndAbsorptionProperties: FunctionComponent<{
+    entity: Atmosphere;
+}>;
+export declare const MultipleScatteringProperties: FunctionComponent<{
+    entity: Atmosphere;
+}>;
+export declare const AerialPerspectiveProperties: FunctionComponent<{
+    entity: Atmosphere;
+}>;
+export declare const DiffuseIrradianceProperties: FunctionComponent<{
+    entity: Atmosphere;
+}>;
+export declare const RenderingOptionsProperties: FunctionComponent<{
+    entity: Atmosphere;
+}>;

@@ -1,0 +1,52 @@
+const GS_LINEAR_DEPTH_HELPERS = (
+  /* wgsl */
+  `
+fn gsLinearDepth(ndcZ: f32) -> f32 {
+    // Lite uses a reverse-Z left-handed perspective matrix:
+    //   projection[2][2] = -near / (far-near)
+    //   projection[3][2] =  far*near / (far-near)
+    // For a point at camera-space depth viewZ (positive in front in LH):
+    //   pos2d.z = projection[2][2] * viewZ + projection[3][2]
+    //   pos2d.w = viewZ
+    // After perspective divide (what we get as in.pos.z):
+    //   ndcZ = pos2d.z / pos2d.w = projection[2][2] + projection[3][2] / viewZ
+    // So we can recover viewZ and the camera near/far purely from the projection:
+    let p22 = u.projection[2][2];
+    let p32 = u.projection[3][2];
+    let viewZ = p32 / (ndcZ - p22);
+    let near = p32 / (1.0 - p22);
+    let far  = -p32 / p22;
+    return clamp((viewZ - near) / (far - near), 0.0, 1.0);
+}
+`
+);
+const gsLinearDepthFragment = {
+  id: "gsLinearDepth",
+  helperFunctions: GS_LINEAR_DEPTH_HELPERS,
+  fragmentSlots: {
+    GS_FRAGMENT_BEFORE_FRAGCOLOR: (
+      /* wgsl */
+      `
+            if (dot(in.vPos, in.vPos) > in.vColor.a) { discard; }
+            let _gsDepth = gsLinearDepth(in.pos.z);
+            finalColor = vec4<f32>(_gsDepth, _gsDepth, _gsDepth, 1.0);
+        `
+    )
+  }
+};
+const gsAlphaBlendedDepthFragment = {
+  id: "gsAlphaBlendedDepth",
+  helperFunctions: GS_LINEAR_DEPTH_HELPERS,
+  fragmentSlots: {
+    GS_FRAGMENT_BEFORE_FRAGCOLOR: (
+      /* wgsl */
+      `
+            let _gsDepth = gsLinearDepth(in.pos.z);
+            finalColor = vec4<f32>(_gsDepth, _gsDepth, _gsDepth, finalColor.a);
+        `
+    )
+  }
+};
+
+export { gsAlphaBlendedDepthFragment, gsLinearDepthFragment };
+//# sourceMappingURL=gs-depth-fragments.js.map

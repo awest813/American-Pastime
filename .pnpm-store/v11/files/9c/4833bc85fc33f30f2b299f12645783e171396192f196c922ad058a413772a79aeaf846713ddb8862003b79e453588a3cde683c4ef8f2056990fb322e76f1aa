@@ -1,0 +1,6 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISettingsStore } from "@babylonjs/shared-ui-components/modularTool/services/settingsStore.js";
+import { type IToastService } from "@babylonjs/shared-ui-components/modularTool/services/toastService.js";
+import { type IToolsService } from "../../toolsService";
+export declare const GLTFLoaderServiceIdentity: unique symbol;
+export declare const GLTFLoaderOptionsServiceDefinition: ServiceDefinition<[], [IToolsService, ISettingsStore, IToastService]>;

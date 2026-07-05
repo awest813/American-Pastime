@@ -1,0 +1,66 @@
+let _texRefs = null;
+function texRefs() {
+  if (!_texRefs) {
+    _texRefs = /* @__PURE__ */ new WeakMap();
+  }
+  return _texRefs;
+}
+function acquireTexture(tex) {
+  const m = texRefs();
+  m.set(tex.texture, (m.get(tex.texture) ?? 0) + 1);
+}
+function releaseTexture(tex) {
+  const m = texRefs();
+  const c = (m.get(tex.texture) ?? 1) - 1;
+  if (c <= 0) {
+    tex.texture.destroy();
+    m.delete(tex.texture);
+    return true;
+  }
+  m.set(tex.texture, c);
+  return false;
+}
+function acquireGPUTexture(tex) {
+  const m = texRefs();
+  m.set(tex, (m.get(tex) ?? 0) + 1);
+}
+function releaseGPUTexture(tex) {
+  const m = texRefs();
+  const c = (m.get(tex) ?? 1) - 1;
+  if (c <= 0) {
+    tex.destroy();
+    m.delete(tex);
+    return true;
+  }
+  m.set(tex, c);
+  return false;
+}
+let _samplerCache = null;
+function samplerKey(desc) {
+  return `${desc.minFilter ?? "nearest"}:${desc.magFilter ?? "nearest"}:${desc.mipmapFilter ?? "nearest"}:${desc.addressModeU ?? "clamp-to-edge"}:${desc.addressModeV ?? "clamp-to-edge"}:${desc.addressModeW ?? "clamp-to-edge"}:${desc.maxAnisotropy ?? 1}`;
+}
+function getOrCreateSampler(engine, desc = {}) {
+  const device = engine._device;
+  if (!_samplerCache) {
+    _samplerCache = /* @__PURE__ */ new WeakMap();
+  }
+  let dc = _samplerCache.get(device);
+  if (!dc) {
+    dc = /* @__PURE__ */ new Map();
+    _samplerCache.set(device, dc);
+  }
+  const key = samplerKey(desc);
+  let s = dc.get(key);
+  if (!s) {
+    s = device.createSampler(desc);
+    dc.set(key, s);
+  }
+  return s;
+}
+function clearSamplerCache(engine) {
+  const device = engine._device;
+  _samplerCache?.delete(device);
+}
+
+export { acquireGPUTexture, acquireTexture, clearSamplerCache, getOrCreateSampler, releaseGPUTexture, releaseTexture };
+//# sourceMappingURL=gpu-pool.js.map

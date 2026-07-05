@@ -1,0 +1,50 @@
+import { createLightBase, applyWorldMatrixAccessors } from './light-base.js';
+import { allocateMat4 } from '../math/_matrix-allocator.js';
+import { ObservableVec3 } from '../math/observable-vec3.js';
+
+function createPointLight(position, intensity = 1) {
+  const m = allocateMat4();
+  m[0] = 1;
+  m[5] = 1;
+  m[10] = 1;
+  m[15] = 1;
+  const _localMatrix = m;
+  const { wm, onDirty, lvs } = createLightBase(() => {
+    m[12] = light.position.x;
+    m[13] = light.position.y;
+    m[14] = light.position.z;
+    return _localMatrix;
+  });
+  const light = applyWorldMatrixAccessors(
+    {
+      lightType: "point",
+      children: [],
+      position: new ObservableVec3(position[0], position[1], position[2], onDirty),
+      diffuse: [1, 1, 1],
+      specular: [1, 1, 1],
+      intensity,
+      range: Number.MAX_VALUE,
+      _writeLightUbo: (data, offset) => {
+        const o = offset;
+        const w = light.worldMatrix;
+        data[o] = w[12];
+        data[o + 1] = w[13];
+        data[o + 2] = w[14];
+        data[o + 3] = 0;
+        data[o + 4] = light.diffuse[0] * light.intensity;
+        data[o + 5] = light.diffuse[1] * light.intensity;
+        data[o + 6] = light.diffuse[2] * light.intensity;
+        data[o + 7] = light.range;
+        data[o + 8] = light.specular[0] * light.intensity;
+        data[o + 9] = light.specular[1] * light.intensity;
+        data[o + 10] = light.specular[2] * light.intensity;
+      }
+    },
+    wm,
+    lvs
+  );
+  return light;
+}
+
+export { createPointLight };
+//# sourceMappingURL=point-light.js.map

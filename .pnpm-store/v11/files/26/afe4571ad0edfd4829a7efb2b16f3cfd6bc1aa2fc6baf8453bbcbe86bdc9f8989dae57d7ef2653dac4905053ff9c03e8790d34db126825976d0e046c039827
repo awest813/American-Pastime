@@ -1,0 +1,5 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../../sceneContext";
+import { type IWatcherService } from "../../watcherService";
+import { type ISceneExplorerService } from "./sceneExplorerService";
+export declare const AtmosphereExplorerServiceDefinition: ServiceDefinition<[], [ISceneExplorerService, ISceneContext, IWatcherService]>;

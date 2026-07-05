@@ -1,0 +1,6 @@
+import { type FunctionComponent } from "react";
+import { type Scene } from "@babylonjs/core/index.js";
+import "@babylonjs/core/Misc/PerformanceViewer/performanceViewerSceneExtension.js";
+export declare const PerformanceStats: FunctionComponent<{
+    context: Scene;
+}>;

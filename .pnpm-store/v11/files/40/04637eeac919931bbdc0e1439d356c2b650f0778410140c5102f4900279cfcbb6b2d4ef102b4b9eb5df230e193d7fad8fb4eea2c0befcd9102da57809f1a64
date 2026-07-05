@@ -1,0 +1,8 @@
+import { createCsmShadowFragment } from '../../../shader/fragments/csm-shadow-fragment-core.js';
+
+function createStdCsmShadowFragment(shadowLights) {
+  return createCsmShadowFragment("std-csm-shadow", shadowLights);
+}
+
+export { createStdCsmShadowFragment };
+//# sourceMappingURL=std-csm-shadow-fragment.js.map

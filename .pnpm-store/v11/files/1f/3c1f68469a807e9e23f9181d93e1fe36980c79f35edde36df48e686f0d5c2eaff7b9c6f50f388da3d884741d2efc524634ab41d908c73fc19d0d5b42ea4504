@@ -1,0 +1,17 @@
+import { allocateMat4 } from '../math/_matrix-allocator.js';
+
+let _tmpLocal = null;
+let _tmpAnim = null;
+let _tmpInstance = null;
+function getLoaderTmpLocal() {
+  return _tmpLocal ??= allocateMat4();
+}
+function getLoaderTmpAnim() {
+  return _tmpAnim ??= allocateMat4();
+}
+function getLoaderTmpInstance() {
+  return _tmpInstance ??= allocateMat4();
+}
+
+export { getLoaderTmpAnim, getLoaderTmpInstance, getLoaderTmpLocal };
+//# sourceMappingURL=_loader-scratch.js.map

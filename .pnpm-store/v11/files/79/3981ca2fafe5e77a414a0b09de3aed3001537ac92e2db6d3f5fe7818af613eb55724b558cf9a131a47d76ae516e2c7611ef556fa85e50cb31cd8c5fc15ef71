@@ -1,0 +1,100 @@
+import { U32, I32, F32, U8 } from '../engine/typed-arrays.js';
+
+let dracoBaseUrl = "/";
+function setDracoBaseUrl(url) {
+  dracoBaseUrl = url.endsWith("/") ? url : url + "/";
+}
+let modulePromise = null;
+let scriptLoadPromise = null;
+function loadDracoScript() {
+  if (scriptLoadPromise) {
+    return scriptLoadPromise;
+  }
+  scriptLoadPromise = new Promise((resolve, reject) => {
+    const existing = globalThis.DracoDecoderModule;
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = dracoBaseUrl + "draco_decoder.js";
+    script.onload = () => {
+      const factory = globalThis.DracoDecoderModule;
+      if (!factory) {
+        reject(new Error("draco_decoder.js loaded but DracoDecoderModule is undefined"));
+      } else {
+        resolve(factory);
+      }
+    };
+    script.onerror = () => reject(new Error("Failed to load draco_decoder.js from " + script.src));
+    document.head.appendChild(script);
+  });
+  return scriptLoadPromise;
+}
+async function getDracoModule() {
+  if (modulePromise) {
+    return modulePromise;
+  }
+  modulePromise = (async () => {
+    const factory = await loadDracoScript();
+    return factory({ locateFile: (f) => dracoBaseUrl + f });
+  })();
+  return modulePromise;
+}
+async function decodeDracoPrimitive(compressed, attributeMap, accessorTypes) {
+  const module = await getDracoModule();
+  const decoder = new module.Decoder();
+  const buffer = new module.DecoderBuffer();
+  buffer.Init(compressed, compressed.byteLength);
+  const mesh = new module.Mesh();
+  const status = decoder.DecodeBufferToMesh(buffer, mesh);
+  if (!status.ok()) {
+    const err = status.error_msg();
+    module.destroy(buffer);
+    module.destroy(mesh);
+    module.destroy(decoder);
+    throw new Error("Draco decode failed: " + err);
+  }
+  const numPoints = mesh.num_points();
+  const numFaces = mesh.num_faces();
+  const indexCount = numFaces * 3;
+  const indexByteLength = indexCount * 4;
+  const indexPtr = module._malloc(indexByteLength);
+  decoder.GetTrianglesUInt32Array(mesh, indexByteLength, indexPtr);
+  const indices = new U32(module.HEAPU32.buffer, indexPtr, indexCount).slice();
+  module._free(indexPtr);
+  const attributes = /* @__PURE__ */ new Map();
+  for (const name of Object.keys(attributeMap)) {
+    const uniqueId = attributeMap[name];
+    const attr = decoder.GetAttributeByUniqueId(mesh, uniqueId);
+    const componentCount = accessorTypes[name] ?? 3;
+    const totalComponents = numPoints * componentCount;
+    const isIntAttr = name === "JOINTS_0" || name === "JOINTS_1";
+    const bytesPerElement = 4;
+    const byteLength = totalComponents * bytesPerElement;
+    const ptr = module._malloc(byteLength);
+    const dataType = isIntAttr ? module.DT_INT32 : module.DT_FLOAT32;
+    decoder.GetAttributeDataArrayForAllPoints(mesh, attr, dataType, byteLength, ptr);
+    if (isIntAttr) {
+      attributes.set(name, new I32(module.HEAP32.buffer, ptr, totalComponents).slice());
+    } else {
+      attributes.set(name, new F32(module.HEAPF32.buffer, ptr, totalComponents).slice());
+    }
+    module._free(ptr);
+  }
+  module.destroy(buffer);
+  module.destroy(mesh);
+  module.destroy(decoder);
+  return { _attributes: attributes, _indices: indices, _vertexCount: numPoints, _indexCount: indexCount };
+}
+function getDracoBufferViewBytes(json, binChunk, bufferViewIdx) {
+  const view = json.bufferViews[bufferViewIdx];
+  if (!view) {
+    throw new Error(`Draco bufferView ${bufferViewIdx} not found`);
+  }
+  const offset = binChunk.byteOffset + (view.byteOffset ?? 0);
+  return new U8(binChunk.buffer, offset, view.byteLength);
+}
+
+export { decodeDracoPrimitive, getDracoBufferViewBytes, setDracoBaseUrl };
+//# sourceMappingURL=draco-decode.js.map

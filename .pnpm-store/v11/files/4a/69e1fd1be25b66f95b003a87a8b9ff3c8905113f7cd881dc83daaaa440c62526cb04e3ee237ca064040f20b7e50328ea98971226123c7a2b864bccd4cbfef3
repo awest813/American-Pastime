@@ -1,0 +1,10 @@
+import { enableSceneTransmission } from '../../frame-graph/transmission.js';
+import { makeRefractionRttExt } from './fragments/refraction-rtt-fragment.js';
+
+function registerPbrTransmission(scene, engine, register, dispersionSampleWgsl) {
+  enableSceneTransmission(scene, engine);
+  register(makeRefractionRttExt(dispersionSampleWgsl));
+}
+
+export { registerPbrTransmission };
+//# sourceMappingURL=pbr-transmission-ext.js.map

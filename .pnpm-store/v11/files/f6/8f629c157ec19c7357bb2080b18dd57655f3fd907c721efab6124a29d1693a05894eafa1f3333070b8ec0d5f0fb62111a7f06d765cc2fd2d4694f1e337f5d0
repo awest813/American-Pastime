@@ -1,0 +1,33 @@
+function mapBabylonImport(source) {
+  if (/^@babylonjs\/(core|loaders)(\/|$)/.test(source)) {
+    return "core";
+  }
+  if (/^@babylonjs\/addons(\/|$)/.test(source)) {
+    return "addons";
+  }
+  if (/^@recast-navigation\/(core|generators)(\/|$)/.test(source)) {
+    return "recast";
+  }
+  if (/^@babylonjs\/materials(\/|$)/.test(source)) {
+    return "materials";
+  }
+  return null;
+}
+const COMPAT_SPECIFIER = {
+  core: "@babylonjs/lite-compat",
+  addons: "@babylonjs/lite-compat/navigation",
+  recast: "@babylonjs/lite-compat/recast-shim",
+  // `GridMaterial` is re-exported from the root barrel, so the materials
+  // redirect folds into the main entry rather than carrying its own subpath.
+  materials: "@babylonjs/lite-compat"
+};
+function resolveCompatSpecifier(source) {
+  const target = mapBabylonImport(source);
+  return target ? COMPAT_SPECIFIER[target] : null;
+}
+const COMPAT_SOURCE_FILTER = /^@babylonjs\/|^@recast-navigation\//;
+export {
+  COMPAT_SOURCE_FILTER as C,
+  resolveCompatSpecifier as r
+};
+//# sourceMappingURL=bundler-resolve-0pEkTP9X.js.map

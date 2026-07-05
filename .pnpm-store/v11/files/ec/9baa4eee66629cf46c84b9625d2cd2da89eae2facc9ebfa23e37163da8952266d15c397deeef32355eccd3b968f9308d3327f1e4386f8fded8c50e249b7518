@@ -1,0 +1,8 @@
+import { createMaterialView } from '../material-view.js';
+
+function createShaderNoColorMaterialView(source) {
+  return createMaterialView(source, { features: 0 });
+}
+
+export { createShaderNoColorMaterialView };
+//# sourceMappingURL=no-color-view.js.map

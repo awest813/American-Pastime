@@ -1,0 +1,113 @@
+import { U32 } from '../engine/typed-arrays.js';
+import { addBillboardSpriteIndex, removeBillboardSpriteIndex, setBillboardSpriteFrameIndex, updateBillboardSpriteIndex } from './billboard-sprite.js';
+
+const MAX_HANDLE_ID = 4294967295;
+function getOrCreateState(system) {
+  const withHandles = system;
+  let state = withHandles._handleState;
+  if (state) {
+    ensureIndexCapacity(system, state);
+    return state;
+  }
+  state = {
+    nextId: 1,
+    idToIndex: /* @__PURE__ */ new Map(),
+    indexToId: new U32(system._capacity)
+  };
+  const hooks = {
+    removeIndex(index, last) {
+      onRemoveIndex(state, index, last);
+    },
+    clear() {
+      state.idToIndex.clear();
+      state.indexToId.fill(0);
+    }
+  };
+  withHandles._handleState = state;
+  withHandles._handleHooks = hooks;
+  return state;
+}
+function getState(system) {
+  return system._handleState;
+}
+function ensureIndexCapacity(system, state) {
+  if (state.indexToId.length >= system._capacity) {
+    return;
+  }
+  const next = new U32(system._capacity);
+  next.set(state.indexToId);
+  state.indexToId = next;
+}
+function onRemoveIndex(state, index, last) {
+  const removedId = state.indexToId[index] ?? 0;
+  const movedId = state.indexToId[last] ?? 0;
+  if (removedId !== 0) {
+    state.idToIndex.delete(removedId);
+  }
+  if (index !== last) {
+    if (movedId !== 0) {
+      state.idToIndex.set(movedId, index);
+    }
+    if (index < state.indexToId.length) {
+      state.indexToId[index] = movedId;
+    }
+  } else if (index < state.indexToId.length) {
+    state.indexToId[index] = 0;
+  }
+  if (last < state.indexToId.length) {
+    state.indexToId[last] = 0;
+  }
+}
+function allocateId(state) {
+  const id = state.nextId;
+  if (id > MAX_HANDLE_ID) {
+    throw new Error("addBillboardSprite: handle id space exhausted.");
+  }
+  state.nextId = id + 1;
+  return id;
+}
+function lookupIndex(handle) {
+  const state = getState(handle.system);
+  if (!state) {
+    return null;
+  }
+  const index = state.idToIndex.get(handle.id);
+  return index === void 0 ? null : index;
+}
+function requireIndex(handle, caller) {
+  const index = lookupIndex(handle);
+  if (index === null) {
+    throw new Error(`${caller}: BillboardSpriteHandle ${handle.id} has been removed.`);
+  }
+  return index;
+}
+function addBillboardSprite(system, init) {
+  const index = addBillboardSpriteIndex(system, init);
+  const state = getOrCreateState(system);
+  const id = allocateId(state);
+  state.idToIndex.set(id, index);
+  state.indexToId[index] = id;
+  return { _entityType: "billboard-sprite-handle", system, id };
+}
+function updateBillboardSprite(handle, patch) {
+  updateBillboardSpriteIndex(handle.system, requireIndex(handle, "updateBillboardSprite"), patch);
+}
+function removeBillboardSprite(handle) {
+  const index = lookupIndex(handle);
+  if (index === null) {
+    return;
+  }
+  removeBillboardSpriteIndex(handle.system, index);
+}
+function setBillboardSpriteFrame(handle, frame) {
+  setBillboardSpriteFrameIndex(handle.system, requireIndex(handle, "setBillboardSpriteFrame"), frame);
+}
+function getBillboardSpriteHandleIndex(handle) {
+  return requireIndex(handle, "getBillboardSpriteHandleIndex");
+}
+function isBillboardSpriteHandleAlive(handle) {
+  return lookupIndex(handle) !== null;
+}
+
+export { addBillboardSprite, getBillboardSpriteHandleIndex, isBillboardSpriteHandleAlive, removeBillboardSprite, setBillboardSpriteFrame, updateBillboardSprite };
+//# sourceMappingURL=billboard-sprite-handle.js.map

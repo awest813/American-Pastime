@@ -1,0 +1,21 @@
+let shadowTaskInputs = null;
+let shadowTaskInputPreloader = null;
+function getShadowTaskInputs() {
+  shadowTaskInputs ??= /* @__PURE__ */ new WeakMap();
+  return shadowTaskInputs;
+}
+function setShadowTaskCasterMeshes(shadowGenerator, casterMeshes) {
+  getShadowTaskInputs().set(shadowGenerator, casterMeshes);
+  if (shadowTaskInputPreloader) {
+    void shadowTaskInputPreloader(shadowGenerator, casterMeshes);
+  }
+}
+function _getShadowTaskCasterMeshes(shadowGenerator) {
+  return shadowTaskInputs?.get(shadowGenerator);
+}
+function _setShadowTaskInputPreloader(preloader) {
+  shadowTaskInputPreloader = preloader;
+}
+
+export { _getShadowTaskCasterMeshes, _setShadowTaskInputPreloader, setShadowTaskCasterMeshes };
+//# sourceMappingURL=shadow-inputs.js.map

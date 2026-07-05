@@ -1,0 +1,7 @@
+function nextTemp(state, prefix = "t") {
+  const id = state.nextTemp++;
+  return `_${prefix}${id}`;
+}
+
+export { nextTemp };
+//# sourceMappingURL=_block-api.js.map

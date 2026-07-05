@@ -1,0 +1,8 @@
+import { type FunctionComponent } from "react";
+import { type NodeMaterial } from "@babylonjs/core/index.js";
+export declare const NodeMaterialGeneralProperties: FunctionComponent<{
+    material: NodeMaterial;
+}>;
+export declare const NodeMaterialInputProperties: FunctionComponent<{
+    material: NodeMaterial;
+}>;

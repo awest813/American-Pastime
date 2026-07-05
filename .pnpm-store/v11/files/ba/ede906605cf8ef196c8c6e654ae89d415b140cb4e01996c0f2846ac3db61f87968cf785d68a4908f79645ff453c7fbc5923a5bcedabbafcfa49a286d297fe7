@@ -1,0 +1,70 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { TU } from '../engine/gpu-flags.js';
+import { createShadowParamsUBO, createSharedShadowUBO, buildLightViewMatrix, multiply4x4 } from './shadow-base.js';
+import { preloadPcfShadowTaskState, ensurePcfShadowTaskState, renderPcfShadowMap } from './pcf-shadow-task-hooks.js';
+
+function _computeSpotLightMatrix(light, near, far, offX = 0, offY = 0, offZ = 0) {
+  const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
+  const f = 1 / Math.tan(light.angle * 0.5);
+  const proj = new F32(16);
+  proj[0] = f;
+  proj[5] = f;
+  proj[10] = far / (far - near);
+  proj[11] = 1;
+  proj[14] = -(far * near) / (far - near);
+  return { _view: view, _viewProj: multiply4x4(proj, view), _near: near, _far: far };
+}
+function createPcfSpotlightShadowGenerator(engine, _light, cfg = {}) {
+  const device = engine._device;
+  const mapSize = cfg.mapSize ?? 512;
+  const bias = cfg.bias ?? 5e-5;
+  const darkness = cfg.darkness ?? 0;
+  const near = cfg.near ?? 1;
+  const far = cfg.far ?? (_light.range === Number.MAX_VALUE ? 1e4 : _light.range);
+  const _depthTexture = device.createTexture({
+    size: { width: mapSize, height: mapSize },
+    format: "depth32float",
+    usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING
+  });
+  const _depthSampler = device.createSampler({
+    compare: "less",
+    magFilter: "linear",
+    minFilter: "linear"
+  });
+  const _shadowParamsUBO = createShadowParamsUBO(engine, bias, 1 / mapSize);
+  const _lightMatrix = new F32(16);
+  const _shadowsInfo = new F32([darkness, mapSize, 1 / mapSize, 0]);
+  const _depthValues = new F32([0, far]);
+  const { ubo: _shadowUBO } = createSharedShadowUBO(engine, _lightMatrix, _depthValues, _shadowsInfo);
+  const _config = {
+    _mapSize: mapSize,
+    _bias: bias,
+    _forceRefreshEveryFrame: cfg.forceRefreshEveryFrame ?? false
+  };
+  const sg = {
+    _shadowType: "pcf",
+    _light,
+    _depthTexture,
+    _depthSampler,
+    _lightMatrix,
+    _shadowsInfo,
+    _depthValues,
+    _shadowParamsUBO,
+    _shadowUBO,
+    _config,
+    _version: 0
+  };
+  sg._preloadShadowTask = preloadPcfShadowTaskState;
+  sg._ensureShadowTaskState = (engine2, scene, casterMeshes) => {
+    const state = ensurePcfShadowTaskState(engine2, scene, sg, casterMeshes, sg._shadowTaskState ?? null);
+    sg._shadowTaskState = state;
+    return state;
+  };
+  sg._renderShadowMap = (engine2, state) => {
+    return renderPcfShadowMap(engine2, sg, state, (_casterMeshes, offX, offY, offZ) => _computeSpotLightMatrix(_light, near, far, offX, offY, offZ));
+  };
+  return sg;
+}
+
+export { _computeSpotLightMatrix, createPcfSpotlightShadowGenerator };
+//# sourceMappingURL=pcf-spotlight-shadow-generator.js.map

@@ -1,0 +1,328 @@
+import { createPickingRay } from '../picking/ray.js';
+import { disposePicker, createGpuPicker, pickAsync } from '../picking/gpu-picker.js';
+import { getCameraPosition, getViewProjectionMatrix } from '../camera/camera.js';
+import { resolveCameraViewport } from '../camera/viewport.js';
+import { rayPlaneIntersect, normalizeVec3Obj } from './gizmo-math.js';
+import { GizmoObservable } from './gizmo-core.js';
+
+function createPointerDrag(options) {
+  return {
+    options: { moveAttached: false, ...options },
+    enabled: true,
+    _colliders: [],
+    onDragStart: new GizmoObservable(),
+    onDrag: new GizmoObservable(),
+    onDragEnd: new GizmoObservable(),
+    onHoverStart: new GizmoObservable(),
+    onHoverEnd: new GizmoObservable(),
+    dragging: false,
+    hovering: false
+  };
+}
+let _dispatchers = null;
+function getDispatchers() {
+  if (!_dispatchers) {
+    _dispatchers = /* @__PURE__ */ new WeakMap();
+  }
+  return _dispatchers;
+}
+function registerPointerDrag(layer, canvas, drag) {
+  const map = getDispatchers();
+  let state = map.get(canvas);
+  if (!state) {
+    state = installDispatcher(layer, canvas);
+    map.set(canvas, state);
+  } else if (state.layer !== layer) {
+    console.warn(
+      "[babylon-lite] registerPointerDrag: a second UtilityLayer was used for the same canvas. Only one utility layer per canvas is supported; the first layer's GPU picker will be reused."
+    );
+  }
+  state.drags.push(drag);
+  return () => {
+    const i = state.drags.indexOf(drag);
+    if (i < 0) {
+      return;
+    }
+    state.drags.splice(i, 1);
+    if (state.active && state.active.drag === drag) {
+      const pointerId = state.active.pointerId;
+      drag.dragging = false;
+      drag.onDragEnd.notify({ pointerEvent: null });
+      if ("releasePointerCapture" in state.canvas) {
+        try {
+          state.canvas.releasePointerCapture(pointerId);
+        } catch {
+        }
+      }
+      state.active = null;
+      state.pickPending = false;
+    }
+    if (state.hovered === drag) {
+      drag.hovering = false;
+      drag.onHoverEnd.notify();
+      state.hovered = null;
+    }
+    if (state.drags.length === 0 && !state.active) {
+      state.hoverToken++;
+      state.cleanup();
+      disposePicker(state.picker);
+      map.delete(canvas);
+    }
+  };
+}
+function installDispatcher(layer, canvas) {
+  const picker = createGpuPicker(layer.scene);
+  const state = {
+    layer,
+    canvas,
+    picker,
+    drags: [],
+    active: null,
+    hovered: null,
+    hoverToken: 0,
+    pickPending: false,
+    cleanup: () => void 0
+  };
+  const onPointerDown = (event) => {
+    if (state.active || event.button !== 0) {
+      return;
+    }
+    state.pickPending = true;
+    void handlePointerDown(state, event);
+  };
+  const onPointerMove = (event) => {
+    if (state.active && event.pointerId === state.active.pointerId) {
+      handlePointerMove(state, event);
+      return;
+    }
+    void handleHoverMove(state, event);
+  };
+  const onPointerUp = (event) => {
+    if (!state.active || event.pointerId !== state.active.pointerId) {
+      return;
+    }
+    handlePointerUp(state, event);
+  };
+  const onPointerLeave = () => {
+    if (state.hovered) {
+      state.hovered.hovering = false;
+      state.hovered.onHoverEnd.notify();
+      state.hovered = null;
+    }
+  };
+  canvas.addEventListener("pointerdown", onPointerDown, { capture: true });
+  canvas.addEventListener("pointermove", onPointerMove, { capture: true });
+  canvas.addEventListener("pointerup", onPointerUp, { capture: true });
+  canvas.addEventListener("pointercancel", onPointerUp, { capture: true });
+  canvas.addEventListener("pointerleave", onPointerLeave, { capture: true });
+  state.cleanup = () => {
+    canvas.removeEventListener("pointerdown", onPointerDown, { capture: true });
+    canvas.removeEventListener("pointermove", onPointerMove, { capture: true });
+    canvas.removeEventListener("pointerup", onPointerUp, { capture: true });
+    canvas.removeEventListener("pointercancel", onPointerUp, { capture: true });
+    canvas.removeEventListener("pointerleave", onPointerLeave, { capture: true });
+  };
+  return state;
+}
+async function handleHoverMove(state, event) {
+  const token = ++state.hoverToken;
+  const info = await pickAsync(state.picker, event.offsetX, event.offsetY);
+  if (token !== state.hoverToken || state.active) {
+    return;
+  }
+  const drag = info.hit && info.pickedMesh ? findDragForMesh(state.drags, info.pickedMesh) : null;
+  const next = drag && drag.enabled ? drag : null;
+  if (next === state.hovered) {
+    return;
+  }
+  if (state.hovered) {
+    state.hovered.hovering = false;
+    state.hovered.onHoverEnd.notify();
+  }
+  state.hovered = next;
+  if (next) {
+    next.hovering = true;
+    next.onHoverStart.notify();
+  }
+}
+async function handlePointerDown(state, event) {
+  let info;
+  try {
+    info = await pickAsync(state.picker, event.offsetX, event.offsetY);
+  } finally {
+    state.pickPending = false;
+  }
+  if (!info.hit || !info.pickedMesh) {
+    return;
+  }
+  const drag = findDragForMesh(state.drags, info.pickedMesh);
+  if (!drag || !drag.enabled) {
+    return;
+  }
+  event.stopImmediatePropagation();
+  event.preventDefault();
+  if ("setPointerCapture" in state.canvas) {
+    try {
+      state.canvas.setPointerCapture(event.pointerId);
+    } catch {
+    }
+  }
+  const hitPoint = info.pickedPoint ? { x: info.pickedPoint[0], y: info.pickedPoint[1], z: info.pickedPoint[2] } : null;
+  const planeNormal = pickDragPlaneNormal(drag, state.layer.scene, hitPoint);
+  const overridePoint = drag.options.getPlanePoint?.();
+  const planePoint = overridePoint ?? hitPoint ?? { x: 0, y: 0, z: 0 };
+  let startPoint = hitPoint ?? planePoint;
+  if (overridePoint) {
+    const downRay = canvasRayFromPointer(state.layer.scene, state.canvas, event.offsetX, event.offsetY);
+    const hit = downRay ? rayPlaneIntersect(downRay.origin, downRay.dir, planePoint, planeNormal) : null;
+    startPoint = hit ?? planePoint;
+  }
+  if (state.hovered) {
+    state.hovered.hovering = false;
+    state.hovered.onHoverEnd.notify();
+    state.hovered = null;
+  }
+  state.active = {
+    drag,
+    planeNormal,
+    planePoint,
+    lastPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
+    startPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
+    pointerId: event.pointerId
+  };
+  drag.dragging = true;
+  drag.onDragStart.notify({ dragPlanePoint: startPoint, pointerEvent: event });
+}
+function handlePointerMove(state, event) {
+  const active = state.active;
+  const livePlanePoint = active.drag.options.getPlanePoint?.();
+  if (livePlanePoint) {
+    active.planePoint = { x: livePlanePoint.x, y: livePlanePoint.y, z: livePlanePoint.z };
+  }
+  const ray = canvasRayFromPointer(state.layer.scene, state.canvas, event.offsetX, event.offsetY);
+  if (!ray) {
+    return;
+  }
+  const hit = rayPlaneIntersect(ray.origin, ray.dir, active.planePoint, active.planeNormal);
+  if (!hit) {
+    return;
+  }
+  let delta = {
+    x: hit.x - active.lastPlanePoint.x,
+    y: hit.y - active.lastPlanePoint.y,
+    z: hit.z - active.lastPlanePoint.z
+  };
+  let dragDistance;
+  const axis = active.drag.options.dragAxis;
+  if (axis) {
+    const proj = delta.x * axis.x + delta.y * axis.y + delta.z * axis.z;
+    delta = { x: axis.x * proj, y: axis.y * proj, z: axis.z * proj };
+    const totalDelta = {
+      x: hit.x - active.startPlanePoint.x,
+      y: hit.y - active.startPlanePoint.y,
+      z: hit.z - active.startPlanePoint.z
+    };
+    dragDistance = totalDelta.x * axis.x + totalDelta.y * axis.y + totalDelta.z * axis.z;
+  } else {
+    dragDistance = Math.hypot(delta.x, delta.y, delta.z);
+  }
+  active.lastPlanePoint = { x: hit.x, y: hit.y, z: hit.z };
+  active.drag.onDrag.notify({ delta, dragPlanePoint: hit, dragDistance });
+  if (active.drag.options.dragAxis) {
+    active.planeNormal = pickDragPlaneNormal(active.drag, state.layer.scene, hit);
+  }
+}
+function handlePointerUp(state, event) {
+  const active = state.active;
+  active.drag.dragging = false;
+  active.drag.onDragEnd.notify({ pointerEvent: event });
+  state.active = null;
+  if ("releasePointerCapture" in state.canvas) {
+    try {
+      state.canvas.releasePointerCapture(event.pointerId);
+    } catch {
+    }
+  }
+}
+function findDragForMesh(drags, mesh) {
+  for (const d of drags) {
+    if (d._colliders.includes(mesh)) {
+      return d;
+    }
+  }
+  return null;
+}
+function isGizmoInteracting(canvas) {
+  const state = _dispatchers?.get(canvas);
+  if (!state) {
+    return false;
+  }
+  return state.hovered !== null || state.active !== null;
+}
+function isGizmoDragging(canvas) {
+  const state = _dispatchers?.get(canvas);
+  return state ? state.active !== null : false;
+}
+function isGizmoPickPending(canvas) {
+  const state = _dispatchers?.get(canvas);
+  return state ? state.pickPending : false;
+}
+function pickDragPlaneNormal(drag, scene, hitPoint) {
+  const planeNormal = drag.options.dragPlaneNormal;
+  if (planeNormal) {
+    return normalizeVec3Obj(planeNormal);
+  }
+  const axis = drag.options.dragAxis;
+  const cam = scene.camera;
+  if (!cam) {
+    return normalizeVec3Obj({ x: -axis.y, y: axis.x, z: 0 });
+  }
+  const camPos = getCameraPosition(cam);
+  const ref = hitPoint ?? { x: 0, y: 0, z: 0 };
+  const dx = camPos.x - ref.x, dy = camPos.y - ref.y, dz = camPos.z - ref.z;
+  const dotAxis = dx * axis.x + dy * axis.y + dz * axis.z;
+  let nx = dx - axis.x * dotAxis;
+  let ny = dy - axis.y * dotAxis;
+  let nz = dz - axis.z * dotAxis;
+  const len = Math.hypot(nx, ny, nz);
+  if (len < 1e-6) {
+    return normalizeVec3Obj({ x: -axis.y, y: axis.x, z: 0 });
+  }
+  nx /= len;
+  ny /= len;
+  nz /= len;
+  return { x: nx, y: ny, z: nz };
+}
+function canvasRayFromPointer(scene, canvas, cssX, cssY) {
+  const cam = scene.camera;
+  if (!cam) {
+    return null;
+  }
+  const backingWidth = canvas.width;
+  const backingHeight = canvas.height;
+  const clientWidth = canvas.clientWidth || backingWidth;
+  const clientHeight = canvas.clientHeight || backingHeight;
+  const viewport = resolveCameraViewport(cam, backingWidth, backingHeight);
+  const scaleX = backingWidth / clientWidth;
+  const scaleY = backingHeight / clientHeight;
+  const px = cssX * scaleX - viewport.x;
+  const py = cssY * scaleY - viewport.y;
+  const w = viewport.width;
+  const h = viewport.height;
+  if (w === 0 || h === 0) {
+    return null;
+  }
+  const aspect = w / h;
+  const vp = getViewProjectionMatrix(cam, aspect);
+  const ray = createPickingRay(px, py, vp, w, h);
+  if (!ray) {
+    return null;
+  }
+  return {
+    origin: { x: ray.origin[0], y: ray.origin[1], z: ray.origin[2] },
+    dir: { x: ray.direction[0], y: ray.direction[1], z: ray.direction[2] }
+  };
+}
+
+export { createPointerDrag, isGizmoDragging, isGizmoInteracting, isGizmoPickPending, registerPointerDrag };
+//# sourceMappingURL=pointer-drag.js.map

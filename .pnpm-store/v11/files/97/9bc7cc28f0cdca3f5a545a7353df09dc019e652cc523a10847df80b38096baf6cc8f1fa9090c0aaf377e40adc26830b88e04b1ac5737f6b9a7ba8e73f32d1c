@@ -1,0 +1,137 @@
+import { U8, U32, I32, F32, U8C } from '../engine/typed-arrays.js';
+import { attachParsedSplat } from './load-splat.js';
+
+const SH_C0 = 0.28209479177387814;
+const MAGIC_NGSP = 1347635022;
+async function decompressGzip(bytes) {
+  const stream = new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")));
+  return new U8(await stream.arrayBuffer());
+}
+function read24bComponent(u8, offset, positionScale, int32View, uint8View) {
+  uint8View[0] = u8[offset + 0];
+  uint8View[1] = u8[offset + 1];
+  uint8View[2] = u8[offset + 2];
+  uint8View[3] = (u8[offset + 2] & 128) !== 0 ? 255 : 0;
+  return int32View[0] * positionScale;
+}
+const clamp255 = (v) => v < 0 ? 0 : v > 255 ? 255 : v;
+function parseSpz(data) {
+  const ubuf = new U8(data);
+  if (ubuf.byteLength < 16) {
+    throw new Error("loadSPZ: file too short to contain header");
+  }
+  const ubuf32 = new U32(data.slice(0, 12));
+  const splatCount = ubuf32[2];
+  const shDegree = ubuf[12];
+  const fractionalBits = ubuf[13];
+  const reserved = ubuf[15];
+  const version = ubuf32[1];
+  if (reserved !== 0 || ubuf32[0] !== MAGIC_NGSP || version < 2 || version > 3) {
+    throw new Error(`loadSPZ: unsupported SPZ stream (magic=0x${ubuf32[0].toString(16)} version=${version})`);
+  }
+  const ROW = 32;
+  const buffer = new ArrayBuffer(ROW * splatCount);
+  const position = new F32(buffer);
+  const scale = new F32(buffer);
+  const rgba = new U8C(buffer);
+  const rot = new U8C(buffer);
+  const positionScale = 1 / (1 << fractionalBits);
+  const int32View = new I32(1);
+  const uint8View = new U8(int32View.buffer);
+  let byteOffset = 16;
+  for (let i = 0; i < splatCount; i++) {
+    position[i * 8 + 0] = read24bComponent(ubuf, byteOffset + 0, positionScale, int32View, uint8View);
+    position[i * 8 + 1] = read24bComponent(ubuf, byteOffset + 3, positionScale, int32View, uint8View);
+    position[i * 8 + 2] = read24bComponent(ubuf, byteOffset + 6, positionScale, int32View, uint8View);
+    byteOffset += 9;
+  }
+  for (let i = 0; i < splatCount; i++) {
+    for (let c = 0; c < 3; c++) {
+      const byteValue = ubuf[byteOffset + splatCount + i * 3 + c];
+      const value = (byteValue - 127.5) / (0.15 * 255);
+      rgba[i * 32 + 24 + c] = clamp255((0.5 + SH_C0 * value) * 255);
+    }
+    rgba[i * 32 + 24 + 3] = ubuf[byteOffset + i];
+  }
+  byteOffset += splatCount * 4;
+  for (let i = 0; i < splatCount; i++) {
+    scale[i * 8 + 3 + 0] = Math.exp(ubuf[byteOffset + 0] / 16 - 10);
+    scale[i * 8 + 3 + 1] = Math.exp(ubuf[byteOffset + 1] / 16 - 10);
+    scale[i * 8 + 3 + 2] = Math.exp(ubuf[byteOffset + 2] / 16 - 10);
+    byteOffset += 3;
+  }
+  if (version >= 3) {
+    const sqrt12 = Math.SQRT1_2;
+    for (let i = 0; i < splatCount; i++) {
+      const comp = ubuf[byteOffset + 0] + (ubuf[byteOffset + 1] << 8) + (ubuf[byteOffset + 2] << 16) + (ubuf[byteOffset + 3] << 24);
+      const cmask = (1 << 9) - 1;
+      const rotation = [0, 0, 0, 0];
+      const iLargest = comp >>> 30;
+      let remaining = comp;
+      let sumSquares = 0;
+      for (let j = 3; j >= 0; --j) {
+        if (j !== iLargest) {
+          const mag = remaining & cmask;
+          const negbit = remaining >>> 9 & 1;
+          remaining = remaining >>> 10;
+          let v = sqrt12 * (mag / cmask);
+          if (negbit === 1) {
+            v = -v;
+          }
+          rotation[j] = v;
+          sumSquares += v * v;
+        }
+      }
+      rotation[iLargest] = Math.sqrt(Math.max(1 - sumSquares, 0));
+      const shuffle = [3, 0, 1, 2];
+      for (let j = 0; j < 4; j++) {
+        rot[i * 32 + 28 + j] = Math.round(127.5 + rotation[shuffle[j]] * 127.5);
+      }
+      byteOffset += 4;
+    }
+  } else {
+    for (let i = 0; i < splatCount; i++) {
+      const x = ubuf[byteOffset + 0];
+      const y = ubuf[byteOffset + 1];
+      const z = ubuf[byteOffset + 2];
+      const nx = x / 127.5 - 1;
+      const ny = y / 127.5 - 1;
+      const nz = z / 127.5 - 1;
+      rot[i * 32 + 28 + 1] = x;
+      rot[i * 32 + 28 + 2] = y;
+      rot[i * 32 + 28 + 3] = z;
+      const v = 1 - (nx * nx + ny * ny + nz * nz);
+      rot[i * 32 + 28 + 0] = 127.5 + Math.sqrt(v < 0 ? 0 : v) * 127.5;
+      byteOffset += 3;
+    }
+  }
+  if (shDegree) {
+    const shVectorCount = (shDegree + 1) * (shDegree + 1) - 1;
+    const shComponentCount = shVectorCount * 3;
+    const shFlat = new U8(splatCount * shComponentCount);
+    for (let i = 0; i < splatCount; i++) {
+      for (let k = 0; k < shComponentCount; k++) {
+        shFlat[i * shComponentCount + k] = ubuf[byteOffset++];
+      }
+    }
+    return { data: buffer, sh: shFlat, shDegree };
+  }
+  return { data: buffer };
+}
+async function loadSPZ(scene, url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`loadSPZ: HTTP ${response.status} for ${url}`);
+  }
+  const raw = new U8(await response.arrayBuffer());
+  const isGzip = raw[0] === 31 && raw[1] === 139;
+  const data = isGzip ? (await decompressGzip(raw)).buffer : raw.buffer;
+  const parsed = parseSpz(data);
+  const friendly = url.substring(url.lastIndexOf("/") + 1) || "spz";
+  const mesh = await attachParsedSplat(scene, friendly, parsed);
+  mesh.rotation.x = Math.PI;
+  return mesh;
+}
+
+export { loadSPZ };
+//# sourceMappingURL=load-spz.js.map

@@ -1,0 +1,6 @@
+function scaleVec3(v, s) {
+  return { x: v.x * s, y: v.y * s, z: v.z * s };
+}
+
+export { scaleVec3 };
+//# sourceMappingURL=scale-vec3.js.map

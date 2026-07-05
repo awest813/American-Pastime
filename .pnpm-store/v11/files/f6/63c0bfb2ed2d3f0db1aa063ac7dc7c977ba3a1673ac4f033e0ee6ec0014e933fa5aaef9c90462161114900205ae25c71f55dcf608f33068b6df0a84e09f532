@@ -1,0 +1,55 @@
+import { type FunctionComponent, type Ref } from "react";
+import { type BaseTexture } from "@babylonjs/core/index.js";
+export type TexturePreviewImperativeRef = {
+    /**
+     * Refreshes the preview canvas.
+     */
+    refresh: () => Promise<void>;
+};
+/**
+ * Properties for the texture preview component.
+ */
+export type TexturePreviewProps = {
+    /**
+     * Texture to display.
+     */
+    texture: BaseTexture;
+    /**
+     * Disables preview toolbar controls.
+     */
+    disableToolbar?: boolean;
+    /**
+     * Maximum preview width CSS value.
+     */
+    maxWidth?: string;
+    /**
+     * Maximum preview height CSS value.
+     */
+    maxHeight?: string;
+    /**
+     * Horizontal offset in source pixels.
+     */
+    offsetX?: number;
+    /**
+     * Vertical offset in source pixels.
+     */
+    offsetY?: number;
+    /**
+     * Preview width override.
+     */
+    width?: number;
+    /**
+     * Preview height override.
+     */
+    height?: number;
+    /**
+     * Optional imperative ref.
+     */
+    imperativeRef?: Ref<TexturePreviewImperativeRef>;
+};
+/**
+ * Displays a 2D preview for a texture, including channels/cube face controls.
+ * @param props The component properties.
+ * @returns The rendered component.
+ */
+export declare const TexturePreview: FunctionComponent<TexturePreviewProps>;

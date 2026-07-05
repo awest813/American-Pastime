@@ -1,0 +1,54 @@
+{
+  "name": "@babylonjs/lite-compat",
+  "version": "1.6.0-preview",
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Opt-in Babylon.js-shaped compatibility layer implemented on top of the Babylon Lite public API. Provides a migration runway from Babylon.js to Babylon Lite.",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "types": "./index.d.ts"
+    },
+    "./vite": {
+      "import": "./vite.js",
+      "types": "./vite.d.ts"
+    },
+    "./rollup": {
+      "import": "./rollup.js",
+      "types": "./rollup.d.ts"
+    },
+    "./webpack": {
+      "import": "./webpack.js",
+      "types": "./webpack.d.ts"
+    },
+    "./esbuild": {
+      "import": "./esbuild.js",
+      "types": "./esbuild.d.ts"
+    },
+    "./navigation": {
+      "import": "./navigation.js",
+      "types": "./navigation.d.ts"
+    },
+    "./recast-shim": {
+      "import": "./recast-shim.js",
+      "types": "./recast-shim.d.ts"
+    }
+  },
+  "sideEffects": false,
+  "peerDependencies": {
+    "@babylonjs/lite": "*"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  },
+  "babylonLiteRelease": {
+    "azureBuildId": "55411",
+    "sourceVersion": "e533d48d9eff9391768488b35503868cf4d76d5e",
+    "builtAgainstLite": "1.6.0"
+  }
+}

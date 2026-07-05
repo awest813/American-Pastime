@@ -1,0 +1,11 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { mat4ComposeInto } from './mat4-compose-into.js';
+
+function mat4Compose(tx, ty, tz, qx, qy, qz, qw, sx, sy, sz) {
+  const out = new F32(16);
+  mat4ComposeInto(out, 0, tx, ty, tz, qx, qy, qz, qw, sx, sy, sz);
+  return out;
+}
+
+export { mat4Compose };
+//# sourceMappingURL=mat4-compose.js.map

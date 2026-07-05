@@ -1,0 +1,38 @@
+import { type DragEvent } from "react";
+import { type SceneExplorerDragDropConfig } from "./sceneExplorer";
+/**
+ * Props for drop-only event handlers on a section header.
+ */
+export type DropProps = {
+    onDragOver: (e: DragEvent) => void;
+    onDragLeave: (e: DragEvent) => void;
+    onDrop: (e: DragEvent) => void;
+};
+/**
+ * Props for drag-drop event handlers on a tree item.
+ */
+export type DragDropProps = {
+    draggable: boolean;
+    onDragStart: (e: DragEvent) => void;
+    onDragEnd: (e: DragEvent) => void;
+} & DropProps;
+/**
+ * Options for the drag-drop hook.
+ */
+export type SceneExplorerDragDropOptions = {
+    /** Called after a successful drop with the dragged entity and target (entity or null for section root). */
+    onDrop?: (draggedEntity: object, targetEntity: object | null) => void;
+};
+/**
+ * Hook that provides drag-drop functionality for the scene explorer.
+ * Uses vanilla HTML5 drag and drop APIs.
+ * @param options Optional callbacks for drag-drop events.
+ * @returns State and props factory for drag-drop functionality.
+ */
+export declare function useSceneExplorerDragDrop(options?: SceneExplorerDragDropOptions): {
+    draggedEntity: object | undefined;
+    dropTarget: object | undefined;
+    dropTargetIsRoot: boolean;
+    createDragProps: (entity: object, getName: () => string, dragDropConfig?: SceneExplorerDragDropConfig<object>) => DragDropProps;
+    createSectionDropProps: (dragDropConfig: SceneExplorerDragDropConfig<object> | undefined) => DropProps;
+};

@@ -1,0 +1,171 @@
+import { uploadMeshToGPU, initMeshTransform } from './mesh.js';
+import { c as computeAabb } from '../_chunks/__vite-browser-external-BFTKbDcV.js';
+import { createSphereData } from './create-sphere.js';
+import { createBoxData } from './create-box.js';
+import { createTorusData } from './create-torus.js';
+import { createTorusKnotData } from './create-torus-knot.js';
+import { createFlatGroundData, createGroundFromHeightMap as createGroundFromHeightMap$1 } from './create-ground.js';
+import { createCylinderData } from './create-cylinder.js';
+import { createCapsuleData } from './create-capsule.js';
+import { createPlaneData } from './create-plane.js';
+import { createDiscData } from './create-disc.js';
+import { createPolyhedronData } from './create-polyhedron.js';
+import { createRibbonData } from './create-ribbon.js';
+import { createTubeData } from './create-tube.js';
+import { createExtrudeShapeData } from './create-extrude.js';
+
+function createMeshFromData(engine, name, positions, normals, indices, uvs, uvs2, tangents, colors) {
+  const [min, max] = computeAabb(positions);
+  const mesh = {
+    name,
+    material: null,
+    receiveShadows: false,
+    boundMin: isFinite(min[0]) ? min : void 0,
+    boundMax: isFinite(max[0]) ? max : void 0,
+    _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors)
+  };
+  initMeshTransform(mesh);
+  mesh._cpuPositions = positions;
+  mesh._cpuNormals = normals;
+  mesh._cpuUvs = uvs;
+  mesh._cpuIndices = indices;
+  engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+  return mesh;
+}
+function invalidateRenderBundles(engine) {
+  for (const ctx of engine._renderingContexts) {
+    const sc = ctx;
+    if (sc._renderableVersion !== void 0) {
+      sc._renderableVersion++;
+    }
+  }
+}
+function updateMeshPositions(engine, mesh, positions, vertexOffset = 0) {
+  const gpu = mesh._gpu;
+  engine._device.queue.writeBuffer(gpu.positionBuffer, vertexOffset * 3 * 4, positions.buffer, positions.byteOffset, positions.byteLength);
+}
+function resizeMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors) {
+  const old = mesh._gpu;
+  for (const ctx of engine._renderingContexts) {
+    const sc = ctx;
+    if (sc._renderableVersion !== void 0) {
+      sc._renderableVersion++;
+    }
+  }
+  mesh._gpu = uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors);
+  const [min, max] = computeAabb(positions);
+  mesh.boundMin = isFinite(min[0]) ? min : void 0;
+  mesh.boundMax = isFinite(max[0]) ? max : void 0;
+  mesh._cpuPositions = positions;
+  mesh._cpuNormals = normals;
+  mesh._cpuUvs = uvs;
+  mesh._cpuIndices = indices;
+  engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+  void engine._device.queue.onSubmittedWorkDone().then(() => {
+    try {
+      old.positionBuffer.destroy();
+      old.normalBuffer.destroy();
+      old.indexBuffer.destroy();
+      old.uvBuffer.destroy();
+      old.uv2Buffer?.destroy();
+      old.tangentBuffer?.destroy();
+      old.colorBuffer?.destroy();
+    } catch {
+    }
+  }).catch(() => {
+  });
+}
+function updateMeshNormals(engine, mesh, normals, vertexOffset = 0) {
+  const gpu = mesh._gpu;
+  if (!gpu.normalBuffer) {
+    return;
+  }
+  engine._device.queue.writeBuffer(gpu.normalBuffer, vertexOffset * 3 * 4, normals.buffer, normals.byteOffset, normals.byteLength);
+}
+function updateMeshColors(engine, mesh, colors, vertexOffset = 0) {
+  const gpu = mesh._gpu;
+  if (!gpu.colorBuffer) {
+    return;
+  }
+  engine._device.queue.writeBuffer(gpu.colorBuffer, vertexOffset * 4 * 4, colors.buffer, colors.byteOffset, colors.byteLength);
+}
+function updateMeshUvs(engine, mesh, uvs, vertexOffset = 0) {
+  const gpu = mesh._gpu;
+  if (!gpu.uvBuffer) {
+    return;
+  }
+  engine._device.queue.writeBuffer(gpu.uvBuffer, vertexOffset * 2 * 4, uvs.buffer, uvs.byteOffset, uvs.byteLength);
+}
+function updateMeshUv2(engine, mesh, uvs2, vertexOffset = 0) {
+  const gpu = mesh._gpu;
+  if (!gpu.uv2Buffer) {
+    return;
+  }
+  engine._device.queue.writeBuffer(gpu.uv2Buffer, vertexOffset * 2 * 4, uvs2.buffer, uvs2.byteOffset, uvs2.byteLength);
+}
+function updateMeshTangents(engine, mesh, tangents, vertexOffset = 0) {
+  const gpu = mesh._gpu;
+  if (!gpu.tangentBuffer) {
+    return;
+  }
+  engine._device.queue.writeBuffer(gpu.tangentBuffer, vertexOffset * 4 * 4, tangents.buffer, tangents.byteOffset, tangents.byteLength);
+}
+function createSphere(engine, options) {
+  const data = createSphereData(options);
+  return createMeshFromData(engine, "sphere", data.positions, data.normals, data.indices, data.uvs);
+}
+function createBox(engine, size = 1) {
+  const data = createBoxData(size);
+  return createMeshFromData(engine, "box", data.positions, data.normals, data.indices, data.uvs);
+}
+function createTorus(engine, options) {
+  const data = createTorusData(options);
+  return createMeshFromData(engine, "torus", data.positions, data.normals, data.indices, data.uvs);
+}
+function createTorusKnot(engine, options) {
+  const data = createTorusKnotData(options);
+  return createMeshFromData(engine, "torusKnot", data.positions, data.normals, data.indices, data.uvs);
+}
+async function createGroundFromHeightMap(engine, url, options) {
+  const data = await createGroundFromHeightMap$1(url, options);
+  return createMeshFromData(engine, "ground", data.positions, data.normals, data.indices, data.uvs);
+}
+function createGround(engine, options) {
+  const data = createFlatGroundData(options);
+  return createMeshFromData(engine, "ground", data.positions, data.normals, data.indices, data.uvs);
+}
+function createCylinder(engine, options) {
+  const data = createCylinderData(options);
+  return createMeshFromData(engine, "cylinder", data.positions, data.normals, data.indices, data.uvs);
+}
+function createCapsule(engine, options) {
+  const data = createCapsuleData(options);
+  return createMeshFromData(engine, "capsule", data.positions, data.normals, data.indices, data.uvs);
+}
+function createPlane(engine, options) {
+  const data = createPlaneData(options);
+  return createMeshFromData(engine, "plane", data.positions, data.normals, data.indices, data.uvs);
+}
+function createDisc(engine, options) {
+  const data = createDiscData(options);
+  return createMeshFromData(engine, "disc", data.positions, data.normals, data.indices, data.uvs);
+}
+function createPolyhedron(engine, options) {
+  const data = createPolyhedronData(options);
+  return createMeshFromData(engine, "polyhedron", data.positions, data.normals, data.indices, data.uvs);
+}
+function createRibbon(engine, options) {
+  const data = createRibbonData(options);
+  return createMeshFromData(engine, "ribbon", data.positions, data.normals, data.indices, data.uvs);
+}
+function createTube(engine, options) {
+  const data = createTubeData(options);
+  return createMeshFromData(engine, "tube", data.positions, data.normals, data.indices, data.uvs);
+}
+function createExtrudeShape(engine, options) {
+  const data = createExtrudeShapeData(options);
+  return createMeshFromData(engine, "extrude", data.positions, data.normals, data.indices, data.uvs);
+}
+
+export { createBox, createCapsule, createCylinder, createDisc, createExtrudeShape, createGround, createGroundFromHeightMap, createMeshFromData, createPlane, createPolyhedron, createRibbon, createSphere, createTorus, createTorusKnot, createTube, invalidateRenderBundles, resizeMeshGeometry, updateMeshColors, updateMeshNormals, updateMeshPositions, updateMeshTangents, updateMeshUv2, updateMeshUvs };
+//# sourceMappingURL=mesh-factories.js.map

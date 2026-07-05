@@ -1,0 +1,5 @@
+import { type TextureEditorToolProvider } from "../../../components/textureEditor/textureEditor";
+/**
+ * Floodfill tool for filling regions with a solid color
+ */
+export declare const Floodfill: TextureEditorToolProvider;

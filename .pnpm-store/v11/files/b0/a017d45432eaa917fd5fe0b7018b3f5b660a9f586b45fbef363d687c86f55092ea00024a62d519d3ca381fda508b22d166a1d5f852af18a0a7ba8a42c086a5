@@ -1,0 +1,10 @@
+import { type FunctionComponent } from "react";
+type SaveAnimationPanelProps = {
+    onClose: () => void;
+};
+/**
+ * Panel for saving animations to file or snippet server
+ * @returns The save animation panel component
+ */
+export declare const SaveAnimationPanel: FunctionComponent<SaveAnimationPanelProps>;
+export {};

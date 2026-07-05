@@ -1,0 +1,79 @@
+import { TU } from './gpu-flags.js';
+
+const REVERSE_DEPTH_COMPARE = "greater-equal";
+function targetSignatureKey(desc) {
+  return `${desc._colorFormat ?? "-"}|${desc._depthStencilFormat ?? "-"}|${desc._depthCompare ?? ""}|${desc._sampleCount}`;
+}
+function createRenderTarget(descriptor) {
+  return {
+    _descriptor: descriptor,
+    _colorTexture: null,
+    _colorView: null,
+    _depthTexture: null,
+    _depthView: null,
+    _width: 0,
+    _height: 0
+  };
+}
+function buildRenderTarget(rt, engine) {
+  if (rt._eager) {
+    return;
+  }
+  disposeRenderTarget(rt);
+  const desc = rt._descriptor;
+  const { width, height } = resolveSize(desc);
+  rt._width = width;
+  rt._height = height;
+  const device = engine._device;
+  const allocColor = !!desc.format;
+  if (allocColor) {
+    rt._colorTexture = device.createTexture({
+      label: desc.lbl,
+      size: { width, height },
+      format: desc.format,
+      sampleCount: desc.samples,
+      usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC
+    });
+    rt._colorView = rt._colorTexture.createView();
+  }
+  if (desc.dFormat) {
+    rt._depthTexture = device.createTexture({
+      label: desc.lbl,
+      size: { width, height },
+      format: desc.dFormat,
+      sampleCount: desc.samples,
+      usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING
+    });
+    rt._depthView = rt._depthTexture.createView();
+  }
+}
+function disposeRenderTarget(rt) {
+  if (!rt || rt._eager) {
+    return;
+  }
+  if (rt._colorTexture) {
+    rt._colorTexture.destroy();
+    rt._colorTexture = null;
+    rt._colorView = null;
+  }
+  if (rt._depthTexture) {
+    if (rt._ownsDepthTexture !== false) {
+      rt._depthTexture.destroy();
+    }
+    rt._depthTexture = null;
+    rt._depthView = null;
+  }
+  rt._width = 0;
+  rt._height = 0;
+}
+function resolveSize(desc) {
+  const size = desc.size;
+  if ("canvas" in size) {
+    const canvas = size.canvas;
+    return { width: canvas.width, height: canvas.height };
+  }
+  return size;
+}
+
+export { REVERSE_DEPTH_COMPARE, buildRenderTarget, createRenderTarget, disposeRenderTarget, targetSignatureKey };
+//# sourceMappingURL=render-target.js.map

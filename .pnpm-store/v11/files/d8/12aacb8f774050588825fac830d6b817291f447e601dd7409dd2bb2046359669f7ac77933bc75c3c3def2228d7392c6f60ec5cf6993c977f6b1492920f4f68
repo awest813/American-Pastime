@@ -1,0 +1,18 @@
+import { createShadowFragment } from '../../../shader/fragments/shadow-fragment-core.js';
+import { getCsmPbrReceiverFactory } from '../../../shadow/csm-receiver-registry.js';
+
+function createPbrShadowFragment(shadowLights = [{ lightIndex: 0, shadowType: "esm" }]) {
+  const csmSlots = shadowLights.filter((sl) => sl.shadowType === "csm");
+  if (csmSlots.length > 0) {
+    return getCsmPbrReceiverFactory()(csmSlots.map((s) => ({ lightIndex: s.lightIndex })));
+  }
+  const fragment = createShadowFragment("pbr-shadow", shadowLights);
+  const shadowCode = fragment._fragmentSlots?.AD;
+  return {
+    ...fragment,
+    _fragmentSlots: shadowCode ? { AS: shadowCode } : void 0
+  };
+}
+
+export { createPbrShadowFragment };
+//# sourceMappingURL=pbr-shadow-fragment.js.map

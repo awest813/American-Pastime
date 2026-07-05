@@ -1,0 +1,48 @@
+let _meshScenes = null;
+function enqueueMaterialSwap(scene, mesh) {
+  if (scene._materialSwapQueue.includes(mesh)) {
+    return;
+  }
+  scene._materialSwapQueue.push(mesh);
+}
+function installMaterialSetter(mesh) {
+  let _mat = mesh.material;
+  Object.defineProperty(mesh, "material", {
+    get() {
+      return _mat;
+    },
+    set(v) {
+      if (v !== _mat) {
+        _mat = v;
+        const scenes = _meshScenes?.get(mesh);
+        if (scenes) {
+          for (const scene of scenes) {
+            enqueueMaterialSwap(scene, mesh);
+          }
+        }
+      }
+    },
+    configurable: true,
+    enumerable: true
+  });
+}
+function registerMeshScene(scene, mesh) {
+  const map = _meshScenes ??= /* @__PURE__ */ new WeakMap();
+  let scenes = map.get(mesh);
+  if (!scenes) {
+    map.set(mesh, scenes = /* @__PURE__ */ new Set());
+    installMaterialSetter(mesh);
+  }
+  scenes.add(scene);
+}
+function unregisterMeshScene(scene, mesh) {
+  const scenes = _meshScenes?.get(mesh);
+  if (!scenes) {
+    return true;
+  }
+  scenes.delete(scene);
+  return scenes.size === 0;
+}
+
+export { enqueueMaterialSwap, registerMeshScene, unregisterMeshScene };
+//# sourceMappingURL=mesh-scene-registry.js.map

@@ -1,0 +1,25 @@
+import { type IDisposable, type Scene } from "@babylonjs/core/index.js";
+import { type DynamicAccordionSection, type DynamicAccordionSectionContent } from "@babylonjs/shared-ui-components/modularTool/components/extensibleAccordion.js";
+import { type IService, type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../sceneContext";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+/**
+ * The unique identity symbol for the debug service.
+ */
+export declare const DebugServiceIdentity: unique symbol;
+/**
+ * Allows new sections or content to be added to the debug pane.
+ */
+export interface IDebugService extends IService<typeof DebugServiceIdentity> {
+    /**
+     * Adds a new section.
+     * @param section A description of the section to add.
+     */
+    addSection(section: DynamicAccordionSection): IDisposable;
+    /**
+     * Adds content to one or more sections.
+     * @param content A description of the content to add.
+     */
+    addSectionContent(content: DynamicAccordionSectionContent<Scene>): IDisposable;
+}
+export declare const DebugServiceDefinition: ServiceDefinition<[IDebugService], [IShellService, ISceneContext]>;

@@ -1,0 +1,17 @@
+import { type FunctionComponent } from "react";
+import { type SSRRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssrRenderingPipeline.js";
+export declare const SSRRenderingPipelineSSRProperties: FunctionComponent<{
+    pipeline: SSRRenderingPipeline;
+}>;
+export declare const SSRRenderingPipelineThicknessProperties: FunctionComponent<{
+    pipeline: SSRRenderingPipeline;
+}>;
+export declare const SSRRenderingPipelineBlurProperties: FunctionComponent<{
+    pipeline: SSRRenderingPipeline;
+}>;
+export declare const SSRRenderingPipelineAttenuationProperties: FunctionComponent<{
+    pipeline: SSRRenderingPipeline;
+}>;
+export declare const SSRRenderingPipelineColorSpaceProperties: FunctionComponent<{
+    pipeline: SSRRenderingPipeline;
+}>;

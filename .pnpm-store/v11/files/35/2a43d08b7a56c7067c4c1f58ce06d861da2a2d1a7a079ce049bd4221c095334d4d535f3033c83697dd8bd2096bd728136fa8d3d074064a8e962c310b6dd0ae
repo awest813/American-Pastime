@@ -1,0 +1,63 @@
+import { getMaterialSource, isMaterialView } from './material-view.js';
+
+function rebuildMaterial(scene, materialOrView, options) {
+  const source = getMaterialSource(materialOrView);
+  const rebuildViews = options?.rebuildViews !== false;
+  let changed = false;
+  for (const mesh of scene.meshes) {
+    if (matchesMaterial(mesh.material, source, materialOrView, rebuildViews)) {
+      rebuildSceneMesh(scene, mesh);
+      if (mesh.material) {
+        mesh.material._csmGen = (mesh.material._csmGen ?? 0) + 1;
+      }
+      changed = true;
+    }
+  }
+  if (changed) {
+    scene._renderableVersion++;
+    scene._materialEpoch++;
+  }
+  if (options?.rebuildFrameGraph) {
+    scene._frameGraph.build();
+  }
+}
+function matchesMaterial(meshMaterial, source, materialOrView, rebuildViews) {
+  if (!meshMaterial) {
+    return false;
+  }
+  if (!rebuildViews) {
+    return meshMaterial === materialOrView;
+  }
+  return meshMaterial === source || isMaterialView(meshMaterial) && meshMaterial.source === source;
+}
+function rebuildSceneMesh(ctx, mesh) {
+  const material = mesh.material;
+  if (!material) {
+    return;
+  }
+  const rebuild = material._buildGroup._rebuildSingle;
+  if (!rebuild) {
+    return;
+  }
+  const old = ctx._meshDisposables.get(mesh);
+  if (old) {
+    for (const fn of old) {
+      fn();
+    }
+    ctx._meshDisposables.delete(mesh);
+  }
+  for (let i2 = ctx._renderables.length - 1; i2 >= 0; i2--) {
+    if (ctx._renderables[i2].mesh === mesh) {
+      ctx._renderables.splice(i2, 1);
+    }
+  }
+  const renderable = rebuild(ctx, mesh);
+  let i = ctx._renderables.length;
+  while (i > 0 && ctx._renderables[i - 1].order > renderable.order) {
+    i--;
+  }
+  ctx._renderables.splice(i, 0, renderable);
+}
+
+export { rebuildMaterial };
+//# sourceMappingURL=material-rebuild.js.map

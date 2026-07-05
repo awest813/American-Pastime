@@ -1,0 +1,19 @@
+import { type FunctionComponent } from "react";
+type MaterialWithPublicNormalMaps = {
+    invertNormalMapX: boolean;
+    invertNormalMapY: boolean;
+};
+type MaterialWithInternalNormalMaps = {
+    _invertNormalMapX: boolean;
+    _invertNormalMapY: boolean;
+};
+export type MaterialWithNormalMaps = MaterialWithPublicNormalMaps | MaterialWithInternalNormalMaps;
+/**
+ * Displays the normal map properties of a standard material.
+ * @param props - The required properties
+ * @returns A JSX element representing the normal map properties.
+ */
+export declare const NormalMapProperties: FunctionComponent<{
+    material: MaterialWithNormalMaps;
+}>;
+export {};

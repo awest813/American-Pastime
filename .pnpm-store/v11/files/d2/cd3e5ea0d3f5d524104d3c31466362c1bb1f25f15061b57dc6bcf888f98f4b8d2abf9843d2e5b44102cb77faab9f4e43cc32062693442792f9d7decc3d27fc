@@ -1,0 +1,69 @@
+import { getTextureImageIndex, resolveImage } from './gltf-parser.js';
+
+async function assembleMaterial(json, binChunk, materialIdx, baseUrl, imageCache) {
+  const mat = json.materials?.[materialIdx];
+  if (!mat) {
+    return {
+      _baseColorFactor: [1, 1, 1, 1],
+      _metallicFactor: 1,
+      _roughnessFactor: 1,
+      _emissiveFactor: [0, 0, 0],
+      _baseColorImage: null,
+      _metallicRoughnessImage: null,
+      _normalImage: null,
+      _normalScale: 1,
+      _occlusionTexCoord: 0,
+      _occlusionImage: null,
+      _emissiveImage: null,
+      _doubleSided: false,
+      _alphaMode: "OPAQUE",
+      _alphaCutoff: 0.5
+    };
+  }
+  const pbr = mat.pbrMetallicRoughness ?? {};
+  const fetchImg = makeImageFetcher(json, binChunk, baseUrl, imageCache);
+  const [baseColorImg, mrImg, normalImg, occlusionImg, emissiveImg] = await Promise.all([
+    fetchImg(pbr.baseColorTexture),
+    fetchImg(pbr.metallicRoughnessTexture),
+    fetchImg(mat.normalTexture),
+    fetchImg(mat.occlusionTexture),
+    fetchImg(mat.emissiveTexture)
+  ]);
+  return {
+    _baseColorFactor: pbr.baseColorFactor ?? [1, 1, 1, 1],
+    _metallicFactor: pbr.metallicFactor ?? 1,
+    _roughnessFactor: pbr.roughnessFactor ?? 1,
+    _emissiveFactor: mat.emissiveFactor ?? [0, 0, 0],
+    _baseColorImage: baseColorImg,
+    _metallicRoughnessImage: mrImg,
+    _normalImage: normalImg,
+    _normalScale: typeof mat.normalTexture?.scale === "number" ? mat.normalTexture.scale : 1,
+    _occlusionTexCoord: typeof mat.occlusionTexture?.texCoord === "number" ? mat.occlusionTexture.texCoord : 0,
+    _occlusionImage: occlusionImg,
+    _emissiveImage: emissiveImg,
+    _doubleSided: !!mat.doubleSided,
+    _alphaMode: mat.alphaMode ?? "OPAQUE",
+    _alphaCutoff: mat.alphaCutoff ?? 0.5,
+    _rawMatDef: mat
+  };
+}
+function makeImageFetcher(json, binChunk, baseUrl, imageCache) {
+  return (texInfo) => {
+    if (!texInfo) {
+      return Promise.resolve(null);
+    }
+    const imgIdx = getTextureImageIndex(json.textures[texInfo.index]);
+    if (imageCache) {
+      let cached = imageCache.get(imgIdx);
+      if (!cached) {
+        cached = resolveImage(json, binChunk, imgIdx, baseUrl);
+        imageCache.set(imgIdx, cached);
+      }
+      return cached;
+    }
+    return resolveImage(json, binChunk, imgIdx, baseUrl);
+  };
+}
+
+export { assembleMaterial, makeImageFetcher };
+//# sourceMappingURL=gltf-material.js.map

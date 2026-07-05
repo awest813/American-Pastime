@@ -1,0 +1,176 @@
+import { CW } from '../../engine/gpu-flags.js';
+import { _getPbrExtsSorted } from './pbr-flags.js';
+import { MSH_HAS_UV2, MSH_HAS_TANGENTS } from '../mesh-features.js';
+import { targetSignatureKey, REVERSE_DEPTH_COMPARE } from '../../engine/render-target.js';
+import { getSceneBindGroupLayout } from '../../render/scene-helpers.js';
+import { PBR2_HAS_UV2, PBR_HAS_EMISSIVE, PBR_HAS_SPEC_GLOSS, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT, PBR_HAS_ALPHA_BLEND, PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP } from './pbr-flag-bits.js';
+
+let _stencilResolver = null;
+function _installPbrStencilResolver(resolve) {
+  _stencilResolver = resolve;
+}
+let _pbrFallbackResolver = null;
+function _installPbrFallbackResolver(resolve) {
+  _pbrFallbackResolver = resolve;
+}
+let _primitiveResolver = null;
+function _installPbrPrimitiveResolver(resolve) {
+  _primitiveResolver = resolve;
+}
+const _bindingsCache = /* @__PURE__ */ new Map();
+let _cachedDevice = null;
+function ensureDevice(engine) {
+  if (_cachedDevice !== engine._device) {
+    _bindingsCache.clear();
+    _cachedDevice = engine._device;
+  }
+}
+function clearPbrPipelineCache() {
+  _bindingsCache.clear();
+  _cachedDevice = null;
+}
+function getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, shaderKey = "", stencil = null) {
+  ensureDevice(engine);
+  const resolvedStencil = stencil && _stencilResolver ? _stencilResolver(stencil) : null;
+  const key = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}${resolvedStencil ? resolvedStencil._key : ""}`;
+  const cached = _bindingsCache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const device = engine._device;
+  const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
+  let shadowBGL = null;
+  if (composed._shadowBGLDescriptor) {
+    shadowBGL = device.createBindGroupLayout(composed._shadowBGLDescriptor);
+  }
+  const bindings = {
+    _features: features,
+    _features2: features2,
+    _meshFeatures: meshFeatures,
+    _meshBGL: meshBGL,
+    _shadowBGL: shadowBGL,
+    _composed: composed,
+    _pipelines: /* @__PURE__ */ new Map()
+  };
+  if (resolvedStencil) {
+    bindings._stencil = resolvedStencil._desc;
+  }
+  _bindingsCache.set(key, bindings);
+  return bindings;
+}
+function getOrCreatePbrPipeline(engine, sig, bindings) {
+  ensureDevice(engine);
+  const key = targetSignatureKey(sig);
+  const cached = bindings._pipelines.get(key);
+  if (cached) {
+    return cached;
+  }
+  const device = engine._device;
+  const { _features: features, _features2: features2, _composed: composed, _meshFeatures: meshFeatures } = bindings;
+  const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
+  const hasAlpha = !esmShadowOutput && (features & PBR_HAS_ALPHA_BLEND) !== 0;
+  const hasDoubleSided = (features & PBR_HAS_DOUBLE_SIDED) !== 0;
+  const sceneBGL = getSceneBindGroupLayout(engine);
+  const bgls = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
+  const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
+  const noColorOutput = (features2 & PBR2_NO_COLOR_OUTPUT) !== 0;
+  const fragModule = !sig._colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+  const fragTarget = noColorOutput ? null : { format: sig._colorFormat, writeMask: CW.ALL };
+  if (hasAlpha && fragTarget) {
+    fragTarget.blend = {
+      color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+      alpha: { srcFactor: "one", dstFactor: "one", operation: "add" }
+    };
+  }
+  const pipeline = device.createRenderPipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
+    vertex: { module: vertModule, entryPoint: "main", buffers: composed._vertexBufferLayouts },
+    ...fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: fragTarget ? [fragTarget] : [] } } : {},
+    ...sig._depthStencilFormat ? {
+      depthStencil: {
+        format: sig._depthStencilFormat,
+        depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE,
+        depthWriteEnabled: noColorOutput || esmShadowOutput || !hasAlpha,
+        // Pre-baked stencil sub-fields, applied only on a stencil-capable target — the same
+        // material in the depth32float shadow/depth pass keeps plain depth state (no stencil → no
+        // format mismatch). Gated on `_stencilResolver` (the opt-in hook) so the entire branch —
+        // including the `bindings._stencil` reads — folds out of stencil-free bundles.
+        ..._stencilResolver && bindings._stencil && sig._depthStencilFormat.includes("stencil") ? bindings._stencil : {}
+      }
+    } : {},
+    multisample: { count: sig._sampleCount },
+    primitive: _primitiveResolver ? _primitiveResolver(meshFeatures, hasDoubleSided) : { topology: "triangle-list", cullMode: hasDoubleSided ? "none" : "back", frontFace: "ccw" }
+  });
+  bindings._pipelines.set(key, pipeline);
+  return pipeline;
+}
+function createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, material, env, meshCtx, refractionTexture) {
+  const device = engine._device;
+  const features = bindings._features;
+  const features2 = bindings._features2;
+  const meshFeatures = bindings._meshFeatures;
+  const hasNormal = (features & PBR_HAS_NORMAL_MAP) !== 0 && (meshFeatures & MSH_HAS_TANGENTS) !== 0;
+  const hasCotangentNormal = (features & PBR_HAS_NORMAL_MAP) !== 0 && (meshFeatures & MSH_HAS_TANGENTS) === 0;
+  const hasAnyNormal = hasNormal || hasCotangentNormal;
+  const hasEmissive = (features & PBR_HAS_EMISSIVE) !== 0;
+  const hasSpecGloss = (features & PBR_HAS_SPEC_GLOSS) !== 0;
+  const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
+  const entries = [];
+  let b = 0;
+  const addTex = (t) => {
+    entries.push({ binding: b++, resource: t.view });
+    entries.push({ binding: b++, resource: t.sampler });
+  };
+  const ctx = {
+    _engine: engine,
+    _features: features,
+    _features2: features2,
+    _meshFeatures: meshFeatures,
+    _material: material,
+    _mesh: meshCtx ?? void 0,
+    _env: env,
+    _refractionTexture: refractionTexture
+  };
+  const sortedExts = _getPbrExtsSorted();
+  const fragIds = composed._fragmentKey ? composed._fragmentKey.split("|").filter((s) => s.length > 0) : [];
+  entries.push({ binding: b++, resource: { buffer: meshUBO } });
+  entries.push({ binding: b++, resource: { buffer: materialUBO } });
+  for (const ext of sortedExts) {
+    if (ext.phase === "vertex" && ext.bind) {
+      b = ext.bind(ctx, entries, b);
+    }
+  }
+  addTex(material.baseColorTexture ?? _pbrFallbackResolver?.(engine));
+  if (hasAnyNormal) {
+    addTex(material.normalTexture);
+  }
+  addTex(material.ormTexture ?? _pbrFallbackResolver?.(engine));
+  if ((features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0 && material.occlusionTexture) {
+    addTex(material.occlusionTexture);
+  }
+  if (hasEmissive) {
+    addTex(material.emissiveTexture);
+  }
+  if (hasSpecGloss) {
+    addTex(material.specGlossTexture);
+  }
+  if (esmShadowOutput) {
+    entries.push({
+      binding: b++,
+      resource: { buffer: material._esmShadowParamsUBO }
+    });
+  }
+  const seenExts = [];
+  for (const fid of fragIds) {
+    const ext = sortedExts.find((e) => e.id === fid || fid.startsWith(e.id + "-"));
+    if (!ext || ext.phase === "vertex" || !ext.bind || seenExts.includes(ext)) {
+      continue;
+    }
+    seenExts.push(ext);
+    b = ext.bind(ctx, entries, b);
+  }
+  return device.createBindGroup({ layout: bindings._meshBGL, entries });
+}
+
+export { _installPbrFallbackResolver, _installPbrPrimitiveResolver, _installPbrStencilResolver, clearPbrPipelineCache, createPbrMeshBindGroup, getOrCreatePbrBindings, getOrCreatePbrPipeline };
+//# sourceMappingURL=pbr-pipeline.js.map

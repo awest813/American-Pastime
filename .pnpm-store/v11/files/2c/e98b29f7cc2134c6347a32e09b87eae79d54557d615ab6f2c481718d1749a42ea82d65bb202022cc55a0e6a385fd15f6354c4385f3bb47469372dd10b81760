@@ -1,0 +1,109 @@
+import { SCENE_UBO_WGSL } from '../shader/scene-uniforms.js';
+import { makeBillboardBasisWgsl } from './billboard-pipeline.js';
+import { validateExtraTextureNames, createSpriteLayerFx, makeCustomShaderLayoutEntries, nextCustomShaderKey, makeShaderModuleCache, makeExtraBindingsWgsl, makeFxStructWgsl, EMPTY_PARAMS } from './custom-shader-core.js';
+import { _registerBillboardFxHook } from './sprite-fx-hook.js';
+
+function makeCustomBillboardWgsl(orientation, extraTextures, fragment) {
+  const fxBinding = 3 + extraTextures.length * 2;
+  return `${SCENE_UBO_WGSL}
+struct S {
+opacityMul: vec4f,
+axisAndCutoff: vec4f,
+};
+@group(1) @binding(0) var<uniform> billboards: S;
+@group(1) @binding(1) var atlasTex: texture_2d<f32>;
+@group(1) @binding(2) var atlasSamp: sampler;
+${makeExtraBindingsWgsl(1, 3, extraTextures)}${makeFxStructWgsl(1, fxBinding)}
+${makeBillboardBasisWgsl(orientation)}
+struct I {
+@builtin(vertex_index) vid: u32,
+@location(0) p: vec3f,
+@location(1) s: vec2f,
+@location(2) a: vec2f,
+@location(3) b: vec2f,
+@location(4) r: f32,
+@location(5) o: vec2f,
+@location(6) c: vec4f,
+};
+struct O {
+@builtin(position) p: vec4f,
+@location(0) uv: vec2f,
+@location(1) tint: vec4f,
+@location(2) viewDist: f32,
+@location(3) vWorldPos: vec3f,
+};
+@vertex
+fn vs(in: I) -> O {
+let q = vec2f(select(0.0, 1.0, in.vid == 1u || in.vid == 2u), select(0.0, 1.0, in.vid >= 2u));
+let l = (q - in.o) * in.s;
+let cr = cos(in.r);
+let sr = sin(in.r);
+let r = vec2f(l.x * cr - l.y * sr, l.x * sr + l.y * cr);
+let b = basis(in.p);
+let wp = in.p + b.r * r.x + b.u * r.y;
+var out: O;
+out.p = scene.viewProjection * vec4f(wp, 1);
+out.uv = mix(in.a, in.b, q);
+out.tint = in.c;
+let viewCenter = scene.view * vec4f(in.p, 1);
+out.viewDist = length(viewCenter.xyz);
+out.vWorldPos = wp;
+return out;
+}
+@fragment
+fn fs(in: O) -> @location(0) vec4f {
+${fragment}
+}`;
+}
+const BILLBOARD_FX_HOOK = {
+  initSystem(system, opts) {
+    const customShader = opts.customShader;
+    if (customShader) {
+      system._customShader = customShader;
+      system.shaderParams = [0, 0, 0, 0];
+    }
+  },
+  pipelineKeyPart(system) {
+    return system._customShader?._key ?? "";
+  },
+  shaderModule(engine, system) {
+    return system._customShader?._getShaderModule(engine, system._orientation, system._depthMode) ?? null;
+  },
+  layoutEntries(system, startBinding) {
+    return system._customShader?._layoutEntries(startBinding) ?? null;
+  },
+  createLayerFx(engine, label, system) {
+    return system._customShader?._createLayerFx(engine, label) ?? null;
+  },
+  updateFx(fx, system, deltaMs) {
+    fx.update(system.shaderParams ?? EMPTY_PARAMS, deltaMs);
+  },
+  bindEntries(fx, startBinding) {
+    return fx.bindEntries(startBinding);
+  },
+  disposeFx(fx) {
+    fx.destroy();
+  }
+};
+function createBillboardCustomShader(options) {
+  _registerBillboardFxHook(BILLBOARD_FX_HOOK);
+  const fragment = options.fragment;
+  if (typeof fragment !== "string" || fragment.trim().length === 0) {
+    throw new Error("createBillboardCustomShader: `fragment` must be a non-empty WGSL string.");
+  }
+  const extraTextures = options.extraTextures ?? [];
+  validateExtraTextureNames("createBillboardCustomShader", extraTextures);
+  const moduleCache = makeShaderModuleCache();
+  return {
+    _entityType: "billboard-custom-shader",
+    _extraTextures: extraTextures,
+    _key: nextCustomShaderKey("c"),
+    _composeWgsl: (orientation) => makeCustomBillboardWgsl(orientation, extraTextures, fragment),
+    _getShaderModule: (engine, orientation, depthMode) => moduleCache(engine, `${orientation}:${depthMode}`, () => makeCustomBillboardWgsl(orientation, extraTextures, fragment)),
+    _layoutEntries: (startBinding) => makeCustomShaderLayoutEntries(extraTextures, startBinding),
+    _createLayerFx: (engine, label) => createSpriteLayerFx(engine, label, extraTextures)
+  };
+}
+
+export { createBillboardCustomShader };
+//# sourceMappingURL=billboard-custom-shader.js.map

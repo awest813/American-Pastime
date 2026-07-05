@@ -1,0 +1,57 @@
+import { TU } from '../engine/gpu-flags.js';
+import { getTrilinearSampler } from '../resource/samplers.js';
+import { generateMipmaps } from './generate-mipmaps.js';
+import { mipLevelCount } from './mip-count.js';
+
+let _cc = null;
+function loadCubeTexture(engine, baseUrl, ext = ".jpg") {
+  const device = engine._device;
+  if (!_cc) {
+    _cc = /* @__PURE__ */ new WeakMap();
+  }
+  let dc = _cc.get(device);
+  if (!dc) {
+    dc = /* @__PURE__ */ new Map();
+    _cc.set(device, dc);
+  }
+  const key = `${baseUrl}\0${ext}`;
+  const hit = dc.get(key);
+  if (hit) {
+    return hit;
+  }
+  const p = (async () => {
+    const bitmaps = await Promise.all(
+      ["_px", "_nx", "_py", "_ny", "_pz", "_nz"].map(async (s) => {
+        const r = await fetch(`${baseUrl}${s}${ext}`);
+        if (!r.ok) {
+          throw new Error(`Cube face load failed: ${baseUrl}${s}${ext}`);
+        }
+        return createImageBitmap(await r.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+      })
+    );
+    const sz = bitmaps[0].width;
+    const tex = device.createTexture({
+      size: [sz, sz, 6],
+      format: "rgba8unorm",
+      dimension: "2d",
+      usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
+      mipLevelCount: mipLevelCount(sz, sz)
+    });
+    for (let i = 0; i < 6; i++) {
+      device.queue.copyExternalImageToTexture({ source: bitmaps[i] }, { texture: tex, origin: [0, 0, i], premultipliedAlpha: false }, [sz, sz, 1]);
+      bitmaps[i].close();
+      generateMipmaps(engine, tex, i);
+    }
+    return {
+      texture: tex,
+      view: tex.createView({ dimension: "cube", format: "rgba8unorm" }),
+      sampler: getTrilinearSampler(engine)
+    };
+  })();
+  dc.set(key, p);
+  p.catch(() => dc.delete(key));
+  return p;
+}
+
+export { loadCubeTexture };
+//# sourceMappingURL=cube-texture.js.map

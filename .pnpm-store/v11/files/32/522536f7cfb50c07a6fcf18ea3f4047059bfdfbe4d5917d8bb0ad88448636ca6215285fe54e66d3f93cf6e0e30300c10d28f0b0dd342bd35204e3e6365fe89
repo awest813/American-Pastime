@@ -1,0 +1,28 @@
+import { _ALPHA_BLEND_STATE, _PREMULTIPLIED_BLEND_STATE } from './blend-descriptors.js';
+
+const spriteBlendAlpha = {
+  _key: "alpha",
+  _descriptor: _ALPHA_BLEND_STATE
+};
+const spriteBlendPremultiplied = {
+  _key: "premultiplied",
+  _descriptor: _PREMULTIPLIED_BLEND_STATE,
+  _premultipliedOpacity: true
+};
+const spriteBlendAdditive = {
+  _key: "additive",
+  _descriptor: {
+    color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+    alpha: { srcFactor: "one", dstFactor: "one", operation: "add" }
+  }
+};
+const spriteBlendMultiply = {
+  _key: "multiply",
+  _descriptor: {
+    color: { srcFactor: "dst", dstFactor: "zero", operation: "add" },
+    alpha: { srcFactor: "dst-alpha", dstFactor: "zero", operation: "add" }
+  }
+};
+
+export { spriteBlendAdditive, spriteBlendAlpha, spriteBlendMultiply, spriteBlendPremultiplied };
+//# sourceMappingURL=sprite-blend.js.map

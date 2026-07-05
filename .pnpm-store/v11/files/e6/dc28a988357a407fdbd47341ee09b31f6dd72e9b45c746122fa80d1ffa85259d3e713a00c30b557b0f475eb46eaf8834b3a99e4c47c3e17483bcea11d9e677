@@ -1,0 +1,1611 @@
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+import { quatFromRotationMatrix, setMeshVisible, resizeMeshGeometry, removeFromScene, createMeshFromData, setThinInstances, setThinInstanceColors, createExtrudeShape, createTube, createRibbon, createPolyhedron, createDisc, createTorusKnot, createTorus, createCylinder, createPlane, createGroundFromHeightMap, updateMeshUvs, createGround, createSphere, createBox, createTransformNode, addToScene, setParent } from "@babylonjs/lite";
+class LiteCompatError extends Error {
+  constructor(api, detail) {
+    super(detail ? `'${api}' is not supported by the Babylon Lite compat layer. ${detail}` : `'${api}' is not supported by the Babylon Lite compat layer.`);
+    this.name = "LiteCompatError";
+  }
+}
+function unsupported(api, detail) {
+  throw new LiteCompatError(api, detail);
+}
+class Vector2 {
+  constructor(x = 0, y = 0) {
+    this.x = x;
+    this.y = y;
+  }
+  set(x, y) {
+    this.x = x;
+    this.y = y;
+    return this;
+  }
+  copyFrom(source) {
+    this.x = source.x;
+    this.y = source.y;
+    return this;
+  }
+  copyFromFloats(x, y) {
+    this.x = x;
+    this.y = y;
+    return this;
+  }
+  add(other) {
+    return new Vector2(this.x + other.x, this.y + other.y);
+  }
+  addInPlace(other) {
+    this.x += other.x;
+    this.y += other.y;
+    return this;
+  }
+  subtract(other) {
+    return new Vector2(this.x - other.x, this.y - other.y);
+  }
+  scale(scale) {
+    return new Vector2(this.x * scale, this.y * scale);
+  }
+  scaleInPlace(scale) {
+    this.x *= scale;
+    this.y *= scale;
+    return this;
+  }
+  length() {
+    return Math.sqrt(this.x * this.x + this.y * this.y);
+  }
+  lengthSquared() {
+    return this.x * this.x + this.y * this.y;
+  }
+  normalize() {
+    const len = this.length();
+    if (len !== 0) {
+      this.x /= len;
+      this.y /= len;
+    }
+    return this;
+  }
+  clone() {
+    return new Vector2(this.x, this.y);
+  }
+  equals(other) {
+    return this.x === other.x && this.y === other.y;
+  }
+  asArray() {
+    return [this.x, this.y];
+  }
+  static Zero() {
+    return new Vector2(0, 0);
+  }
+  static One() {
+    return new Vector2(1, 1);
+  }
+  static Dot(a, b) {
+    return a.x * b.x + a.y * b.y;
+  }
+}
+class Vector3 {
+  constructor(x = 0, y = 0, z = 0) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+  }
+  set(x, y, z) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+    return this;
+  }
+  setAll(value) {
+    this.x = this.y = this.z = value;
+    return this;
+  }
+  copyFrom(source) {
+    this.x = source.x;
+    this.y = source.y;
+    this.z = source.z;
+    return this;
+  }
+  copyFromFloats(x, y, z) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+    return this;
+  }
+  add(other) {
+    return new Vector3(this.x + other.x, this.y + other.y, this.z + other.z);
+  }
+  addInPlace(other) {
+    this.x += other.x;
+    this.y += other.y;
+    this.z += other.z;
+    return this;
+  }
+  addInPlaceFromFloats(x, y, z) {
+    this.x += x;
+    this.y += y;
+    this.z += z;
+    return this;
+  }
+  subtract(other) {
+    return new Vector3(this.x - other.x, this.y - other.y, this.z - other.z);
+  }
+  subtractInPlace(other) {
+    this.x -= other.x;
+    this.y -= other.y;
+    this.z -= other.z;
+    return this;
+  }
+  multiply(other) {
+    return new Vector3(this.x * other.x, this.y * other.y, this.z * other.z);
+  }
+  scale(scale) {
+    return new Vector3(this.x * scale, this.y * scale, this.z * scale);
+  }
+  scaleInPlace(scale) {
+    this.x *= scale;
+    this.y *= scale;
+    this.z *= scale;
+    return this;
+  }
+  negate() {
+    return new Vector3(-this.x, -this.y, -this.z);
+  }
+  minimizeInPlace(other) {
+    return this.minimizeInPlaceFromFloats(other.x, other.y, other.z);
+  }
+  maximizeInPlace(other) {
+    return this.maximizeInPlaceFromFloats(other.x, other.y, other.z);
+  }
+  minimizeInPlaceFromFloats(x, y, z) {
+    if (x < this.x) {
+      this.x = x;
+    }
+    if (y < this.y) {
+      this.y = y;
+    }
+    if (z < this.z) {
+      this.z = z;
+    }
+    return this;
+  }
+  maximizeInPlaceFromFloats(x, y, z) {
+    if (x > this.x) {
+      this.x = x;
+    }
+    if (y > this.y) {
+      this.y = y;
+    }
+    if (z > this.z) {
+      this.z = z;
+    }
+    return this;
+  }
+  length() {
+    return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+  }
+  lengthSquared() {
+    return this.x * this.x + this.y * this.y + this.z * this.z;
+  }
+  normalize() {
+    const len = this.length();
+    if (len !== 0) {
+      this.x /= len;
+      this.y /= len;
+      this.z /= len;
+    }
+    return this;
+  }
+  clone() {
+    return new Vector3(this.x, this.y, this.z);
+  }
+  equals(other) {
+    return this.x === other.x && this.y === other.y && this.z === other.z;
+  }
+  equalsWithEpsilon(other, epsilon = 1e-6) {
+    return Math.abs(this.x - other.x) <= epsilon && Math.abs(this.y - other.y) <= epsilon && Math.abs(this.z - other.z) <= epsilon;
+  }
+  asArray() {
+    return [this.x, this.y, this.z];
+  }
+  toArray(array, index = 0) {
+    array[index] = this.x;
+    array[index + 1] = this.y;
+    array[index + 2] = this.z;
+    return this;
+  }
+  static Zero() {
+    return new Vector3(0, 0, 0);
+  }
+  static One() {
+    return new Vector3(1, 1, 1);
+  }
+  static Up() {
+    return new Vector3(0, 1, 0);
+  }
+  static Down() {
+    return new Vector3(0, -1, 0);
+  }
+  static Forward() {
+    return new Vector3(0, 0, 1);
+  }
+  static Backward() {
+    return new Vector3(0, 0, -1);
+  }
+  static Right() {
+    return new Vector3(1, 0, 0);
+  }
+  static Left() {
+    return new Vector3(-1, 0, 0);
+  }
+  static FromArray(array, offset = 0) {
+    return new Vector3(array[offset] ?? 0, array[offset + 1] ?? 0, array[offset + 2] ?? 0);
+  }
+  static FromArrayToRef(array, offset, result) {
+    result.set(array[offset] ?? 0, array[offset + 1] ?? 0, array[offset + 2] ?? 0);
+    return result;
+  }
+  static FromFloatsToRef(x, y, z, result) {
+    result.set(x, y, z);
+    return result;
+  }
+  static Dot(a, b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+  }
+  static Cross(a, b) {
+    return Vector3.CrossToRef(a, b, new Vector3());
+  }
+  static CrossToRef(a, b, result) {
+    result.set(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+    return result;
+  }
+  static Distance(a, b) {
+    return Math.sqrt(Vector3.DistanceSquared(a, b));
+  }
+  static DistanceSquared(a, b) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    const dz = a.z - b.z;
+    return dx * dx + dy * dy + dz * dz;
+  }
+  static Lerp(start, end, amount) {
+    return Vector3.LerpToRef(start, end, amount, new Vector3());
+  }
+  static LerpToRef(start, end, amount, result) {
+    result.set(start.x + (end.x - start.x) * amount, start.y + (end.y - start.y) * amount, start.z + (end.z - start.z) * amount);
+    return result;
+  }
+  /** Midpoint between two vectors. */
+  static Center(a, b) {
+    return Vector3.CenterToRef(a, b, new Vector3());
+  }
+  /** Midpoint between two vectors, written into `ref`. */
+  static CenterToRef(a, b, ref) {
+    return ref.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+  }
+  static Normalize(vector) {
+    return Vector3.NormalizeToRef(vector, new Vector3());
+  }
+  static NormalizeToRef(vector, result) {
+    const len = vector.length();
+    if (len === 0) {
+      result.set(0, 0, 0);
+    } else {
+      result.set(vector.x / len, vector.y / len, vector.z / len);
+    }
+    return result;
+  }
+  static Minimize(a, b) {
+    return a.clone().minimizeInPlace(b);
+  }
+  static Maximize(a, b) {
+    return a.clone().maximizeInPlace(b);
+  }
+  /** Transform a coordinate (point) by a matrix using the row-vector convention. */
+  static TransformCoordinates(vector, transformation) {
+    return Vector3.TransformCoordinatesToRef(vector, transformation, new Vector3());
+  }
+  /** Transform a coordinate (point) by a matrix using the row-vector convention. */
+  static TransformCoordinatesToRef(vector, transformation, result) {
+    const m = transformation.m;
+    const x = vector.x;
+    const y = vector.y;
+    const z = vector.z;
+    const rx = x * m[0] + y * m[4] + z * m[8] + m[12];
+    const ry = x * m[1] + y * m[5] + z * m[9] + m[13];
+    const rz = x * m[2] + y * m[6] + z * m[10] + m[14];
+    const rw = 1 / (x * m[3] + y * m[7] + z * m[11] + m[15]);
+    result.set(rx * rw, ry * rw, rz * rw);
+    return result;
+  }
+  /** Transform a direction (normal) by a matrix, ignoring translation. */
+  static TransformNormal(vector, transformation) {
+    return Vector3.TransformNormalToRef(vector, transformation, new Vector3());
+  }
+  /** Transform a direction (normal) by a matrix, ignoring translation. */
+  static TransformNormalToRef(vector, transformation, result) {
+    const m = transformation.m;
+    const x = vector.x;
+    const y = vector.y;
+    const z = vector.z;
+    result.set(x * m[0] + y * m[4] + z * m[8], x * m[1] + y * m[5] + z * m[9], x * m[2] + y * m[6] + z * m[10]);
+    return result;
+  }
+}
+class LiteBackedVector3 extends Vector3 {
+  constructor(lite) {
+    super(0, 0, 0);
+    Object.defineProperty(this, "x", { enumerable: true, configurable: true, get: () => lite.x, set: (v) => lite.x = v });
+    Object.defineProperty(this, "y", { enumerable: true, configurable: true, get: () => lite.y, set: (v) => lite.y = v });
+    Object.defineProperty(this, "z", { enumerable: true, configurable: true, get: () => lite.z, set: (v) => lite.z = v });
+  }
+}
+const _liteVec3Proxies = /* @__PURE__ */ new WeakMap();
+function liteBackedVector3(lite) {
+  let proxy = _liteVec3Proxies.get(lite);
+  if (!proxy) {
+    proxy = new LiteBackedVector3(lite);
+    _liteVec3Proxies.set(lite, proxy);
+  }
+  return proxy;
+}
+class Vector4 {
+  constructor(x = 0, y = 0, z = 0, w = 0) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+    this.w = w;
+  }
+  set(x, y, z, w) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+    this.w = w;
+    return this;
+  }
+  copyFrom(source) {
+    this.x = source.x;
+    this.y = source.y;
+    this.z = source.z;
+    this.w = source.w;
+    return this;
+  }
+  add(other) {
+    return new Vector4(this.x + other.x, this.y + other.y, this.z + other.z, this.w + other.w);
+  }
+  scale(scale) {
+    return new Vector4(this.x * scale, this.y * scale, this.z * scale, this.w * scale);
+  }
+  length() {
+    return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z + this.w * this.w);
+  }
+  clone() {
+    return new Vector4(this.x, this.y, this.z, this.w);
+  }
+  equals(other) {
+    return this.x === other.x && this.y === other.y && this.z === other.z && this.w === other.w;
+  }
+  asArray() {
+    return [this.x, this.y, this.z, this.w];
+  }
+  static Zero() {
+    return new Vector4(0, 0, 0, 0);
+  }
+}
+class Quaternion {
+  constructor(x = 0, y = 0, z = 0, w = 1) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+    this.w = w;
+  }
+  set(x, y, z, w) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+    this.w = w;
+    return this;
+  }
+  copyFrom(source) {
+    this.x = source.x;
+    this.y = source.y;
+    this.z = source.z;
+    this.w = source.w;
+    return this;
+  }
+  multiply(other) {
+    return new Quaternion(
+      other.w * this.x + other.x * this.w + other.y * this.z - other.z * this.y,
+      other.w * this.y - other.x * this.z + other.y * this.w + other.z * this.x,
+      other.w * this.z + other.x * this.y - other.y * this.x + other.z * this.w,
+      other.w * this.w - other.x * this.x - other.y * this.y - other.z * this.z
+    );
+  }
+  length() {
+    return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z + this.w * this.w);
+  }
+  normalize() {
+    const len = this.length();
+    if (len !== 0) {
+      const inv = 1 / len;
+      this.x *= inv;
+      this.y *= inv;
+      this.z *= inv;
+      this.w *= inv;
+    }
+    return this;
+  }
+  conjugate() {
+    return new Quaternion(-this.x, -this.y, -this.z, this.w);
+  }
+  /**
+   * Babylon.js `Quaternion.fromRotationMatrix` — update this quaternion in place
+   * from the rotation part of `matrix`. Backed by Lite's `quatFromRotationMatrix`.
+   */
+  fromRotationMatrix(matrix) {
+    const q = quatFromRotationMatrix(matrix.m);
+    this.x = q.x;
+    this.y = q.y;
+    this.z = q.z;
+    this.w = q.w;
+    return this;
+  }
+  clone() {
+    return new Quaternion(this.x, this.y, this.z, this.w);
+  }
+  equals(other) {
+    return this.x === other.x && this.y === other.y && this.z === other.z && this.w === other.w;
+  }
+  asArray() {
+    return [this.x, this.y, this.z, this.w];
+  }
+  toEulerAngles() {
+    const result = new Vector3();
+    const qz = this.z;
+    const qx = this.x;
+    const qy = this.y;
+    const qw = this.w;
+    const sqw = qw * qw;
+    const sqz = qz * qz;
+    const sqx = qx * qx;
+    const sqy = qy * qy;
+    const zAxisY = qy * qz - qx * qw;
+    const limit = 0.4999999;
+    if (zAxisY < -limit) {
+      result.y = 2 * Math.atan2(qy, qw);
+      result.x = Math.PI / 2;
+      result.z = 0;
+    } else if (zAxisY > limit) {
+      result.y = 2 * Math.atan2(qy, qw);
+      result.x = -Math.PI / 2;
+      result.z = 0;
+    } else {
+      result.z = Math.atan2(2 * (qx * qy + qz * qw), -sqz - sqx + sqy + sqw);
+      result.x = Math.asin(-2 * (qz * qy - qx * qw));
+      result.y = Math.atan2(2 * (qz * qx + qy * qw), sqz - sqx - sqy + sqw);
+    }
+    return result;
+  }
+  static Identity() {
+    return new Quaternion(0, 0, 0, 1);
+  }
+  /**
+   * Babylon.js `Quaternion.FromRotationMatrix` — create a new quaternion from the
+   * rotation part of `matrix`. Backed by Lite's `quatFromRotationMatrix`.
+   */
+  static FromRotationMatrix(matrix) {
+    const result = new Quaternion();
+    Quaternion.FromRotationMatrixToRef(matrix, result);
+    return result;
+  }
+  /**
+   * Babylon.js `Quaternion.FromRotationMatrixToRef` — write the rotation part of
+   * `matrix` into `result`. Backed by Lite's `quatFromRotationMatrix`.
+   */
+  static FromRotationMatrixToRef(matrix, result) {
+    const q = quatFromRotationMatrix(matrix.m);
+    result.x = q.x;
+    result.y = q.y;
+    result.z = q.z;
+    result.w = q.w;
+    return result;
+  }
+  static FromEulerAngles(x, y, z) {
+    return Quaternion.RotationYawPitchRoll(y, x, z);
+  }
+  static RotationYawPitchRoll(yaw, pitch, roll) {
+    const halfRoll = roll * 0.5;
+    const halfPitch = pitch * 0.5;
+    const halfYaw = yaw * 0.5;
+    const sinRoll = Math.sin(halfRoll);
+    const cosRoll = Math.cos(halfRoll);
+    const sinPitch = Math.sin(halfPitch);
+    const cosPitch = Math.cos(halfPitch);
+    const sinYaw = Math.sin(halfYaw);
+    const cosYaw = Math.cos(halfYaw);
+    return new Quaternion(
+      cosYaw * sinPitch * cosRoll + sinYaw * cosPitch * sinRoll,
+      sinYaw * cosPitch * cosRoll - cosYaw * sinPitch * sinRoll,
+      cosYaw * cosPitch * sinRoll - sinYaw * sinPitch * cosRoll,
+      cosYaw * cosPitch * cosRoll + sinYaw * sinPitch * sinRoll
+    );
+  }
+  static RotationAxis(axis, angle) {
+    const sin = Math.sin(angle / 2);
+    const len = axis.length() || 1;
+    return new Quaternion(axis.x / len * sin, axis.y / len * sin, axis.z / len * sin, Math.cos(angle / 2));
+  }
+  static Slerp(left, right, amount) {
+    let num2;
+    let num3;
+    const num = amount;
+    let dot = left.x * right.x + left.y * right.y + left.z * right.z + left.w * right.w;
+    let flip = false;
+    if (dot < 0) {
+      flip = true;
+      dot = -dot;
+    }
+    if (dot > 0.999999) {
+      num3 = 1 - num;
+      num2 = flip ? -num : num;
+    } else {
+      const angle = Math.acos(dot);
+      const invSin = 1 / Math.sin(angle);
+      num3 = Math.sin((1 - num) * angle) * invSin;
+      num2 = flip ? -Math.sin(num * angle) * invSin : Math.sin(num * angle) * invSin;
+    }
+    return new Quaternion(num3 * left.x + num2 * right.x, num3 * left.y + num2 * right.y, num3 * left.z + num2 * right.z, num3 * left.w + num2 * right.w);
+  }
+}
+class Matrix {
+  constructor() {
+    __publicField(this, "m");
+    this.m = new Float32Array(16);
+  }
+  set(index, value) {
+    this.m[index] = value;
+    return this;
+  }
+  copyFrom(source) {
+    this.m.set(source.m);
+    return this;
+  }
+  clone() {
+    const result = new Matrix();
+    result.m.set(this.m);
+    return result;
+  }
+  asArray() {
+    return this.m;
+  }
+  toArray() {
+    return Array.from(this.m);
+  }
+  /** Babylon.js `Matrix.copyToArray` — copy the 16 elements into `array` at `offset`. */
+  copyToArray(array, offset = 0) {
+    for (let i = 0; i < 16; i++) {
+      array[offset + i] = this.m[i];
+    }
+    return this;
+  }
+  equals(other) {
+    for (let i = 0; i < 16; i++) {
+      if (this.m[i] !== other.m[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+  multiply(other) {
+    return Matrix.FromValues(...multiplyValues(this.m, other.m));
+  }
+  multiplyToRef(other, result) {
+    const values = multiplyValues(this.m, other.m);
+    result.m.set(values);
+    return result;
+  }
+  transpose() {
+    const a = this.m;
+    return Matrix.FromValues(a[0], a[4], a[8], a[12], a[1], a[5], a[9], a[13], a[2], a[6], a[10], a[14], a[3], a[7], a[11], a[15]);
+  }
+  determinant() {
+    return determinant(this.m);
+  }
+  invert() {
+    const result = new Matrix();
+    this.invertToRef(result);
+    return result;
+  }
+  invertToRef(result) {
+    const inv = invertValues(this.m);
+    result.m.set(inv);
+    return result;
+  }
+  getTranslation() {
+    return new Vector3(this.m[12], this.m[13], this.m[14]);
+  }
+  /**
+   * Babylon.js `Matrix.decompose(scale?, rotation?, translation?)` — split this
+   * TRS matrix into its scale, rotation (quaternion), and translation parts,
+   * writing into any provided out-params. Returns `false` (matching BJS) when a
+   * scale axis is zero. The rotation extraction is backed by Lite's
+   * `quatFromRotationMatrix` (via `Quaternion.FromRotationMatrixToRef`); the
+   * negative-determinant `scale.y` flip matches Babylon.js exactly.
+   */
+  decompose(scale, rotation, translation) {
+    const m = this.m;
+    if (translation) {
+      translation.copyFromFloats(m[12], m[13], m[14]);
+    }
+    const sc = scale ?? new Vector3();
+    sc.x = Math.sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    sc.y = Math.sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+    sc.z = Math.sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+    const det3 = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8]);
+    if (det3 < 0) {
+      sc.y *= -1;
+    }
+    if (sc.x === 0 || sc.y === 0 || sc.z === 0) {
+      if (rotation) {
+        rotation.set(0, 0, 0, 1);
+      }
+      return false;
+    }
+    if (rotation) {
+      const sx = 1 / sc.x;
+      const sy = 1 / sc.y;
+      const sz = 1 / sc.z;
+      const r = (decomposeRotationScratch ?? (decomposeRotationScratch = new Matrix())).m;
+      r[0] = m[0] * sx;
+      r[1] = m[1] * sx;
+      r[2] = m[2] * sx;
+      r[3] = 0;
+      r[4] = m[4] * sy;
+      r[5] = m[5] * sy;
+      r[6] = m[6] * sy;
+      r[7] = 0;
+      r[8] = m[8] * sz;
+      r[9] = m[9] * sz;
+      r[10] = m[10] * sz;
+      r[11] = 0;
+      r[12] = 0;
+      r[13] = 0;
+      r[14] = 0;
+      r[15] = 1;
+      Quaternion.FromRotationMatrixToRef(decomposeRotationScratch, rotation);
+    }
+    return true;
+  }
+  static FromValues(m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15) {
+    const result = new Matrix();
+    result.m.set([m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]);
+    return result;
+  }
+  static FromArray(array, offset = 0) {
+    const result = new Matrix();
+    for (let i = 0; i < 16; i++) {
+      result.m[i] = array[offset + i] ?? 0;
+    }
+    return result;
+  }
+  static Identity() {
+    return Matrix.FromValues(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+  }
+  static Zero() {
+    return new Matrix();
+  }
+  static Translation(x, y, z) {
+    return Matrix.FromValues(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1);
+  }
+  static Scaling(x, y, z) {
+    return Matrix.FromValues(x, 0, 0, 0, 0, y, 0, 0, 0, 0, z, 0, 0, 0, 0, 1);
+  }
+  static RotationX(angle) {
+    const s = Math.sin(angle);
+    const c = Math.cos(angle);
+    return Matrix.FromValues(1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1);
+  }
+  static RotationY(angle) {
+    const s = Math.sin(angle);
+    const c = Math.cos(angle);
+    return Matrix.FromValues(c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1);
+  }
+  static RotationZ(angle) {
+    const s = Math.sin(angle);
+    const c = Math.cos(angle);
+    return Matrix.FromValues(c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+  }
+  /** Babylon.js `Matrix.LookAtLH(eye, target, up)` — left-handed view matrix. */
+  static LookAtLH(eye, target, up) {
+    let zx = target.x - eye.x, zy = target.y - eye.y, zz = target.z - eye.z;
+    const zl = Math.hypot(zx, zy, zz) || 1;
+    zx /= zl;
+    zy /= zl;
+    zz /= zl;
+    let xx = up.y * zz - up.z * zy, xy = up.z * zx - up.x * zz, xz = up.x * zy - up.y * zx;
+    const xl = Math.hypot(xx, xy, xz) || 1;
+    xx /= xl;
+    xy /= xl;
+    xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    const ex = -(xx * eye.x + xy * eye.y + xz * eye.z);
+    const ey = -(yx * eye.x + yy * eye.y + yz * eye.z);
+    const ez = -(zx * eye.x + zy * eye.y + zz * eye.z);
+    return Matrix.FromValues(xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0, ex, ey, ez, 1);
+  }
+  /** Babylon.js `Matrix.OrthoOffCenterLH(left, right, bottom, top, znear, zfar, halfZRange?)` — LH ortho projection. */
+  static OrthoOffCenterLH(left, right, bottom, top, znear, zfar, _halfZRange) {
+    const a = 2 / (right - left);
+    const b = 2 / (top - bottom);
+    const c = 1 / (zfar - znear);
+    const tx = (left + right) / (left - right);
+    const ty = (top + bottom) / (bottom - top);
+    const tz = -znear * c;
+    return Matrix.FromValues(a, 0, 0, 0, 0, b, 0, 0, 0, 0, c, 0, tx, ty, tz, 1);
+  }
+  /**
+   * Babylon.js `Matrix.Compose(scale, rotation, translation)` — build a TRS matrix
+   * from a scale vector, a rotation quaternion, and a translation vector (row-vector
+   * convention, translation in elements 12/13/14).
+   */
+  static Compose(scale, rotation, translation) {
+    const { x, y, z, w } = rotation;
+    const x2 = x + x, y2 = y + y, z2 = z + z;
+    const xx = x * x2, xy = x * y2, xz = x * z2, yy = y * y2, yz = y * z2, zz = z * z2, wx = w * x2, wy = w * y2, wz = w * z2;
+    const sx = scale.x, sy = scale.y, sz = scale.z;
+    return Matrix.FromValues(
+      (1 - (yy + zz)) * sx,
+      (xy + wz) * sx,
+      (xz - wy) * sx,
+      0,
+      (xy - wz) * sy,
+      (1 - (xx + zz)) * sy,
+      (yz + wx) * sy,
+      0,
+      (xz + wy) * sz,
+      (yz - wx) * sz,
+      (1 - (xx + yy)) * sz,
+      0,
+      translation.x,
+      translation.y,
+      translation.z,
+      1
+    );
+  }
+  /** Babylon.js `Matrix.markAsUpdated()` — Lite has no per-matrix dirty flag; no-op for parity. */
+  markAsUpdated() {
+    return this;
+  }
+}
+let decomposeRotationScratch = null;
+function multiplyValues(a, b) {
+  const result = new Array(16);
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++) {
+      result[r * 4 + c] = a[r * 4] * b[c] + a[r * 4 + 1] * b[4 + c] + a[r * 4 + 2] * b[8 + c] + a[r * 4 + 3] * b[12 + c];
+    }
+  }
+  return result;
+}
+function determinant(m) {
+  const m00 = m[0], m01 = m[1], m02 = m[2], m03 = m[3];
+  const m10 = m[4], m11 = m[5], m12 = m[6], m13 = m[7];
+  const m20 = m[8], m21 = m[9], m22 = m[10], m23 = m[11];
+  const m30 = m[12], m31 = m[13], m32 = m[14], m33 = m[15];
+  const b00 = m00 * m11 - m01 * m10;
+  const b01 = m00 * m12 - m02 * m10;
+  const b02 = m00 * m13 - m03 * m10;
+  const b03 = m01 * m12 - m02 * m11;
+  const b04 = m01 * m13 - m03 * m11;
+  const b05 = m02 * m13 - m03 * m12;
+  const b06 = m20 * m31 - m21 * m30;
+  const b07 = m20 * m32 - m22 * m30;
+  const b08 = m20 * m33 - m23 * m30;
+  const b09 = m21 * m32 - m22 * m31;
+  const b10 = m21 * m33 - m23 * m31;
+  const b11 = m22 * m33 - m23 * m32;
+  return b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+}
+function invertValues(m) {
+  const m00 = m[0], m01 = m[1], m02 = m[2], m03 = m[3];
+  const m10 = m[4], m11 = m[5], m12 = m[6], m13 = m[7];
+  const m20 = m[8], m21 = m[9], m22 = m[10], m23 = m[11];
+  const m30 = m[12], m31 = m[13], m32 = m[14], m33 = m[15];
+  const b00 = m00 * m11 - m01 * m10;
+  const b01 = m00 * m12 - m02 * m10;
+  const b02 = m00 * m13 - m03 * m10;
+  const b03 = m01 * m12 - m02 * m11;
+  const b04 = m01 * m13 - m03 * m11;
+  const b05 = m02 * m13 - m03 * m12;
+  const b06 = m20 * m31 - m21 * m30;
+  const b07 = m20 * m32 - m22 * m30;
+  const b08 = m20 * m33 - m23 * m30;
+  const b09 = m21 * m32 - m22 * m31;
+  const b10 = m21 * m33 - m23 * m31;
+  const b11 = m22 * m33 - m23 * m32;
+  const det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (det === 0) {
+    return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  }
+  const invDet = 1 / det;
+  return [
+    (m11 * b11 - m12 * b10 + m13 * b09) * invDet,
+    (m02 * b10 - m01 * b11 - m03 * b09) * invDet,
+    (m31 * b05 - m32 * b04 + m33 * b03) * invDet,
+    (m22 * b04 - m21 * b05 - m23 * b03) * invDet,
+    (m12 * b08 - m10 * b11 - m13 * b07) * invDet,
+    (m00 * b11 - m02 * b08 + m03 * b07) * invDet,
+    (m32 * b02 - m30 * b05 - m33 * b01) * invDet,
+    (m20 * b05 - m22 * b02 + m23 * b01) * invDet,
+    (m10 * b10 - m11 * b08 + m13 * b06) * invDet,
+    (m01 * b08 - m00 * b10 - m03 * b06) * invDet,
+    (m30 * b04 - m31 * b02 + m33 * b00) * invDet,
+    (m21 * b02 - m20 * b04 - m23 * b00) * invDet,
+    (m11 * b07 - m10 * b09 - m12 * b06) * invDet,
+    (m00 * b09 - m01 * b07 + m02 * b06) * invDet,
+    (m31 * b01 - m30 * b03 - m32 * b00) * invDet,
+    (m20 * b03 - m21 * b01 + m22 * b00) * invDet
+  ];
+}
+function transformCoordinates(vector, transformation) {
+  const m = transformation.m;
+  const x = vector.x;
+  const y = vector.y;
+  const z = vector.z;
+  const rx = x * m[0] + y * m[4] + z * m[8] + m[12];
+  const ry = x * m[1] + y * m[5] + z * m[9] + m[13];
+  const rz = x * m[2] + y * m[6] + z * m[10] + m[14];
+  const rw = 1 / (x * m[3] + y * m[7] + z * m[11] + m[15]);
+  return new Vector3(rx * rw, ry * rw, rz * rw);
+}
+function transformNormal(vector, transformation) {
+  const m = transformation.m;
+  const x = vector.x;
+  const y = vector.y;
+  const z = vector.z;
+  return new Vector3(x * m[0] + y * m[4] + z * m[8], x * m[1] + y * m[5] + z * m[9], x * m[2] + y * m[6] + z * m[10]);
+}
+let _uniqueIdCounter = 0;
+class Node {
+  constructor(name, scene) {
+    __publicField(this, "name");
+    /** String id. Defaults to the name (Babylon.js parity). */
+    __publicField(this, "id");
+    /** Process-unique numeric id, assigned at construction. */
+    __publicField(this, "uniqueId");
+    /** Free-form user data slot (Babylon.js `Node.metadata`). */
+    __publicField(this, "metadata", null);
+    /** @internal Owning compat scene, when constructed against one. */
+    __publicField(this, "_scene");
+    /** @internal */
+    __publicField(this, "_parent", null);
+    /** @internal Direct children, maintained as `parent` / `setParent` links change. */
+    __publicField(this, "_children", []);
+    /** @internal */
+    __publicField(this, "_enabled", true);
+    /** @internal */
+    __publicField(this, "_disposed", false);
+    this.name = name;
+    this.id = name;
+    this.uniqueId = ++_uniqueIdCounter;
+    this._scene = scene;
+  }
+  /** The runtime class name (overridden by each subclass). */
+  getClassName() {
+    return "Node";
+  }
+  /** The scene this node belongs to, if any. */
+  getScene() {
+    return this._scene;
+  }
+  /** The engine backing this node's scene, if any. */
+  getEngine() {
+    var _a;
+    return (_a = this._scene) == null ? void 0 : _a.getEngine();
+  }
+  get parent() {
+    return this._parent;
+  }
+  set parent(value) {
+    this._linkParent(value);
+    this._applyParent(value);
+  }
+  /**
+   * @internal Update the parent link and both nodes' child registries. Shared by
+   * the `parent` setter and `TransformNode.setParent` (which differ only in how
+   * the Lite-side transform is reparented, handled by their own callers).
+   */
+  _linkParent(value) {
+    if (this._parent === value) {
+      return;
+    }
+    if (this._parent) {
+      const i = this._parent._children.indexOf(this);
+      if (i !== -1) {
+        this._parent._children.splice(i, 1);
+      }
+    }
+    this._parent = value;
+    if (value && !value._children.includes(this)) {
+      value._children.push(this);
+    }
+  }
+  /** @internal Whether this node is an `AbstractMesh` (overridden there) — drives `getChildMeshes`. */
+  _isMeshNode() {
+    return false;
+  }
+  /**
+   * Babylon.js `node.getDescendants(directDescendantsOnly?, predicate?)` — the
+   * nodes parented (directly or transitively) under this one, optionally filtered.
+   */
+  getDescendants(directDescendantsOnly = false, predicate) {
+    const results = [];
+    const collect = (node) => {
+      for (const child of node._children) {
+        if (!predicate || predicate(child)) {
+          results.push(child);
+        }
+        if (!directDescendantsOnly) {
+          collect(child);
+        }
+      }
+    };
+    collect(this);
+    return results;
+  }
+  /**
+   * Babylon.js `node.getChildren(predicate?, directDescendantsOnly?)` — descendant
+   * nodes (direct children by default), optionally filtered by a predicate.
+   */
+  getChildren(predicate, directDescendantsOnly = true) {
+    return this.getDescendants(directDescendantsOnly, predicate);
+  }
+  /**
+   * Babylon.js `node.getChildMeshes(directDescendantsOnly?, predicate?)` — the
+   * descendant nodes that are meshes (all descendants by default).
+   */
+  getChildMeshes(directDescendantsOnly = false, predicate) {
+    return this.getDescendants(directDescendantsOnly, (node) => node._isMeshNode() && (!predicate || predicate(node)));
+  }
+  isEnabled() {
+    return this._enabled;
+  }
+  setEnabled(value) {
+    this._enabled = value;
+  }
+  isDisposed() {
+    return this._disposed;
+  }
+  dispose() {
+    var _a;
+    this._disposed = true;
+    this._linkParent(null);
+    (_a = this._scene) == null ? void 0 : _a._unregisterNode(this);
+  }
+  /** @internal Hook for subclasses to wire the parent link into the Lite scene graph. */
+  _applyParent(_parent) {
+  }
+}
+function isCompatScene(value) {
+  return typeof value.getEngine === "function";
+}
+function liteNodeOf(node) {
+  if (!node) {
+    return null;
+  }
+  const n = node;
+  return n._node ?? n._lite ?? null;
+}
+const PLACEHOLDER_POSITIONS = new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+const PLACEHOLDER_NORMALS = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+const PLACEHOLDER_UVS = new Float32Array([0, 0, 0, 0, 0, 0]);
+const PLACEHOLDER_INDICES = new Uint32Array([0, 1, 2]);
+function toF32(data) {
+  return data instanceof Float32Array ? data : Float32Array.from(data);
+}
+function toU32(data) {
+  return data instanceof Uint32Array ? data : Uint32Array.from(data);
+}
+function computeFlatNormals(positions, indices) {
+  const normals = new Float32Array(positions.length);
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i] * 3;
+    const b = indices[i + 1] * 3;
+    const c = indices[i + 2] * 3;
+    const ux = positions[b] - positions[a];
+    const uy = positions[b + 1] - positions[a + 1];
+    const uz = positions[b + 2] - positions[a + 2];
+    const vx = positions[c] - positions[a];
+    const vy = positions[c + 1] - positions[a + 1];
+    const vz = positions[c + 2] - positions[a + 2];
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len;
+    ny /= len;
+    nz /= len;
+    for (const vi of [a, b, c]) {
+      normals[vi] = nx;
+      normals[vi + 1] = ny;
+      normals[vi + 2] = nz;
+    }
+  }
+  return normals;
+}
+class TransformNode extends Node {
+  constructor(name, scene, liteNode) {
+    super(name, scene);
+    /** @internal The Lite scene node that carries this transform. */
+    __publicField(this, "_node");
+    /** @internal Whether `rotationQuaternion` was explicitly set (Babylon.js returns null otherwise). */
+    __publicField(this, "_useQuat", false);
+    if (liteNode) {
+      this._node = liteNode;
+    } else {
+      this._node = createTransformNode(name);
+      if (scene) {
+        addToScene(scene._lite, this._node);
+      }
+    }
+  }
+  getClassName() {
+    return "TransformNode";
+  }
+  get position() {
+    return liteBackedVector3(this._node.position);
+  }
+  set position(value) {
+    this._node.position.set(value.x, value.y, value.z);
+  }
+  get rotation() {
+    return liteBackedVector3(this._node.rotation);
+  }
+  set rotation(value) {
+    this._node.rotation.set(value.x, value.y, value.z);
+  }
+  get scaling() {
+    return liteBackedVector3(this._node.scaling);
+  }
+  set scaling(value) {
+    this._node.scaling.set(value.x, value.y, value.z);
+  }
+  /**
+   * Babylon.js `rotationQuaternion`. Babylon Lite always drives a node's world
+   * matrix from a quaternion (its euler `rotation` is a proxy over the same
+   * quaternion), so this reads/writes that quaternion. Returns `null` until
+   * explicitly assigned, matching Babylon.js's euler-by-default convention.
+   */
+  get rotationQuaternion() {
+    if (!this._useQuat) {
+      return null;
+    }
+    const q = this._node.rotationQuaternion;
+    return new Quaternion(q.x, q.y, q.z, q.w);
+  }
+  set rotationQuaternion(value) {
+    if (value) {
+      this._useQuat = true;
+      this._node.rotationQuaternion.set(value.x, value.y, value.z, value.w);
+    } else {
+      this._useQuat = false;
+    }
+  }
+  /**
+   * Babylon.js `setParent(node)` — reparent while **preserving world position**
+   * (the child's local transform is recomputed). Distinct from the `parent`
+   * setter, which keeps the local transform and lets the world move.
+   */
+  setParent(parent) {
+    this._linkParent(parent);
+    setParent(this._node, liteNodeOf(parent));
+    return this;
+  }
+  _applyParent(parent) {
+    this._node.parent = liteNodeOf(parent);
+  }
+}
+class AbstractMesh extends TransformNode {
+  constructor(name, lite, scene) {
+    super(name, scene, lite);
+    /** @internal Underlying Babylon Lite mesh. */
+    __publicField(this, "_lite");
+    __publicField(this, "_material", null);
+    __publicField(this, "_visible", true);
+    /** @internal Retained tangent/color buffers so successive `setVerticesData` calls keep both. */
+    __publicField(this, "_lastTangents");
+    __publicField(this, "_lastColors");
+    this._lite = lite;
+    this._lite.name = name;
+    if (scene) {
+      this.material = scene.defaultMaterial;
+    }
+  }
+  getClassName() {
+    return "AbstractMesh";
+  }
+  /** @internal An `AbstractMesh` counts as a mesh node for `getChildMeshes`. */
+  _isMeshNode() {
+    return true;
+  }
+  get material() {
+    return this._material;
+  }
+  set material(value) {
+    this._material = value;
+    if (value == null ? void 0 : value._lite) {
+      this._lite.material = value._lite;
+    }
+  }
+  get isVisible() {
+    return this._visible;
+  }
+  set isVisible(value) {
+    this._visible = value;
+    setMeshVisible(this._lite, value);
+  }
+  get receiveShadows() {
+    return this._lite.receiveShadows;
+  }
+  set receiveShadows(value) {
+    this._lite.receiveShadows = value;
+  }
+  setEnabled(enabled) {
+    super.setEnabled(enabled);
+    this.isVisible = enabled;
+  }
+  /** Bounding info accessor — needs a public Lite bounds accessor that does not yet exist. */
+  getBoundingInfo() {
+    return unsupported("AbstractMesh.getBoundingInfo", "Babylon Lite does not expose a public mesh bounding-info accessor yet.");
+  }
+  /**
+   * Babylon.js `mesh.getVerticesData(kind)` — read back the CPU geometry buffer
+   * for `position` / `normal` / `uv`. Babylon Lite retains these on the mesh
+   * (for picking + device-loss recovery); other kinds are not stored.
+   */
+  getVerticesData(kind) {
+    switch (kind) {
+      case "position":
+        return this._lite._cpuPositions ?? null;
+      case "normal":
+        return this._lite._cpuNormals ?? null;
+      case "uv":
+        return this._lite._cpuUvs ?? null;
+      default:
+        return null;
+    }
+  }
+  /**
+   * Babylon.js `mesh.setVerticesData(kind, data)` — replace a vertex attribute.
+   * `position` / `normal` / `uv` / `color` / `tangent` re-upload the geometry in
+   * place; the last-set `color`/`tangent` buffers are retained so successive calls
+   * (e.g. set tangent then set color) keep both. Skinning/morph attributes
+   * (`matricesIndices`, etc.) are accepted but not applied (Babylon Lite drives
+   * skinning through its own loaded-skeleton path).
+   */
+  setVerticesData(kind, data, _updatable) {
+    var _a;
+    const engine = (_a = this._scene) == null ? void 0 : _a.getEngine()._lite;
+    const lite = this._lite;
+    if (!engine || !lite._cpuPositions || !lite._cpuIndices) {
+      return;
+    }
+    if (kind !== "position" && kind !== "normal" && kind !== "uv" && kind !== "color" && kind !== "tangent") {
+      return;
+    }
+    const f32 = data instanceof Float32Array ? data : Float32Array.from(data);
+    if (kind === "color") {
+      this._lastColors = f32;
+    }
+    if (kind === "tangent") {
+      this._lastTangents = f32;
+    }
+    const positions = kind === "position" ? f32 : lite._cpuPositions;
+    const normals = kind === "normal" ? f32 : lite._cpuNormals ?? computeFlatNormals(positions, lite._cpuIndices);
+    const uvs = kind === "uv" ? f32 : lite._cpuUvs;
+    resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, void 0, this._lastTangents, this._lastColors);
+  }
+  /** Babylon.js `mesh.getTotalVertices()` — vertex count from the position buffer. */
+  getTotalVertices() {
+    const positions = this._lite._cpuPositions;
+    return positions ? positions.length / 3 : 0;
+  }
+  /**
+   * Babylon.js `mesh.refreshBoundingInfo()` — Babylon Lite recomputes a mesh's
+   * bounds from its CPU geometry on demand (and on geometry upload), so this is a
+   * no-op that returns the mesh for chaining. The deformed-pick options
+   * (`applySkeleton` / `applyMorph`) are accepted for parity but not used.
+   */
+  refreshBoundingInfo(_options) {
+    return this;
+  }
+  /**
+   * Babylon.js `mesh.bakeCurrentTransformIntoVertices()` — fold the node's local
+   * transform (position / rotation / scaling) into the CPU geometry and reset the
+   * transform to identity. Babylon Lite has no built-in mesh-transform bake, so we
+   * transform the retained CPU positions (full matrix) and normals (rotation only,
+   * renormalized), re-upload via `resizeMeshGeometry`, then clear the transform.
+   */
+  bakeCurrentTransformIntoVertices() {
+    var _a;
+    const engine = (_a = this._scene) == null ? void 0 : _a.getEngine()._lite;
+    const lite = this._lite;
+    const positions = lite._cpuPositions;
+    const indices = lite._cpuIndices;
+    if (!engine || !positions || !indices) {
+      return this;
+    }
+    const node = this._node;
+    const s = node.scaling;
+    const q = node.rotationQuaternion;
+    const t = node.position;
+    const matrix = Matrix.Compose(liteBackedVector3(s), { x: q.x, y: q.y, z: q.z, w: q.w }, liteBackedVector3(t));
+    const m = matrix.m;
+    const newPositions = new Float32Array(positions.length);
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i], y = positions[i + 1], z = positions[i + 2];
+      newPositions[i] = x * m[0] + y * m[4] + z * m[8] + m[12];
+      newPositions[i + 1] = x * m[1] + y * m[5] + z * m[9] + m[13];
+      newPositions[i + 2] = x * m[2] + y * m[6] + z * m[10] + m[14];
+    }
+    let newNormals;
+    const normals = lite._cpuNormals;
+    if (normals) {
+      newNormals = new Float32Array(normals.length);
+      for (let i = 0; i < normals.length; i += 3) {
+        const x = normals[i], y = normals[i + 1], z = normals[i + 2];
+        let nx = x * m[0] + y * m[4] + z * m[8];
+        let ny = x * m[1] + y * m[5] + z * m[9];
+        let nz = x * m[2] + y * m[6] + z * m[10];
+        const len = Math.hypot(nx, ny, nz) || 1;
+        nx /= len;
+        ny /= len;
+        nz /= len;
+        newNormals[i] = nx;
+        newNormals[i + 1] = ny;
+        newNormals[i + 2] = nz;
+      }
+    } else {
+      newNormals = computeFlatNormals(newPositions, indices);
+    }
+    resizeMeshGeometry(engine, this._lite, newPositions, newNormals, indices, lite._cpuUvs);
+    node.position.set(0, 0, 0);
+    node.rotation.set(0, 0, 0);
+    node.scaling.set(1, 1, 1);
+    return this;
+  }
+  dispose() {
+    if (this._scene) {
+      removeFromScene(this._scene._lite, this._lite);
+    }
+    super.dispose();
+  }
+}
+class Mesh extends AbstractMesh {
+  constructor(name, sceneOrLite, scene) {
+    var __super = (...args) => {
+      super(...args);
+      __publicField(this, "_morphTargetManager", null);
+      return this;
+    };
+    if (sceneOrLite !== void 0 && isCompatScene(sceneOrLite)) {
+      const realScene = sceneOrLite;
+      const lite = createMeshFromData(realScene.getEngine()._lite, name, PLACEHOLDER_POSITIONS, PLACEHOLDER_NORMALS, PLACEHOLDER_INDICES, PLACEHOLDER_UVS);
+      __super(name, lite, realScene);
+      addPrimitive(this, realScene);
+    } else {
+      __super(name, sceneOrLite, scene);
+    }
+  }
+  getClassName() {
+    return "Mesh";
+  }
+  /**
+   * Babylon.js `mesh.morphTargetManager`. Babylon Lite builds morph GPU data via
+   * `createMorphTargets` and stores it on the Lite mesh; the compat manager is
+   * registered with the scene so the engine builds it at start (once the base
+   * CPU geometry exists) and assigns it onto the Lite mesh before registration.
+   */
+  get morphTargetManager() {
+    return this._morphTargetManager;
+  }
+  set morphTargetManager(value) {
+    this._morphTargetManager = value;
+    if (value && this._scene) {
+      this._scene._registerMorphTargetManager(this, value);
+    }
+  }
+  // ── Legacy pre-MeshBuilder static creators (Babylon.js `Mesh.CreateX`) ──
+  /** Legacy `Mesh.CreateSphere(name, segments, diameter, scene)`. */
+  static CreateSphere(name, segments, diameter, scene) {
+    return MeshBuilder.CreateSphere(name, { segments, diameter }, scene);
+  }
+  /** Legacy `Mesh.CreateBox(name, size, scene)`. */
+  static CreateBox(name, size, scene) {
+    return MeshBuilder.CreateBox(name, { size }, scene);
+  }
+  /** Legacy `Mesh.CreateGround(name, width, height, subdivisions, scene)`. */
+  static CreateGround(name, width, height, subdivisions, scene) {
+    return MeshBuilder.CreateGround(name, { width, height, subdivisions }, scene);
+  }
+  /** Legacy `Mesh.CreatePlane(name, size, scene)`. */
+  static CreatePlane(name, size, scene) {
+    return MeshBuilder.CreatePlane(name, { size }, scene);
+  }
+  /** Legacy `Mesh.CreateCylinder(name, height, diameterTop, diameterBottom, tessellation, _subdivisions, scene)`. */
+  static CreateCylinder(name, height, diameterTop, diameterBottom, tessellation, _subdivisions, scene) {
+    const diameter = Math.max(diameterTop, diameterBottom);
+    return MeshBuilder.CreateCylinder(name, { height, diameter, tessellation }, scene);
+  }
+  /** Legacy `Mesh.CreateTorus(name, diameter, thickness, tessellation, scene)`. */
+  static CreateTorus(name, diameter, thickness, tessellation, scene) {
+    return MeshBuilder.CreateTorus(name, { diameter, thickness, tessellation }, scene);
+  }
+  /** Hardware-instanced copy — unsupported. Use native thin instances instead. */
+  createInstance() {
+    return unsupported("Mesh.createInstance", "Babylon Lite has no hardware-instance object. Use the native thin-instance API (`setThinInstances`).");
+  }
+  /**
+   * Babylon.js `mesh.thinInstanceSetBuffer(kind, buffer, stride)`. Maps the
+   * `"matrix"` and `"color"` instance buffers onto Babylon Lite's thin-instance
+   * API. Applied immediately to the Lite mesh (before the scene builds).
+   */
+  thinInstanceSetBuffer(kind, buffer, _stride = 16) {
+    if (!buffer) {
+      return;
+    }
+    if (kind === "matrix") {
+      setThinInstances(this._lite, buffer, buffer.length / 16);
+    } else if (kind === "color") {
+      setThinInstanceColors(this._lite, buffer);
+    }
+  }
+  /** Deep mesh clone — not yet wrapped. */
+  clone() {
+    return unsupported("Mesh.clone", "Mesh cloning is not yet wrapped in the compat layer.");
+  }
+  /** Level-of-detail — unsupported (no LOD system in Babylon Lite). */
+  addLODLevel() {
+    return unsupported("Mesh.addLODLevel", "Level-of-detail is not implemented in Babylon Lite.");
+  }
+}
+class GroundMesh extends Mesh {
+  getClassName() {
+    return "GroundMesh";
+  }
+  /** CPU height-at-coordinates query — needs a CPU heightmap accessor not present in Babylon Lite. */
+  getHeightAtCoordinates() {
+    return unsupported("GroundMesh.getHeightAtCoordinates", "CPU height queries are not implemented in Babylon Lite.");
+  }
+}
+class InstancedMesh {
+  constructor() {
+    unsupported("InstancedMesh", "Babylon Lite has no hardware-instance object. Use the native thin-instance API (`setThinInstances`).");
+  }
+}
+const VertexBuffer = {
+  PositionKind: "position",
+  NormalKind: "normal",
+  TangentKind: "tangent",
+  UVKind: "uv",
+  UV2Kind: "uv2",
+  ColorKind: "color",
+  MatricesIndicesKind: "matricesIndices",
+  MatricesWeightsKind: "matricesWeights"
+};
+class VertexData {
+  constructor() {
+    __publicField(this, "positions", null);
+    __publicField(this, "normals", null);
+    __publicField(this, "uvs", null);
+    __publicField(this, "colors", null);
+    __publicField(this, "indices", null);
+  }
+  /**
+   * Babylon.js `VertexData.applyToMesh(mesh)` — upload this CPU geometry onto a
+   * mesh (typically one created via `new Mesh(name, scene)`). Replaces the Lite
+   * mesh's geometry in place via `resizeMeshGeometry`. Normals are computed flat
+   * if omitted (Babylon Lite requires a normals buffer).
+   */
+  applyToMesh(mesh) {
+    if (!this.positions || !this.indices) {
+      return;
+    }
+    const scene = mesh.getScene();
+    if (!scene) {
+      return;
+    }
+    const engine = scene.getEngine()._lite;
+    const positions = toF32(this.positions);
+    const indices = toU32(this.indices);
+    const normals = this.normals ? toF32(this.normals) : computeFlatNormals(positions, indices);
+    const uvs = this.uvs ? toF32(this.uvs) : void 0;
+    const colors = this.colors ? toF32(this.colors) : void 0;
+    resizeMeshGeometry(engine, mesh._lite, positions, normals, indices, uvs, void 0, void 0, colors);
+  }
+  /** Merge another `VertexData` into this one (concatenating attributes + reindexing). */
+  merge(other) {
+    const baseVertexCount = this.positions ? this.positions.length / 3 : 0;
+    this.positions = concat(this.positions, other.positions);
+    this.normals = concat(this.normals, other.normals);
+    this.uvs = concat(this.uvs, other.uvs);
+    this.colors = concat(this.colors, other.colors);
+    if (other.indices) {
+      const shifted = Array.from(other.indices, (i) => i + baseVertexCount);
+      this.indices = this.indices ? [...Array.from(this.indices), ...shifted] : shifted;
+    }
+    return this;
+  }
+}
+function concat(a, b) {
+  if (!a && !b) {
+    return null;
+  }
+  return [...a ? Array.from(a) : [], ...b ? Array.from(b) : []];
+}
+function engineOf(scene) {
+  return scene.getEngine()._lite;
+}
+function addPrimitive(mesh, scene) {
+  scene._deferAdd(() => {
+    const mat = mesh.material;
+    mat == null ? void 0 : mat._ensureRenderable(engineOf(scene));
+    if (mat == null ? void 0 : mat._lite) {
+      mesh._lite.material = mat._lite;
+    }
+    addToScene(scene._lite, mesh._lite);
+  });
+  return mesh;
+}
+const MeshBuilder = {
+  CreateBox(name, options, scene) {
+    const lite = createBox(engineOf(scene), options.size ?? options.width ?? 1);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  CreateSphere(name, options, scene) {
+    const lite = createSphere(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  CreateGround(name, options, scene) {
+    const lite = createGround(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  /**
+   * Babylon.js `MeshBuilder.CreateGroundFromHeightMap(name, url, options, scene)`.
+   * Babylon.js returns the mesh synchronously and fills its geometry once the
+   * heightmap image loads; we mirror that by returning a placeholder `GroundMesh`
+   * immediately and swapping in the real geometry (via `resizeMeshGeometry`) when
+   * the async Lite `createGroundFromHeightMap` resolves. The load is tracked so
+   * the engine awaits it before the scene is registered.
+   */
+  CreateGroundFromHeightMap(name, url, options, scene) {
+    const engine = engineOf(scene);
+    const mesh = new GroundMesh(name, scene);
+    scene._trackTextureLoad(
+      createGroundFromHeightMap(engine, url, options).then((lite) => {
+        resizeMeshGeometry(engine, mesh._lite, lite._cpuPositions, lite._cpuNormals, lite._cpuIndices, lite._cpuUvs);
+        const baseUvs = lite._cpuUvs;
+        if (baseUvs) {
+          scene._registerGroundUvBake(() => {
+            const groundMat = mesh.material;
+            const albedo = (groundMat == null ? void 0 : groundMat.albedoTexture) ?? null;
+            const uScale = (albedo == null ? void 0 : albedo.uScale) ?? 1;
+            const vScale = (albedo == null ? void 0 : albedo.vScale) ?? 1;
+            if (uScale === 1 && vScale === 1) {
+              return;
+            }
+            const scaled = new Float32Array(baseUvs.length);
+            for (let i = 0; i < baseUvs.length; i += 2) {
+              scaled[i] = baseUvs[i] * uScale;
+              scaled[i + 1] = baseUvs[i + 1] * vScale;
+            }
+            updateMeshUvs(engine, mesh._lite, scaled);
+            mesh._lite._cpuUvs = scaled;
+          });
+        }
+      })
+    );
+    return mesh;
+  },
+  CreatePlane(name, options, scene) {
+    const lite = createPlane(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  CreateCylinder(name, options, scene) {
+    const lite = createCylinder(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  CreateTorus(name, options, scene) {
+    const lite = createTorus(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  CreateTorusKnot(name, options, scene) {
+    const lite = createTorusKnot(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  CreateDisc(name, options, scene) {
+    const lite = createDisc(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  CreatePolyhedron(name, options, scene) {
+    const lite = createPolyhedron(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  CreateRibbon(name, options, scene) {
+    const lite = createRibbon(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  CreateTube(name, options, scene) {
+    const lite = createTube(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  ExtrudeShape(name, options, scene) {
+    const lite = createExtrudeShape(engineOf(scene), options);
+    return addPrimitive(new Mesh(name, lite, scene), scene);
+  },
+  // ── Known but unsupported (not present in Babylon Lite) ────────────────
+  CreateLines() {
+    return unsupported("MeshBuilder.CreateLines", "Line meshes are not implemented in Babylon Lite.");
+  },
+  CreateLineSystem() {
+    return unsupported("MeshBuilder.CreateLineSystem", "Line meshes are not implemented in Babylon Lite.");
+  },
+  CreateDashedLines() {
+    return unsupported("MeshBuilder.CreateDashedLines", "Dashed line meshes are not implemented in Babylon Lite.");
+  },
+  CreateDecal() {
+    return unsupported("MeshBuilder.CreateDecal", "Decal projection is not implemented in Babylon Lite.");
+  },
+  CreateText() {
+    return unsupported("MeshBuilder.CreateText", "Extruded font meshes are not implemented in Babylon Lite. For 2D/SDF text use the native `createTextRenderable` API.");
+  }
+};
+function CreateBox(name, options, scene) {
+  return MeshBuilder.CreateBox(name, options, scene);
+}
+function CreateSphere(name, options, scene) {
+  return MeshBuilder.CreateSphere(name, options, scene);
+}
+function CreateGround(name, options, scene) {
+  return MeshBuilder.CreateGround(name, options, scene);
+}
+function CreatePlane(name, options, scene) {
+  return MeshBuilder.CreatePlane(name, options, scene);
+}
+function CreateCylinder(name, options, scene) {
+  return MeshBuilder.CreateCylinder(name, options, scene);
+}
+function CreateTorus(name, options, scene) {
+  return MeshBuilder.CreateTorus(name, options, scene);
+}
+function CreateDisc(name, options, scene) {
+  return MeshBuilder.CreateDisc(name, options, scene);
+}
+export {
+  AbstractMesh as A,
+  CreateBox as C,
+  GroundMesh as G,
+  InstancedMesh as I,
+  LiteCompatError as L,
+  Matrix as M,
+  Node as N,
+  Quaternion as Q,
+  TransformNode as T,
+  Vector3 as V,
+  Mesh as a,
+  CreateCylinder as b,
+  CreateDisc as c,
+  CreateGround as d,
+  CreatePlane as e,
+  CreateSphere as f,
+  CreateTorus as g,
+  MeshBuilder as h,
+  Vector2 as i,
+  Vector4 as j,
+  VertexBuffer as k,
+  liteBackedVector3 as l,
+  VertexData as m,
+  transformNormal as n,
+  transformCoordinates as t,
+  unsupported as u
+};
+//# sourceMappingURL=meshes-a59_KvbH.js.map

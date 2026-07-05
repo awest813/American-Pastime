@@ -1,0 +1,29 @@
+import { type FunctionComponent } from "react";
+import { type StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
+import { type ISelectionService } from "../../../services/selectionService";
+export declare const StandardMaterialGeneralProperties: FunctionComponent<{
+    material: StandardMaterial;
+}>;
+export declare const StandardMaterialTransparencyProperties: FunctionComponent<{
+    material: StandardMaterial;
+}>;
+export declare const StandardMaterialTexturesProperties: FunctionComponent<{
+    material: StandardMaterial;
+    selectionService: ISelectionService;
+}>;
+/**
+ * Displays the levels properties of a standard material.
+ * @param props - The required properties
+ * @returns A JSX element representing the levels properties.
+ */
+export declare const StandardMaterialLevelsProperties: FunctionComponent<{
+    standardMaterial: StandardMaterial;
+}>;
+/**
+ * Displays the lighting and color properties of a standard material.
+ * @param props - The required properties
+ * @returns A JSX element representing the lighting and color properties.
+ */
+export declare const StandardMaterialLightingAndColorProperties: FunctionComponent<{
+    standardMaterial: StandardMaterial;
+}>;

@@ -1,0 +1,9 @@
+import { getMaterialSource } from './material-view.js';
+
+function markMaterialUboDirty(materialOrView) {
+  const source = getMaterialSource(materialOrView);
+  source._uboVersion++;
+}
+
+export { markMaterialUboDirty };
+//# sourceMappingURL=material-dirty.js.map

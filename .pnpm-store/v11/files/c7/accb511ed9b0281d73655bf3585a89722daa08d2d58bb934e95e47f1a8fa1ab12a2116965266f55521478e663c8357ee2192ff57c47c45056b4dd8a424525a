@@ -1,0 +1,453 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+const _interop_require_wildcard = require("@swc/helpers/_/_interop_require_wildcard");
+const _react = /*#__PURE__*/ _interop_require_wildcard._(require("react"));
+const _experimentalctreact = require("@playwright/experimental-ct-react");
+const _useResizeHandleExamplecomponentbrowserspec = require("./useResizeHandleExample.component-browser-spec");
+/* eslint-disable no-restricted-globals */ _experimentalctreact.test.use({
+    viewport: {
+        width: 500,
+        height: 500
+    }
+});
+function createSpyFn() {
+    const calls = [];
+    const spy = (...args)=>{
+        calls.push({
+            time: performance.now(),
+            args
+        });
+    };
+    spy.calls = calls;
+    spy.clear = ()=>{
+        calls.length = 0;
+    };
+    return spy;
+}
+async function mountTest(mount, props = {}) {
+    const component = await mount(/*#__PURE__*/ _react.createElement(_useResizeHandleExamplecomponentbrowserspec.TestArea, props));
+    const wrapperEl = component.getByTestId('wrapper');
+    const resizableEl = component.getByTestId('resizable');
+    const staticEl = component.getByTestId('static');
+    const dragEl = component.getByRole('slider');
+    const valueEl = component.getByTestId('value');
+    const resetEl = component.getByTestId('reset');
+    const spacerBefore = component.getByTestId('spacer-before');
+    const spacerAfter = component.getByTestId('spacer-after');
+    return {
+        component,
+        wrapperEl,
+        resizableEl,
+        staticEl,
+        dragEl,
+        valueEl,
+        resetEl,
+        spacerBefore,
+        spacerAfter,
+        variableTarget: props.variableTarget
+    };
+}
+async function validateComponent(mountResult, { value, domValue = value, eventType, skipAriaCheck = false }) {
+    const variableTarget = mountResult.variableTarget === 'element' ? mountResult.resizableEl : mountResult.wrapperEl;
+    await (0, _experimentalctreact.expect)(mountResult.valueEl).toContainText(`width (from callback): ${value};`);
+    await (0, _experimentalctreact.expect)(mountResult.valueEl).toContainText(`width (actual DOM): ${domValue};`);
+    await (0, _experimentalctreact.expect)(variableTarget).toHaveCSS('--width', value);
+    if (!skipAriaCheck) {
+        await (0, _experimentalctreact.expect)(mountResult.dragEl).toHaveAttribute('aria-valuetext', value);
+    }
+    if (eventType) {
+        await (0, _experimentalctreact.expect)(mountResult.valueEl).toContainText(`eventType: ${eventType}`);
+    }
+}
+_experimentalctreact.test.describe('useResizeHandle', ()=>{
+    (0, _experimentalctreact.test)('mouse can be used for dragging', async ({ mount })=>{
+        const result = await mountTest(mount);
+        await result.dragEl.dragTo(result.staticEl);
+        await validateComponent(result, {
+            value: '235px',
+            eventType: 'mouse'
+        });
+    });
+    (0, _experimentalctreact.test)('keyboard can be used for resizing', async ({ mount, page })=>{
+        const result = await mountTest(mount);
+        await result.dragEl.focus();
+        await page.keyboard.press('ArrowRight');
+        await validateComponent(result, {
+            value: '70px',
+            eventType: 'keyboard'
+        });
+        await page.keyboard.press('ArrowLeft');
+        await validateComponent(result, {
+            value: '50px',
+            eventType: 'keyboard'
+        });
+    });
+    (0, _experimentalctreact.test)('value could be changed imperatively', async ({ mount })=>{
+        const result = await mountTest(mount);
+        await result.dragEl.dragTo(result.staticEl);
+        await validateComponent(result, {
+            value: '235px',
+            eventType: 'mouse'
+        });
+        await result.resetEl.click();
+        await validateComponent(result, {
+            value: '50px',
+            eventType: 'setValue'
+        });
+    });
+    _experimentalctreact.test.describe('CSS clamp', ()=>{
+        (0, _experimentalctreact.test)('cannot exceed min with mouse', async ({ mount })=>{
+            const result = await mountTest(mount, {
+                useCSSClamp: true
+            });
+            await result.dragEl.dragTo(result.spacerBefore);
+            await validateComponent(result, {
+                value: '40px',
+                eventType: 'mouse'
+            });
+        });
+        (0, _experimentalctreact.test)('cannot exceed max with mouse', async ({ mount })=>{
+            const result = await mountTest(mount, {
+                useCSSClamp: true
+            });
+            await result.dragEl.dragTo(result.spacerAfter);
+            await validateComponent(result, {
+                value: '400px',
+                eventType: 'mouse'
+            });
+        });
+        (0, _experimentalctreact.test)('cannot exceed with keyboard', async ({ mount, page })=>{
+            const result = await mountTest(mount, {
+                useCSSClamp: true
+            });
+            await result.dragEl.focus();
+            for(let i = 0; i < 30; i++){
+                await page.keyboard.press('ArrowRight');
+            }
+            await validateComponent(result, {
+                value: '400px',
+                eventType: 'keyboard'
+            });
+            // ---
+            await result.resetEl.click();
+            await result.dragEl.focus();
+            for(let i = 0; i < 30; i++){
+                await page.keyboard.press('ArrowLeft');
+            }
+            await validateComponent(result, {
+                value: '40px',
+                eventType: 'keyboard'
+            });
+        });
+    });
+    _experimentalctreact.test.describe("min/max value can't be exceeded", ()=>{
+        (0, _experimentalctreact.test)('with mouse (min)', async ({ mount })=>{
+            const result = await mountTest(mount, {
+                minValue: 30
+            });
+            await result.dragEl.dragTo(result.spacerBefore);
+            await validateComponent(result, {
+                value: '30px',
+                eventType: 'mouse'
+            });
+        });
+        (0, _experimentalctreact.test)('with mouse (max)', async ({ mount })=>{
+            const result = await mountTest(mount, {
+                maxValue: 300
+            });
+            await result.dragEl.dragTo(result.spacerAfter);
+            await validateComponent(result, {
+                value: '300px',
+                eventType: 'mouse'
+            });
+        });
+        (0, _experimentalctreact.test)('with keyboard', async ({ mount, page })=>{
+            const result = await mountTest(mount, {
+                minValue: 30,
+                maxValue: 300
+            });
+            await result.dragEl.focus();
+            for(let i = 0; i < 30; i++){
+                await page.keyboard.press('ArrowRight');
+            }
+            await validateComponent(result, {
+                value: '300px',
+                eventType: 'keyboard'
+            });
+            // ---
+            await result.resetEl.click();
+            await result.dragEl.focus();
+            for(let i = 0; i < 30; i++){
+                await page.keyboard.press('ArrowLeft');
+            }
+            await validateComponent(result, {
+                value: '30px',
+                eventType: 'keyboard'
+            });
+        });
+    });
+    _experimentalctreact.test.describe('relative', ()=>{
+        (0, _experimentalctreact.test)('mouse can be used for dragging', async ({ mount })=>{
+            const result = await mountTest(mount, {
+                relative: true
+            });
+            await result.dragEl.dragTo(result.staticEl);
+            await validateComponent(result, {
+                value: '185px',
+                domValue: '235px',
+                skipAriaCheck: true
+            });
+        });
+        (0, _experimentalctreact.test)('does not have dead zones after moving off the area', async ({ mount, page })=>{
+            const result = await mountTest(mount, {
+                relative: true
+            });
+            await result.dragEl.hover();
+            await page.mouse.down();
+            await page.mouse.move(30, 0);
+            await validateComponent(result, {
+                value: '-35px',
+                domValue: '40px',
+                skipAriaCheck: true
+            });
+            // ---
+            await page.mouse.move(100, 0);
+            await page.mouse.up();
+            await validateComponent(result, {
+                value: '35px',
+                domValue: '85px',
+                skipAriaCheck: true
+            });
+        });
+        (0, _experimentalctreact.test)('value could be changed imperatively', async ({ mount })=>{
+            const result = await mountTest(mount, {
+                relative: true
+            });
+            await result.dragEl.dragTo(result.staticEl);
+            await validateComponent(result, {
+                value: '185px',
+                domValue: '235px',
+                skipAriaCheck: true
+            });
+            await result.resetEl.click();
+            await validateComponent(result, {
+                value: '0px',
+                domValue: '50px',
+                eventType: 'setValue',
+                skipAriaCheck: true
+            });
+        });
+    });
+    _experimentalctreact.test.describe('variableTarget', ()=>{
+        (0, _experimentalctreact.test)('a CSS variable could be assigned to an element', async ({ mount })=>{
+            const result = await mountTest(mount, {
+                variableTarget: 'element'
+            });
+            await result.dragEl.dragTo(result.staticEl);
+            await validateComponent(result, {
+                value: '235px',
+                eventType: 'mouse'
+            });
+        });
+    });
+    _experimentalctreact.test.describe('unit (viewport)', ()=>{
+        (0, _experimentalctreact.test)('mouse can be used for dragging', async ({ mount })=>{
+            const result = await mountTest(mount, {
+                unit: 'viewport'
+            });
+            await result.dragEl.dragTo(result.staticEl);
+            await validateComponent(result, {
+                value: '47vw',
+                domValue: '235px',
+                eventType: 'mouse'
+            });
+        });
+        (0, _experimentalctreact.test)('keyboard can be used for resizing', async ({ mount, page })=>{
+            const result = await mountTest(mount, {
+                unit: 'viewport'
+            });
+            await result.dragEl.focus();
+            await page.keyboard.press('ArrowRight');
+            await validateComponent(result, {
+                value: '14vw',
+                domValue: '70px',
+                eventType: 'keyboard'
+            });
+        });
+    });
+    _experimentalctreact.test.describe('events', ()=>{
+        (0, _experimentalctreact.test)('events are called in order', async ({ mount, page })=>{
+            const onDragStart = createSpyFn();
+            const onDragEnd = createSpyFn();
+            const onChange = createSpyFn();
+            const result = await mountTest(mount, {
+                onDragStart,
+                onDragEnd,
+                onChange
+            });
+            // Drag start
+            // --------------------
+            await result.dragEl.hover();
+            await page.mouse.down();
+            await page.mouse.move(100, 0);
+            await validateComponent(result, {
+                value: '85px',
+                eventType: 'mouse'
+            });
+            (0, _experimentalctreact.expect)(onDragStart.calls).toHaveLength(1);
+            (0, _experimentalctreact.expect)(onDragEnd.calls).toHaveLength(0);
+            (0, _experimentalctreact.expect)(onChange.call).toHaveLength(1);
+            (0, _experimentalctreact.expect)(onDragStart.calls[0].time).toBeLessThan(onChange.calls[0].time);
+            // Drag end
+            // --------------------
+            await page.mouse.move(200, 0);
+            await page.mouse.up();
+            await validateComponent(result, {
+                value: '185px',
+                eventType: 'mouse'
+            });
+            (0, _experimentalctreact.expect)(onDragStart.calls).toHaveLength(1);
+            (0, _experimentalctreact.expect)(onDragEnd.calls).toHaveLength(1);
+            (0, _experimentalctreact.expect)(onChange.calls).toHaveLength(2);
+            (0, _experimentalctreact.expect)(onChange.calls[1].time).toBeLessThan(onDragEnd.calls[0].time);
+        });
+        (0, _experimentalctreact.test)("exceeding `clamp()` don't fire 'onChange' events", async ({ mount })=>{
+            const onChange = createSpyFn();
+            const result = await mountTest(mount, {
+                onChange,
+                useCSSClamp: true
+            });
+            // Drag to the left
+            // ---
+            const spacerBefore = await result.resizableEl.boundingBox();
+            await result.dragEl.dragTo(result.resizableEl, {
+                targetPosition: {
+                    x: spacerBefore.x + 10,
+                    y: spacerBefore.y
+                }
+            });
+            await validateComponent(result, {
+                value: '40px',
+                eventType: 'mouse'
+            });
+            (0, _experimentalctreact.expect)(onChange.calls.length).toBeGreaterThan(0);
+            // ---
+            onChange.clear();
+            await result.dragEl.dragTo(result.spacerBefore);
+            await validateComponent(result, {
+                value: '40px',
+                eventType: 'mouse'
+            });
+            (0, _experimentalctreact.expect)(onChange.calls).toHaveLength(0);
+            // Drag to the right
+            // ---
+            const staticRect = await result.staticEl.boundingBox();
+            await result.dragEl.dragTo(result.staticEl, {
+                targetPosition: {
+                    x: staticRect.x + 400,
+                    y: staticRect.y
+                }
+            });
+            await validateComponent(result, {
+                value: '400px',
+                eventType: 'mouse'
+            });
+            (0, _experimentalctreact.expect)(onChange.calls.length).toBeGreaterThan(0);
+            // ---
+            onChange.clear();
+            await result.dragEl.dragTo(result.spacerAfter);
+            await validateComponent(result, {
+                value: '400px',
+                eventType: 'mouse'
+            });
+            (0, _experimentalctreact.expect)(onChange.calls).toHaveLength(0);
+        });
+        _experimentalctreact.test.describe('onChangeRejected', ()=>{
+            _experimentalctreact.test.describe('CSS clamp', ()=>{
+                (0, _experimentalctreact.test)('is called with mouse', async ({ mount })=>{
+                    const onChangeRejected = createSpyFn();
+                    const result = await mountTest(mount, {
+                        onChangeRejected,
+                        useCSSClamp: true
+                    });
+                    await result.dragEl.dragTo(result.spacerBefore);
+                    (0, _experimentalctreact.expect)(onChangeRejected.calls).toHaveLength(1);
+                    (0, _experimentalctreact.expect)(onChangeRejected.calls[0].args).toEqual([
+                        _experimentalctreact.expect.any(Object),
+                        _experimentalctreact.expect.objectContaining({
+                            type: 'mouse',
+                            rejectedValue: 0,
+                            value: 40,
+                            unit: 'px'
+                        })
+                    ]);
+                    // ---
+                    onChangeRejected.clear();
+                    await result.dragEl.dragTo(result.spacerAfter);
+                    (0, _experimentalctreact.expect)(onChangeRejected.calls).toHaveLength(1);
+                    (0, _experimentalctreact.expect)(onChangeRejected.calls[0].args).toEqual([
+                        _experimentalctreact.expect.any(Object),
+                        _experimentalctreact.expect.objectContaining({
+                            type: 'mouse',
+                            rejectedValue: 480,
+                            value: 400,
+                            unit: 'px'
+                        })
+                    ]);
+                });
+            });
+            (0, _experimentalctreact.test)('is called with keyboard', async ({ mount, page })=>{
+                const onChangeRejected = createSpyFn();
+                const result = await mountTest(mount, {
+                    onChangeRejected,
+                    useCSSClamp: true
+                });
+                await result.dragEl.focus();
+                for(let i = 0; i < 3; i++){
+                    await page.keyboard.press('ArrowLeft');
+                }
+                // "rejectedValue" will be always the same i.e. 20px due "defaultStep"
+                (0, _experimentalctreact.expect)(onChangeRejected.calls).toHaveLength(2);
+                (0, _experimentalctreact.expect)(onChangeRejected.calls[0].args).toEqual([
+                    _experimentalctreact.expect.any(Object),
+                    _experimentalctreact.expect.objectContaining({
+                        type: 'keyboard',
+                        rejectedValue: 20,
+                        value: 40,
+                        unit: 'px'
+                    })
+                ]);
+                (0, _experimentalctreact.expect)(onChangeRejected.calls[1].args).toEqual([
+                    _experimentalctreact.expect.any(Object),
+                    _experimentalctreact.expect.objectContaining({
+                        type: 'keyboard',
+                        rejectedValue: 20,
+                        value: 40,
+                        unit: 'px'
+                    })
+                ]);
+                // ---
+                onChangeRejected.clear();
+                await result.resetEl.click();
+                await result.dragEl.focus();
+                for(let i = 0; i < 20; i++){
+                    await page.keyboard.press('ArrowRight');
+                }
+                (0, _experimentalctreact.expect)(onChangeRejected.calls).toHaveLength(2);
+                (0, _experimentalctreact.expect)(onChangeRejected.calls[0].args).toEqual([
+                    _experimentalctreact.expect.any(Object),
+                    _experimentalctreact.expect.objectContaining({
+                        type: 'keyboard',
+                        rejectedValue: 420,
+                        value: 400,
+                        unit: 'px'
+                    })
+                ]);
+            });
+        });
+    });
+});
+
+//# sourceMappingURL=useResizeHandle.component-browser-spec.js.map

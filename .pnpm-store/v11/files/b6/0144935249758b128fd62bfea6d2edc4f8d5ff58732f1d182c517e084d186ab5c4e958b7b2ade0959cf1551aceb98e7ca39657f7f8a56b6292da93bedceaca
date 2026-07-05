@@ -1,0 +1,51 @@
+const feature = {
+  id: "ExtrasAsMetadata",
+  async applyMaterial(mat) {
+    const extras = mat._rawMatDef?.extras;
+    return hasExtras(extras) ? { metadata: { gltf: { extras } } } : null;
+  },
+  async applyMesh(meshData, mesh, ctx) {
+    const json = ctx._json;
+    const node = json.nodes?.[meshData._nodeIndex];
+    const gltfMesh = json.meshes?.[node?.mesh];
+    assignFirstExtras(mesh, meshData._primitive?.extras, gltfMesh?.extras, node?.extras);
+  },
+  async applyAsset(_meshes, root, ctx) {
+    const json = ctx._json;
+    assignExtras(root, json.asset?.extras);
+    const nodeMap = ctx._nodeMap;
+    if (nodeMap) {
+      for (let nodeIndex = 0; nodeIndex < nodeMap.length; nodeIndex++) {
+        const node = nodeMap[nodeIndex];
+        if (node) {
+          assignExtras(node, json.nodes?.[nodeIndex]?.extras);
+        }
+      }
+    }
+    return {};
+  }
+};
+function assignFirstExtras(target, ...extrasList) {
+  for (const extras of extrasList) {
+    if (hasExtras(extras)) {
+      assignExtras(target, extras);
+      return;
+    }
+  }
+}
+function assignExtras(target, extras) {
+  if (!hasExtras(extras)) {
+    return;
+  }
+  ensureGltfMetadata(target).extras = extras;
+}
+function ensureGltfMetadata(target) {
+  const metadata = target.metadata ??= {};
+  return metadata.gltf ??= {};
+}
+function hasExtras(extras) {
+  return extras !== void 0;
+}
+
+export { feature as default };
+//# sourceMappingURL=gltf-feature-extras.js.map

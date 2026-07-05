@@ -1,0 +1,113 @@
+import { TEXT_INSTANCE_BYTES } from '../text-data.js';
+
+const vertSrc = "struct A{mvp:mat4x4<f32>,viewport:vec4<f32>,color:vec4<f32>}@group(0) @binding(0) var<uniform> textU:A;struct B{@location(0) slugCorner:vec2<f32>,@location(1) slugBounds:vec4<f32>,@location(2) slugAnchor:vec4<f32>,@location(3) slugAtlas:vec4<f32>,@location(4) slugBand:vec4<f32>,@location(5) slugColor:vec4<f32>}struct u{@builtin(position) pos:vec4<f32>,@location(0) vTexcoord:vec2<f32>,@location(1) @interpolate(flat) vBanding:vec4<f32>,@location(2) @interpolate(flat) vGlyph:vec4<f32>,@location(3) @interpolate(flat) vColor:vec4<f32>}@vertex fn main(b:B)->u{if (b.slugAnchor.w>0.5){var d:u;d.pos=vec4<f32>(-2.0,-2.0,-2.0,1.0);d.vTexcoord=vec2<f32>(0.0,0.0);d.vBanding=vec4<f32>(0.0);d.vGlyph=vec4<f32>(0.0);d.vColor=vec4<f32>(0.0);return d;}let x=vec2<f32>(step(0.0,b.slugCorner.x),step(0.0,b.slugCorner.y));let j=mix(b.slugBounds.xy,b.slugBounds.zw,x);let f=b.slugAnchor.z;let v=select(0.0,1.0/f,f!=0.0);let g=b.slugAnchor.xy+j*v;let q=b.slugCorner;let p=vec4<f32>(f,0.0,0.0,f);let a=textU.mvp;let n=vec4<f32>(a[0].x,a[1].x,a[2].x,a[3].x);let h=vec4<f32>(a[0].y,a[1].y,a[2].y,a[3].y);let o=vec4<f32>(a[0].w,a[1].w,a[2].w,a[3].w);let m=normalize(q);let e=dot(o.xy,g)+o.w;let i=dot(o.xy,m);let s=(e*dot(n.xy,m)-i*(dot(n.xy,g)+n.w))*textU.viewport.x;let t=(e*dot(h.xy,m)-i*(dot(h.xy,g)+h.w))*textU.viewport.y;let w=e*e;let l=e*i;let r=s*s+t*t;let k=q*(w*(l+sqrt(r))/(r-l*l));let y=g+k;let z=vec2<f32>(j.x+dot(k,p.xy),j.y+dot(k,p.zw));var c:u;c.pos=a*vec4<f32>(y,0.0,1.0);c.vTexcoord=z;c.vBanding=b.slugBand;c.vGlyph=b.slugAtlas;c.vColor=vec4<f32>(b.slugColor.rgb,b.slugColor.a*textU.color.a);return c;}";
+
+const fragSrc = "@group(0) @binding(1) var t:texture_2d<f32>;@group(0) @binding(2) var u:texture_2d<f32>;struct sa{mvp:mat4x4<f32>,viewport:vec4<f32>,color:vec4<f32>}@group(0) @binding(0) var<uniform> textU:sa;struct ra{@location(0) vTexcoord:vec2<f32>,@location(1) @interpolate(flat) vBanding:vec4<f32>,@location(2) @interpolate(flat) vGlyph:vec4<f32>,@location(3) @interpolate(flat) vColor:vec4<f32>,@builtin(front_facing) frontFacing:bool}fn I(qa:f32,pa:f32,oa:f32)->i32{let na:i32=select(0,1,qa<0.0);let la:i32=select(0,2,pa<0.0);let ga:i32=select(0,4,oa<0.0);let fa=u32(na+la+ga);return (0x2E74>>fa)&0x0101;}fn ca(b:vec4<f32>,aa:vec2<f32>)->vec2<f32>{let q=vec2<f32>(b.x-b.z*2.0+aa.x,b.y-b.w*2.0+aa.y);let d=vec2<f32>(b.x-b.z,b.y-b.w);let K=1.0/q.y;let ba=0.5/d.y;let L=sqrt(max(d.y*d.y-q.y*b.y,0.0));var H=(d.y-L)*K;var G=(d.y+L)*K;if (abs(q.y)<=max(abs(d.y),abs(b.y))*1.0e-4){H=b.y*ba;G=b.y*ba;}return vec2<f32>((q.x*H-d.x*2.0)*H+b.x,(q.x*G-d.x*2.0)*G+b.x);}fn da(a:vec4<f32>,Y:vec2<f32>)->vec2<f32>{let n=vec2<f32>(a.x-a.z*2.0+Y.x,a.y-a.w*2.0+Y.y);let c=vec2<f32>(a.x-a.z,a.y-a.w);let T=1.0/n.x;let S=0.5/c.x;let O=sqrt(max(c.x*c.x-n.x*a.x,0.0));var D=(c.x-O)*T;var E=(c.x+O)*T;if (abs(n.x)<=max(abs(c.x),abs(a.x))*1.0e-4){D=a.x*S;E=a.x*S;}return vec2<f32>((n.y*D-c.y*2.0)*D+a.y,(n.y*E-c.y*2.0)*E+a.y);}fn J(N:vec2<i32>,ka:i32)->vec2<i32>{var l=vec2<i32>(N.x+ka,N.y);l.y=l.y+(l.x>>12u);l.x=l.x&4095;return l;}@fragment fn main(f:ra)->@location(0) vec4<f32>{if (!f.frontFacing){discard;}let e=f.vTexcoord;let ma=fwidth(e);let w=1.0/ma;let g=vec2<i32>(i32(f.vGlyph.x+0.5),i32(f.vGlyph.y+0.5));let P=vec2<i32>(i32(f.vGlyph.z+0.5),i32(f.vGlyph.w+0.5));let Q=f.vBanding;let R=clamp(vec2<i32>(e*Q.xy+Q.zw),vec2<i32>(0,0),P);var i:f32=0.0;var h:f32=0.0;let U=textureLoad(u,vec2<i32>(g.x+R.y,g.y),0);let ea=i32(U.x+0.5);let ha=i32(U.y+0.5);let X=J(g,ha);for(var s:i32=0;s<ea;s=s+1){let Z=textureLoad(u,vec2<i32>(X.x+s,X.y),0);let F=vec2<i32>(i32(Z.x+0.5),i32(Z.y+0.5));let o=textureLoad(t,F,0)-vec4<f32>(e,e);let A=textureLoad(t,vec2<i32>(F.x+1,F.y),0).xy-e;if (max(max(o.x,o.z),A.x)*w.x<-0.5){break;}let z=I(o.y,o.w,A.y);if (z!=0){let x=ca(o,A)*w.x;if ((z&1)!=0){i=i+clamp(x.x+0.5,0.0,1.0);h=max(h,clamp(1.0-abs(x.x)*2.0,0.0,1.0));}if (z>1){i=i-clamp(x.y+0.5,0.0,1.0);h=max(h,clamp(1.0-abs(x.y)*2.0,0.0,1.0));}}}var k:f32=0.0;var j:f32=0.0;let W=textureLoad(u,vec2<i32>(g.x+P.y+1+R.x,g.y),0);let ia=i32(W.x+0.5);let ja=i32(W.y+0.5);let V=J(g,ja);for(var r:i32=0;r<ia;r=r+1){let M=textureLoad(u,vec2<i32>(V.x+r,V.y),0);let y=vec2<i32>(i32(M.x+0.5),i32(M.y+0.5));let m=textureLoad(t,y,0)-vec4<f32>(e,e);let B=textureLoad(t,vec2<i32>(y.x+1,y.y),0).xy-e;if (max(max(m.y,m.w),B.y)*w.y<-0.5){break;}let C=I(m.x,m.z,B.x);if (C!=0){let v=da(m,B)*w.y;if ((C&1)!=0){k=k-clamp(v.x+0.5,0.0,1.0);j=max(j,clamp(1.0-abs(v.x)*2.0,0.0,1.0));}if (C>1){k=k+clamp(v.y+0.5,0.0,1.0);j=max(j,clamp(1.0-abs(v.y)*2.0,0.0,1.0));}}}var p=max(abs(i*h+k*j)/max(h+j,1.0/65536.0),min(abs(i),abs(k)));p=clamp(p,0.0,1.0);p=pow(p,textU.color.x);return f.vColor*p;}";
+
+let _cache = null;
+function clearTextPipelineCache(engine) {
+  _cache?.delete(engine._device);
+}
+const QUAD_CORNERS = [-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1];
+function getOrCreateDeviceCache(engine) {
+  _cache ??= /* @__PURE__ */ new WeakMap();
+  let cache = _cache.get(engine._device);
+  if (cache) {
+    return cache;
+  }
+  const device = engine._device;
+  const bindGroupLayout = device.createBindGroupLayout({
+    label: "text-bind-group-layout",
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } }
+    ]
+  });
+  const vertModule = device.createShaderModule({ label: "text-vert", code: vertSrc });
+  const fragModule = device.createShaderModule({ label: "text-frag", code: fragSrc });
+  const corners = new Float32Array(QUAD_CORNERS);
+  const quadVertexBuffer = device.createBuffer({
+    label: "text-quad-corners",
+    size: corners.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    mappedAtCreation: true
+  });
+  new Float32Array(quadVertexBuffer.getMappedRange()).set(corners);
+  quadVertexBuffer.unmap();
+  cache = { bindGroupLayout, vertModule, fragModule, quadVertexBuffer, pipelines: /* @__PURE__ */ new Map() };
+  _cache.set(device, cache);
+  return cache;
+}
+function pipelineKey(format, sampleCount, depthStencilFormat, depthWrite) {
+  return format + ":" + sampleCount + ":" + (depthStencilFormat ?? "-") + ":" + (depthWrite ? "w" : "r");
+}
+function getOrCreateTextPipeline(engine, format, sampleCount, depthStencilFormat, depthWrite) {
+  const cache = getOrCreateDeviceCache(engine);
+  const key = pipelineKey(format, sampleCount, depthStencilFormat, depthWrite);
+  let pipeline = cache.pipelines.get(key);
+  if (pipeline) {
+    return { pipeline, cache };
+  }
+  const device = engine._device;
+  const descriptor = {
+    label: "text-pipeline",
+    layout: device.createPipelineLayout({ bindGroupLayouts: [cache.bindGroupLayout] }),
+    vertex: {
+      module: cache.vertModule,
+      entryPoint: "main",
+      buffers: [
+        {
+          arrayStride: 8,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 0, offset: 0, format: "float32x2" }]
+        },
+        {
+          arrayStride: TEXT_INSTANCE_BYTES,
+          stepMode: "instance",
+          attributes: [
+            { shaderLocation: 1, offset: 0, format: "float32x4" },
+            { shaderLocation: 2, offset: 16, format: "float32x4" },
+            { shaderLocation: 3, offset: 32, format: "float32x4" },
+            { shaderLocation: 4, offset: 48, format: "float32x4" },
+            { shaderLocation: 5, offset: 64, format: "float32x4" }
+          ]
+        }
+      ]
+    },
+    fragment: {
+      module: cache.fragModule,
+      entryPoint: "main",
+      targets: [
+        {
+          format,
+          blend: {
+            // Premultiplied-alpha blend. The Slug fragment shader outputs
+            // `vColor * coverage` — i.e. RGB already premultiplied by coverage
+            // (and alpha = coverage) — so the color blend must use srcFactor
+            // `one` (NOT `src-alpha`, which would multiply by coverage a second
+            // time and render anti-aliased edges as coverage², too dark). The
+            // alpha channel already uses `one` for the same reason.
+            color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" }
+          }
+        }
+      ]
+    },
+    primitive: { topology: "triangle-list", cullMode: "none", frontFace: "ccw" },
+    multisample: { count: sampleCount }
+  };
+  if (depthStencilFormat) {
+    descriptor.depthStencil = {
+      format: depthStencilFormat,
+      depthCompare: "greater-equal",
+      depthWriteEnabled: depthWrite
+    };
+  }
+  pipeline = device.createRenderPipeline(descriptor);
+  cache.pipelines.set(key, pipeline);
+  return { pipeline, cache };
+}
+
+export { clearTextPipelineCache, getOrCreateTextPipeline };
+//# sourceMappingURL=text-pipeline.js.map

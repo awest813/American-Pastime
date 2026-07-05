@@ -1,0 +1,17 @@
+let _spriteFxHook = null;
+let _billboardFxHook = null;
+function _registerSpriteFxHook(hook) {
+  _spriteFxHook = hook;
+}
+function _getSpriteFxHook() {
+  return _spriteFxHook;
+}
+function _registerBillboardFxHook(hook) {
+  _billboardFxHook = hook;
+}
+function _getBillboardFxHook() {
+  return _billboardFxHook;
+}
+
+export { _getBillboardFxHook, _getSpriteFxHook, _registerBillboardFxHook, _registerSpriteFxHook };
+//# sourceMappingURL=sprite-fx-hook.js.map

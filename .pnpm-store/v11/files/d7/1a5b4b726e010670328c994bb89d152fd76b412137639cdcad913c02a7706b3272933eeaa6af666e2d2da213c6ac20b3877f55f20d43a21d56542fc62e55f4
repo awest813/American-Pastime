@@ -1,0 +1,41 @@
+function normalizeColorToVec4(data, count, comps) {
+  const out = new Float32Array(count * 4);
+  const hasAlpha = comps >= 4;
+  if (data instanceof Float32Array) {
+    for (let v = 0; v < count; v++) {
+      out[v * 4] = data[v * comps];
+      out[v * 4 + 1] = data[v * comps + 1];
+      out[v * 4 + 2] = data[v * comps + 2];
+      out[v * 4 + 3] = hasAlpha ? data[v * comps + 3] : 1;
+    }
+  } else if (data instanceof Uint16Array) {
+    const inv = 1 / 65535;
+    for (let v = 0; v < count; v++) {
+      out[v * 4] = data[v * comps] * inv;
+      out[v * 4 + 1] = data[v * comps + 1] * inv;
+      out[v * 4 + 2] = data[v * comps + 2] * inv;
+      out[v * 4 + 3] = hasAlpha ? data[v * comps + 3] * inv : 1;
+    }
+  } else if (data instanceof Uint8Array) {
+    const inv = 1 / 255;
+    for (let v = 0; v < count; v++) {
+      out[v * 4] = data[v * comps] * inv;
+      out[v * 4 + 1] = data[v * comps + 1] * inv;
+      out[v * 4 + 2] = data[v * comps + 2] * inv;
+      out[v * 4 + 3] = hasAlpha ? data[v * comps + 3] * inv : 1;
+    }
+  }
+  return out;
+}
+function normalizeUvToVec2(data, count) {
+  const out = new Float32Array(count * 2);
+  const inv = data instanceof Uint16Array ? 1 / 65535 : data instanceof Uint8Array ? 1 / 255 : 1;
+  const s = data;
+  for (let i = 0; i < count * 2; i++) {
+    out[i] = s[i] * inv;
+  }
+  return out;
+}
+
+export { normalizeColorToVec4, normalizeUvToVec2 };
+//# sourceMappingURL=gltf-color-normalize.js.map

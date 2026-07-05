@@ -1,0 +1,231 @@
+const TEX_WIDTH = 4096;
+function createGlyphStorage(initial) {
+  const _curveSets = /* @__PURE__ */ new Map();
+  if (initial) {
+    for (const [curveSetId, curves] of initial) {
+      _curveSets.set(curveSetId, makeCurveSet(curves));
+    }
+  }
+  return { _curveSets };
+}
+function updateGlyphStorage(storage, curveSetId, curves) {
+  let cs = storage._curveSets.get(curveSetId);
+  if (!cs) {
+    cs = makeCurveSet(/* @__PURE__ */ new Map());
+    storage._curveSets.set(curveSetId, cs);
+  }
+  for (const [glyphId, glyph] of curves) {
+    if (cs.curves.has(glyphId)) {
+      continue;
+    }
+    cs.curves.set(glyphId, glyph);
+    cs.atlas.glyphSlots.set(glyphId, packAppendGlyph(cs.atlas, glyph));
+  }
+}
+function disposeGlyphStorage(storage) {
+  for (const cs of storage._curveSets.values()) {
+    const gpu = cs.atlas.gpu;
+    if (gpu) {
+      gpu.curveTex.destroy();
+      gpu.bandTex.destroy();
+      cs.atlas.gpu = null;
+    }
+  }
+  storage._curveSets.clear();
+}
+const ROW_FLOATS = TEX_WIDTH * 4;
+function createSharedAtlas() {
+  return {
+    curveTexData: new Float32Array(ROW_FLOATS),
+    curveTexelsUsed: 0,
+    bandTexData: new Float32Array(ROW_FLOATS),
+    bandTexelsUsed: 0,
+    glyphSlots: /* @__PURE__ */ new Map(),
+    version: 0,
+    gpu: null
+  };
+}
+function makeCurveSet(curves) {
+  const atlas = createSharedAtlas();
+  for (const [glyphId, glyph] of curves) {
+    atlas.glyphSlots.set(glyphId, packAppendGlyph(atlas, glyph));
+  }
+  return { curves, atlas };
+}
+function ensureCurveCapacity(atlas, neededTexels) {
+  const neededFloats = neededTexels * 4;
+  if (atlas.curveTexData.length >= neededFloats) {
+    return;
+  }
+  let newFloats = Math.max(atlas.curveTexData.length * 2, ROW_FLOATS);
+  while (newFloats < neededFloats) {
+    newFloats *= 2;
+  }
+  newFloats = Math.ceil(newFloats / ROW_FLOATS) * ROW_FLOATS;
+  const grown = new Float32Array(newFloats);
+  grown.set(atlas.curveTexData);
+  atlas.curveTexData = grown;
+}
+function ensureBandCapacity(atlas, neededTexels) {
+  const neededFloats = neededTexels * 4;
+  if (atlas.bandTexData.length >= neededFloats) {
+    return;
+  }
+  let newFloats = Math.max(atlas.bandTexData.length * 2, ROW_FLOATS);
+  while (newFloats < neededFloats) {
+    newFloats *= 2;
+  }
+  newFloats = Math.ceil(newFloats / ROW_FLOATS) * ROW_FLOATS;
+  const grown = new Float32Array(newFloats);
+  grown.set(atlas.bandTexData);
+  atlas.bandTexData = grown;
+}
+function packAppendGlyph(atlas, glyph) {
+  const bands = buildGlyphBands(glyph);
+  const curves = glyph.curves;
+  let curveTexel = atlas.curveTexelsUsed;
+  const startTexel = curveTexel;
+  const curveTexelPositions = new Array(curves.length);
+  for (let i = 0; i < curves.length; i++) {
+    const row0 = curveTexel / TEX_WIDTH | 0;
+    const row1 = (curveTexel + 1) / TEX_WIDTH | 0;
+    if (row0 !== row1) {
+      curveTexel = row1 * TEX_WIDTH;
+    }
+    curveTexelPositions[i] = curveTexel;
+    curveTexel += 2;
+  }
+  const curveTexelsEnd = curveTexel;
+  ensureCurveCapacity(atlas, curveTexelsEnd);
+  const curveData = atlas.curveTexData;
+  for (let i = 0; i < curves.length; i++) {
+    const c = curves[i];
+    const tl = curveTexelPositions[i];
+    const o0 = tl * 4;
+    curveData[o0] = c.p0x;
+    curveData[o0 + 1] = c.p0y;
+    curveData[o0 + 2] = c.p1x;
+    curveData[o0 + 3] = c.p1y;
+    const o1 = (tl + 1) * 4;
+    curveData[o1] = c.p2x;
+    curveData[o1 + 1] = c.p2y;
+  }
+  atlas.curveTexelsUsed = curveTexelsEnd;
+  const headerCount = bands.hBandCount + bands.vBandCount;
+  let bandStart = atlas.bandTexelsUsed;
+  const curX = bandStart % TEX_WIDTH;
+  if (curX + headerCount > TEX_WIDTH) {
+    bandStart = ((bandStart / TEX_WIDTH | 0) + 1) * TEX_WIDTH;
+  }
+  const glyphLocX = bandStart % TEX_WIDTH;
+  const glyphLocY = bandStart / TEX_WIDTH | 0;
+  const allBands = [...bands.hBands, ...bands.vBands];
+  let curveListOffset = headerCount;
+  const bandOffsets = new Array(allBands.length);
+  for (let i = 0; i < allBands.length; i++) {
+    bandOffsets[i] = curveListOffset;
+    curveListOffset += allBands[i].curveIndices.length;
+  }
+  const bandTexelsEnd = bandStart + curveListOffset;
+  ensureBandCapacity(atlas, bandTexelsEnd);
+  const bandData = atlas.bandTexData;
+  for (let i = 0; i < allBands.length; i++) {
+    const tl = bandStart + i;
+    const di = tl * 4;
+    bandData[di] = allBands[i].curveIndices.length;
+    bandData[di + 1] = bandOffsets[i];
+  }
+  for (let i = 0; i < allBands.length; i++) {
+    const band = allBands[i];
+    const listStart = bandStart + bandOffsets[i];
+    for (let j = 0; j < band.curveIndices.length; j++) {
+      const ci = band.curveIndices[j];
+      const curveTexelAbs = curveTexelPositions[ci];
+      const cTexX = curveTexelAbs % TEX_WIDTH;
+      const cTexY = curveTexelAbs / TEX_WIDTH | 0;
+      const tl = listStart + j;
+      const di = tl * 4;
+      bandData[di] = cTexX;
+      bandData[di + 1] = cTexY;
+    }
+  }
+  atlas.bandTexelsUsed = bandTexelsEnd;
+  atlas.version++;
+  return {
+    curveTexelStart: startTexel,
+    glyphLocX,
+    glyphLocY,
+    bandMaxX: bands.vBandCount - 1,
+    bandMaxY: bands.hBandCount - 1,
+    vBandCount: bands.vBandCount,
+    hBandCount: bands.hBandCount
+  };
+}
+function curveAt(curves, i) {
+  const c = curves[i];
+  if (!c) {
+    throw new Error("buildGlyphBands: invalid curve index");
+  }
+  return c;
+}
+function buildBandsInternal(g) {
+  const { curves, bounds } = g;
+  const numBands = Math.max(1, Math.min(8, Math.floor(curves.length / 2)));
+  const { xMin, yMin, xMax, yMax } = bounds;
+  const width = xMax - xMin;
+  const height = yMax - yMin;
+  const bandH = height / numBands;
+  const bandW = width / numBands;
+  const hBands = [];
+  const vBands = [];
+  for (let i = 0; i < numBands; i++) {
+    hBands.push({ curveIndices: [] });
+    vBands.push({ curveIndices: [] });
+  }
+  for (let ci = 0; ci < curves.length; ci++) {
+    const c = curveAt(curves, ci);
+    const cyMin = Math.min(c.p0y, c.p1y, c.p2y);
+    const cyMax = Math.max(c.p0y, c.p1y, c.p2y);
+    const cxMin = Math.min(c.p0x, c.p1x, c.p2x);
+    const cxMax = Math.max(c.p0x, c.p1x, c.p2x);
+    if (height > 0) {
+      for (let b = 0; b < numBands; b++) {
+        const bMinY = yMin + b * bandH;
+        const bMaxY = yMin + (b + 1) * bandH;
+        if (cyMax >= bMinY && cyMin <= bMaxY) {
+          hBands[b].curveIndices.push(ci);
+        }
+      }
+    }
+    if (width > 0) {
+      for (let b = 0; b < numBands; b++) {
+        const bMinX = xMin + b * bandW;
+        const bMaxX = xMin + (b + 1) * bandW;
+        if (cxMax >= bMinX && cxMin <= bMaxX) {
+          vBands[b].curveIndices.push(ci);
+        }
+      }
+    }
+  }
+  for (const band of hBands) {
+    band.curveIndices.sort((a, b) => {
+      const ca = curveAt(curves, a);
+      const cb = curveAt(curves, b);
+      return Math.max(cb.p0x, cb.p1x, cb.p2x) - Math.max(ca.p0x, ca.p1x, ca.p2x);
+    });
+  }
+  for (const band of vBands) {
+    band.curveIndices.sort((a, b) => {
+      const ca = curveAt(curves, a);
+      const cb = curveAt(curves, b);
+      return Math.max(cb.p0y, cb.p1y, cb.p2y) - Math.max(ca.p0y, ca.p1y, ca.p2y);
+    });
+  }
+  return { hBands, vBands, hBandCount: numBands, vBandCount: numBands };
+}
+function buildGlyphBands(g) {
+  return g._bands ??= buildBandsInternal(g);
+}
+
+export { TEX_WIDTH, buildGlyphBands, createGlyphStorage, createSharedAtlas, disposeGlyphStorage, packAppendGlyph, updateGlyphStorage };
+//# sourceMappingURL=glyph-storage.js.map

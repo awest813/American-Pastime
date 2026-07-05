@@ -1,0 +1,8 @@
+import { type FunctionComponent } from "react";
+import { type FollowCamera } from "@babylonjs/core/index.js";
+export declare const FollowCameraTransformProperties: FunctionComponent<{
+    camera: FollowCamera;
+}>;
+export declare const FollowCameraLimitsProperties: FunctionComponent<{
+    camera: FollowCamera;
+}>;

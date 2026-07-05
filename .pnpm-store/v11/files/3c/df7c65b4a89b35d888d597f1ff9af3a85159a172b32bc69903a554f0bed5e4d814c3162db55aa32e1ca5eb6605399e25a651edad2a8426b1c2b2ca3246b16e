@@ -1,0 +1,13 @@
+import { createShadowFragment } from '../../../shader/fragments/shadow-fragment-core.js';
+import { getCsmStdReceiverFactory } from '../../../shadow/csm-receiver-registry.js';
+
+function createStdShadowFragment(shadowLights) {
+  const csmSlots = shadowLights.filter((sl) => sl.shadowType === "csm");
+  if (csmSlots.length > 0) {
+    return getCsmStdReceiverFactory()(csmSlots.map((s) => ({ lightIndex: s.lightIndex })));
+  }
+  return createShadowFragment("std-shadow", shadowLights);
+}
+
+export { createStdShadowFragment };
+//# sourceMappingURL=std-shadow-fragment.js.map

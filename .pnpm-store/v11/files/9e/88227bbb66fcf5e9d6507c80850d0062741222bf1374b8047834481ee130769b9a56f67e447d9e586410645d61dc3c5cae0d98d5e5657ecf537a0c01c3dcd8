@@ -1,0 +1,14 @@
+const ext = {
+  id: "KHR_materials_unlit",
+  async applyMaterial(mat) {
+    if (!mat._rawMatDef?.extensions?.KHR_materials_unlit) {
+      return null;
+    }
+    const f = mat._baseColorFactor;
+    const tint = mat._baseColorImage ? [f[0], f[1], f[2]] : void 0;
+    return tint ? { unlit: true, unlitColor: tint } : { unlit: true };
+  }
+};
+
+export { ext as default };
+//# sourceMappingURL=gltf-ext-unlit.js.map

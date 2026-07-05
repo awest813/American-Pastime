@@ -1,0 +1,69 @@
+import { type IDisposable } from "@babylonjs/core/index.js";
+import { type Scene } from "@babylonjs/core/scene.js";
+import { ServiceContainer } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceContainer.js";
+import { type ModularBridgeOptions, type ModularBridgeToken } from "@babylonjs/shared-ui-components/modularTool/modularBridge.js";
+/**
+ * Options for making a scene inspectable via the Inspector CLI.
+ */
+export type InspectableOptions = (Pick<ModularBridgeOptions, "serviceDefinitions"> & {
+    /**
+     * An existing modular bridge token whose ServiceContainer will be used as
+     * the parent for the inspectable container. The bridge already exists
+     * in the bridge token's container, so bridge options are not accepted.
+     * @experimental
+     */
+    bridgeToken: ModularBridgeToken;
+    port?: never;
+    name?: never;
+    autoEnable?: never;
+}) | (ModularBridgeOptions & {
+    bridgeToken?: never;
+});
+/**
+ * A token returned by {@link StartInspectable} that can be disposed to disconnect
+ * the scene from the Inspector CLI bridge.
+ */
+export type InspectableToken = IDisposable & {
+    /**
+     * Whether this token has been disposed.
+     */
+    readonly isDisposed: boolean;
+};
+/**
+ * @internal
+ * An internal token that also exposes the underlying ServiceContainer,
+ * allowing ShowInspector to use it as a parent container.
+ */
+export type InternalInspectableToken = InspectableToken & {
+    /**
+     * The ServiceContainer backing this inspectable session.
+     */
+    readonly serviceContainer: ServiceContainer;
+};
+/**
+ * @internal
+ * Internal implementation that returns an {@link InternalInspectableToken} with access
+ * to the underlying ServiceContainer. Used by ShowInspector to set up a parent container relationship.
+ */
+export declare function _StartInspectable(scene: Scene, options?: Partial<InspectableOptions>): InternalInspectableToken;
+/**
+ * Makes a scene inspectable by connecting it to the Inspector CLI bridge.
+ * This creates a headless {@link ServiceContainer} (no UI) that registers
+ * scene-specific CLI command services (entity query, screenshot, shader, stats, etc.).
+ *
+ * When {@link InspectableOptions.bridgeToken} is provided, the inspectable container
+ * is created as a child of the CLI container, inheriting the bridge and command registry.
+ * When not provided, a bridge container is created internally via {@link MakeModularBridge}.
+ *
+ * Multiple callers may call this for the same scene. Each returned token is
+ * ref-counted — the underlying connection is only torn down when all tokens
+ * have been disposed. Additional {@link InspectableOptions.serviceDefinitions}
+ * passed by each caller are added to the shared container and removed when
+ * that caller's token is disposed.
+ *
+ * @param scene The scene to make inspectable.
+ * @param options Optional configuration.
+ * @returns An {@link InspectableToken} that can be disposed to disconnect.
+ * @experimental
+ */
+export declare function StartInspectable(scene: Scene, options?: Partial<InspectableOptions>): InspectableToken;

@@ -1,0 +1,269 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { BU } from '../engine/gpu-flags.js';
+import { registerRenderingContext, unregisterRenderingContext, getRenderTargetSize } from '../engine/engine.js';
+import { createMappedBuffer, createEmptyUniformBuffer } from '../resource/gpu-buffers.js';
+import { _getSpriteFxHook } from './sprite-fx-hook.js';
+import { getOrCreateSpritePipeline, SHARED_SPRITE_INDEX_DATA, resetSpritePipelineCache, getSpritePipelineCacheSize, createSpritePipelineCache, createSpriteLayerBindGroup, createSpriteInstanceBuffer, LAYER_UBO_BYTES, ensureSpriteInstanceBuffer, uploadSpriteInstances, buildSpriteLayerUbo, writeSpriteLayerUboIfDirty } from './sprite-pipeline.js';
+
+const KIND = "sprite-renderer";
+function ensureLayerGpu(rr, layer) {
+  let lg = rr._layerGpu.get(layer);
+  if (!lg) {
+    const cap = layer._capacity;
+    const instanceBuffer = createSpriteInstanceBuffer(rr._surface.engine._device, layer);
+    const uniformBuffer = createEmptyUniformBuffer(rr._surface.engine, LAYER_UBO_BYTES);
+    const fx = _getSpriteFxHook()?.createLayerFx(rr._surface.engine, "sprite-layer-fx-ubo", layer) ?? null;
+    lg = {
+      layer,
+      instanceBuffer,
+      instanceBufferCapacity: cap,
+      uniformBuffer,
+      bindGroup: null,
+      uploadedVersion: -1,
+      fx,
+      pipeline: null,
+      lastUbo: new F32(LAYER_UBO_BYTES / 4),
+      uboUploaded: false,
+      renderBundle: null,
+      bundleCount: -1
+    };
+    rr._layerGpu.set(layer, lg);
+  }
+  const grown = ensureSpriteInstanceBuffer(rr._surface.engine._device, layer, lg.instanceBuffer, lg.instanceBufferCapacity);
+  if (grown.reallocated) {
+    lg.instanceBuffer = grown.buffer;
+    lg.instanceBufferCapacity = grown.capacity;
+    lg.uploadedVersion = -1;
+    lg.renderBundle = null;
+  }
+  return lg;
+}
+function uploadLayer(rr, lg, deltaMs) {
+  const layer = lg.layer;
+  lg.uploadedVersion = uploadSpriteInstances(rr._surface.engine._device, layer, lg.instanceBuffer, lg.uploadedVersion);
+  buildSpriteLayerUbo(layer, rr._targetWidth, rr._targetHeight, _scratchUbo);
+  lg.uboUploaded = writeSpriteLayerUboIfDirty(rr._surface.engine._device, lg.uniformBuffer, _scratchUbo, lg.lastUbo, lg.uboUploaded);
+  if (lg.fx) {
+    _getSpriteFxHook().updateFx(lg.fx, layer, deltaMs);
+  }
+}
+function disposeLayerGpu(lg) {
+  lg.instanceBuffer.destroy();
+  lg.uniformBuffer.destroy();
+  if (lg.fx) {
+    _getSpriteFxHook().disposeFx(lg.fx);
+  }
+}
+const _scratchUbo = new F32(LAYER_UBO_BYTES / 4);
+function ensureBindGroup(rr, lg, pipeline) {
+  if (lg.bindGroup) {
+    return lg.bindGroup;
+  }
+  lg.bindGroup = createSpriteLayerBindGroup(rr._surface.engine, pipeline, 0, lg.layer, lg.uniformBuffer, lg.fx);
+  return lg.bindGroup;
+}
+function compareLayers(a, b) {
+  if (a.order !== b.order) {
+    return a.order - b.order;
+  }
+  return 0;
+}
+function createSpriteRenderer(surface, opts) {
+  const engine = surface.engine;
+  assertSpriteRendererLayers(opts.layers);
+  const indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, BU.INDEX);
+  const canvas = surface.canvas;
+  const layers = opts.layers.slice();
+  const rr = {
+    _kind: KIND,
+    _surface: surface,
+    _indexBuffer: indexBuffer,
+    _pipelineCache: createSpritePipelineCache(),
+    _layerGpu: /* @__PURE__ */ new Map(),
+    _visibleBundles: [],
+    _targetWidth: canvas.width,
+    _targetHeight: canvas.height,
+    _disposed: false,
+    _clear: opts.clear ?? true,
+    _targetView: null,
+    _beforeUpdate: [],
+    _disposeCallbacks: [],
+    layers,
+    _layers: layers,
+    clearColor: opts.clearValue ?? { r: 0, g: 0, b: 0, a: 1 },
+    _drawCallsPre: 0,
+    _update() {
+      spriteRendererUpdate(rr);
+    },
+    _record() {
+      return spriteRendererRecord(rr);
+    }
+  };
+  for (const layer of rr.layers) {
+    getOrCreateSpritePipeline(engine, rr._pipelineCache, surface.format, 1, layer.blendMode, false, false, void 0, void 0, layer);
+  }
+  return rr;
+}
+function assertSpriteRendererLayers(layers) {
+  for (const layer of layers) {
+    assertSpriteRendererLayer(layer);
+  }
+}
+function assertSpriteRendererLayer(layer) {
+  if (layer.depth !== "none") {
+    throw new Error('SpriteRenderer requires depth: "none".');
+  }
+}
+function spriteRendererUpdate(rr) {
+  if (rr._disposed) {
+    return;
+  }
+  const deltaMs = rr._surface.engine._currentDelta ?? 0;
+  for (const hook of rr._beforeUpdate) {
+    hook(deltaMs);
+  }
+  assertSpriteRendererLayers(rr.layers);
+  const targetSize = getRenderTargetSize(rr._surface);
+  rr._targetWidth = targetSize.width;
+  rr._targetHeight = targetSize.height;
+  if (rr.layers.length > 1) {
+    rr._layers.sort(compareLayers);
+  }
+  for (const layer of rr.layers) {
+    if (!layer.visible || layer.count === 0) {
+      continue;
+    }
+    const lg = ensureLayerGpu(rr, layer);
+    uploadLayer(rr, lg, deltaMs);
+  }
+}
+function spriteRendererRecord(rr) {
+  if (rr._disposed) {
+    return 0;
+  }
+  assertSpriteRendererLayers(rr.layers);
+  const eng = rr._surface.engine;
+  const encoder = eng._currentEncoder;
+  const swapView = rr._targetView ?? eng.scRT._colorView;
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: swapView,
+        clearValue: rr.clearColor,
+        loadOp: rr._clear ? "clear" : "load",
+        storeOp: "store"
+      }
+    ]
+  });
+  let drawCalls = 0;
+  const visibleBundles = rr._visibleBundles;
+  visibleBundles.length = 0;
+  for (const layer of rr.layers) {
+    if (!layer.visible || layer.count === 0) {
+      continue;
+    }
+    const lg = rr._layerGpu.get(layer);
+    if (!lg) {
+      continue;
+    }
+    const sampleCount = 1;
+    const pipeline = getOrCreateSpritePipeline(
+      rr._surface.engine,
+      rr._pipelineCache,
+      rr._surface.format,
+      sampleCount,
+      layer.blendMode,
+      false,
+      false,
+      void 0,
+      void 0,
+      layer
+    );
+    if (lg.pipeline !== pipeline) {
+      lg.pipeline = pipeline;
+      lg.bindGroup = null;
+      lg.renderBundle = null;
+    }
+    const bg = ensureBindGroup(rr, lg, pipeline);
+    if (lg.renderBundle == null || lg.bundleCount !== layer.count) {
+      const be = rr._surface.engine._device.createRenderBundleEncoder({
+        colorFormats: [rr._surface.format],
+        sampleCount
+      });
+      be.setIndexBuffer(rr._indexBuffer, "uint16");
+      be.setPipeline(pipeline);
+      be.setBindGroup(0, bg);
+      be.setVertexBuffer(0, lg.instanceBuffer);
+      be.drawIndexed(6, layer.count, 0, 0, 0);
+      lg.renderBundle = be.finish();
+      lg.bundleCount = layer.count;
+    }
+    visibleBundles.push(lg.renderBundle);
+    drawCalls++;
+  }
+  if (visibleBundles.length > 0) {
+    pass.executeBundles(visibleBundles);
+  }
+  pass.end();
+  return drawCalls;
+}
+function addSpriteRendererLayer(sr, layer) {
+  if (sr._disposed) {
+    throw new Error("SpriteRenderer has been disposed.");
+  }
+  assertSpriteRendererLayer(layer);
+  if (sr.layers.includes(layer)) {
+    return;
+  }
+  sr._layers.push(layer);
+  getOrCreateSpritePipeline(sr._surface.engine, sr._pipelineCache, sr._surface.format, 1, layer.blendMode, false);
+}
+function removeSpriteRendererLayer(sr, layer) {
+  const index = sr.layers.indexOf(layer);
+  if (index < 0) {
+    return false;
+  }
+  sr._layers.splice(index, 1);
+  const lg = sr._layerGpu.get(layer);
+  if (lg) {
+    disposeLayerGpu(lg);
+    sr._layerGpu.delete(layer);
+  }
+  return true;
+}
+function registerSpriteRenderer(sr) {
+  registerRenderingContext(sr._surface, sr);
+}
+function setSpriteRendererTarget(sr, target) {
+  sr._targetView = target ? target.view : null;
+}
+function unregisterSpriteRenderer(sr) {
+  unregisterRenderingContext(sr._surface, sr);
+}
+function disposeSpriteRenderer(sr) {
+  if (sr._disposed) {
+    return;
+  }
+  unregisterSpriteRenderer(sr);
+  sr._disposed = true;
+  const disposeCallbacks = sr._disposeCallbacks.slice();
+  sr._disposeCallbacks.length = 0;
+  for (const dispose of disposeCallbacks) {
+    dispose();
+  }
+  for (const lg of sr._layerGpu.values()) {
+    disposeLayerGpu(lg);
+  }
+  sr._layerGpu.clear();
+  sr._visibleBundles.length = 0;
+  sr._beforeUpdate.length = 0;
+  sr._indexBuffer.destroy();
+  resetSpritePipelineCache(sr._pipelineCache);
+  sr._layers.length = 0;
+}
+function _spriteRendererPipelineCacheSize(sr) {
+  return getSpritePipelineCacheSize(sr._pipelineCache, sr._surface.engine._device);
+}
+
+export { _spriteRendererPipelineCacheSize, addSpriteRendererLayer, createSpriteRenderer, disposeSpriteRenderer, registerSpriteRenderer, removeSpriteRendererLayer, setSpriteRendererTarget, unregisterSpriteRenderer };
+//# sourceMappingURL=sprite-renderer.js.map

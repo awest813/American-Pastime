@@ -1,0 +1,9 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../sceneContext";
+import { type IBridgeCommandRegistry } from "@babylonjs/shared-ui-components/modularTool/services/cli/bridgeCommandRegistry.js";
+import "@babylonjs/core/Misc/PerformanceViewer/performanceViewerSceneExtension.js";
+/**
+ * Service that registers CLI commands for performance tracing using the PerformanceViewerCollector.
+ * start-perf-trace begins collecting data, stop-perf-trace stops and returns the collected data as JSON.
+ */
+export declare const PerfTraceCommandServiceDefinition: ServiceDefinition<[], [IBridgeCommandRegistry, ISceneContext]>;

@@ -1,0 +1,123 @@
+import { F32, U32 } from '../engine/typed-arrays.js';
+import { MAX_LIGHTS, LIGHT_ENTRY_FLOATS } from '../light/types.js';
+import { createUniformBuffer } from '../resource/gpu-buffers.js';
+
+const _countU32 = new U32(1);
+const _countF32 = new F32(_countU32.buffer);
+const MSH_LIGHT_INDEX_WORD_OFFSET = 20;
+function meshLightIndexVec4Count() {
+  return Math.ceil(MAX_LIGHTS / 4);
+}
+function getLightsUboSize() {
+  return 16 + MAX_LIGHTS * LIGHT_ENTRY_FLOATS * 4;
+}
+function computeLightsVersion(lights) {
+  let v = 0;
+  for (const light of lights) {
+    v += light._lightVersion ?? 0;
+  }
+  return v;
+}
+function fillLightsData(data, lights) {
+  data.fill(0);
+  let count = 0;
+  const headerFloats = 4;
+  for (const light of lights) {
+    if (count >= MAX_LIGHTS) {
+      break;
+    }
+    if (!light._writeLightUbo) {
+      continue;
+    }
+    light._writeLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS);
+    count++;
+  }
+  _countU32[0] = count;
+  data[0] = _countF32[0];
+}
+function ensureSceneLightState(engine, scene) {
+  let state = scene._lightGpuState;
+  const byteSize = getLightsUboSize();
+  if (state && state._byteSize === byteSize) {
+    return state;
+  }
+  const registerDisposer = !state;
+  state?._buffer.destroy();
+  const scratch = new F32(byteSize / 4);
+  fillLightsData(scratch, scene.lights);
+  engine._applyLightFoOffset?.(scratch, scene);
+  state = {
+    _buffer: createUniformBuffer(engine, scratch),
+    _scratch: scratch,
+    _version: computeLightsVersion(scene.lights) + (engine._lightFoVersion?.(scene) ?? 0),
+    _lightCount: scene.lights.length,
+    _byteSize: byteSize
+  };
+  scene._lightGpuState = state;
+  if (registerDisposer) {
+    scene._disposables.push(() => {
+      scene._lightGpuState?._buffer.destroy();
+      scene._lightGpuState = void 0;
+    });
+  }
+  return state;
+}
+function refreshSceneLightsUBO(engine, scene) {
+  const state = ensureSceneLightState(engine, scene);
+  const version = computeLightsVersion(scene.lights) + (engine._lightFoVersion?.(scene) ?? 0);
+  if (version !== state._version || scene.lights.length !== state._lightCount) {
+    state._version = version;
+    state._lightCount = scene.lights.length;
+    fillLightsData(state._scratch, scene.lights);
+    engine._applyLightFoOffset?.(state._scratch, scene);
+    engine._device.queue.writeBuffer(state._buffer, 0, state._scratch);
+  }
+  return state._buffer;
+}
+function appendMeshLightUboFields(fields) {
+  fields.push({ _name: "lc", _type: "u32" });
+  fields.push({ _name: "li", _type: `array<vec4<u32>, ${meshLightIndexVec4Count()}>` });
+}
+function meshLightIndexWGSL(meshVar, functionName = "mli") {
+  return `fn ${functionName}(i: u32) -> u32 { return ${meshVar}.li[i / 4u][i % 4u]; }`;
+}
+function affectsMesh(light, mesh) {
+  const meshId = mesh.id;
+  const included = light.includedOnlyMeshIds;
+  if (included?.size) {
+    return !!meshId && included.has(meshId);
+  }
+  return !meshId || !light.excludedMeshIds?.has(meshId);
+}
+function writeMeshLightSelection(mesh, lights, data) {
+  const u32 = data ? new U32(data.buffer, data.byteOffset, data.byteLength / 4) : null;
+  let count = 0;
+  let single = -1;
+  let pi = 0;
+  for (const light of lights) {
+    if (pi >= MAX_LIGHTS) {
+      break;
+    }
+    if (!light._writeLightUbo) {
+      continue;
+    }
+    if (affectsMesh(light, mesh)) {
+      single = pi;
+      if (u32) {
+        u32[MSH_LIGHT_INDEX_WORD_OFFSET + count] = pi;
+      }
+      count++;
+    }
+    pi++;
+  }
+  if (u32) {
+    u32[16] = count;
+    for (let i = count; i < MAX_LIGHTS; i++) {
+      u32[MSH_LIGHT_INDEX_WORD_OFFSET + i] = 0;
+    }
+  }
+  return count === 1 ? single + 1 : -count;
+}
+
+export { appendMeshLightUboFields, ensureSceneLightState, getLightsUboSize, meshLightIndexWGSL, refreshSceneLightsUBO, writeMeshLightSelection };
+//# sourceMappingURL=lights-ubo.js.map

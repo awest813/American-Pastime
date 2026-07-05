@@ -1,0 +1,19 @@
+import { Scene } from "@babylonjs/core/scene.js";
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../services/selectionService";
+export declare const SceneMaterialImageProcessingProperties: FunctionComponent<{
+    scene: Scene;
+}>;
+export declare const ScenePhysicsProperties: FunctionComponent<{
+    scene: Scene;
+}>;
+export declare const SceneCollisionsProperties: FunctionComponent<{
+    scene: Scene;
+}>;
+export declare const SceneShadowsProperties: FunctionComponent<{
+    scene: Scene;
+}>;
+export declare const SceneRenderingProperties: FunctionComponent<{
+    scene: Scene;
+    selectionService: ISelectionService;
+}>;

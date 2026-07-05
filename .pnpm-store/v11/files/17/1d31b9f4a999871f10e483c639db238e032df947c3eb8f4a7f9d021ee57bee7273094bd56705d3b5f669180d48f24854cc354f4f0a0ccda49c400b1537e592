@@ -1,0 +1,100 @@
+import { F32, I32, U8 } from '../engine/typed-arrays.js';
+import { mat4ComposeInto } from '../math/mat4-compose-into.js';
+import { mat4MultiplyInto } from '../math/mat4-multiply-into.js';
+
+const TRS_STRIDE = 12;
+const T_OFF = 0;
+const R_OFF = 3;
+const S_OFF = 7;
+const RH_TO_LH = new F32([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+const _boneTmp = new F32(16);
+function computeTopoOrder(nodes) {
+  const n = nodes.length;
+  const order = new I32(n);
+  const visited = new U8(n);
+  let cursor = 0;
+  function visit(idx) {
+    if (visited[idx]) {
+      return;
+    }
+    visited[idx] = 1;
+    const p = nodes[idx].parentIdx;
+    if (p >= 0) {
+      visit(p);
+    }
+    order[cursor++] = idx;
+  }
+  for (let i = 0; i < n; i++) {
+    visit(i);
+  }
+  return order;
+}
+function resetTRS(nodes, numNodes, currentTRS) {
+  for (let i = 0; i < numNodes; i++) {
+    const n = nodes[i];
+    const off = i * TRS_STRIDE;
+    currentTRS[off + T_OFF] = n.tx;
+    currentTRS[off + T_OFF + 1] = n.ty;
+    currentTRS[off + T_OFF + 2] = n.tz;
+    currentTRS[off + R_OFF] = n.rx;
+    currentTRS[off + R_OFF + 1] = n.ry;
+    currentTRS[off + R_OFF + 2] = n.rz;
+    currentTRS[off + R_OFF + 3] = n.rw;
+    currentTRS[off + S_OFF] = n.sx;
+    currentTRS[off + S_OFF + 1] = n.sy;
+    currentTRS[off + S_OFF + 2] = n.sz;
+  }
+}
+function computeNodeWorldMatrices(nodes, numNodes, topoOrder, currentTRS, localMat, worldMat) {
+  for (let idx = 0; idx < numNodes; idx++) {
+    const nodeIdx = topoOrder[idx];
+    const node = nodes[nodeIdx];
+    const off = nodeIdx * TRS_STRIDE;
+    if (node._matrix) {
+      localMat.set(node._matrix, nodeIdx * 16);
+    } else {
+      mat4ComposeInto(
+        localMat,
+        nodeIdx * 16,
+        currentTRS[off + T_OFF],
+        currentTRS[off + T_OFF + 1],
+        currentTRS[off + T_OFF + 2],
+        currentTRS[off + R_OFF],
+        currentTRS[off + R_OFF + 1],
+        currentTRS[off + R_OFF + 2],
+        currentTRS[off + R_OFF + 3],
+        currentTRS[off + S_OFF],
+        currentTRS[off + S_OFF + 1],
+        currentTRS[off + S_OFF + 2]
+      );
+    }
+    const parentIdx = node.parentIdx;
+    if (parentIdx >= 0) {
+      mat4MultiplyInto(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
+    } else {
+      mat4MultiplyInto(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+    }
+  }
+}
+function writeBoneTextures(device, skeletons, worldMat) {
+  for (let si = 0; si < skeletons.length; si++) {
+    const skel = skeletons[si];
+    const boneData = skel.boneMatrices;
+    for (let bi = 0; bi < skel.boneCount; bi++) {
+      const jointIdx = skel.jointNodes[bi];
+      const ibmOff = bi * 16;
+      mat4MultiplyInto(_boneTmp, 0, skel.invMeshWorld, 0, worldMat, jointIdx * 16);
+      mat4MultiplyInto(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
+    }
+    const texWidth = skel.boneCount * 4;
+    device.queue.writeTexture(
+      { texture: skel.runtimeSkeleton?.boneTexture ?? skel.boneTexture },
+      boneData.buffer,
+      { bytesPerRow: texWidth * 16 },
+      { width: texWidth, height: 1 }
+    );
+  }
+}
+
+export { R_OFF, S_OFF, TRS_STRIDE, T_OFF, computeNodeWorldMatrices, computeTopoOrder, resetTRS, writeBoneTextures };
+//# sourceMappingURL=skeleton-pose.js.map

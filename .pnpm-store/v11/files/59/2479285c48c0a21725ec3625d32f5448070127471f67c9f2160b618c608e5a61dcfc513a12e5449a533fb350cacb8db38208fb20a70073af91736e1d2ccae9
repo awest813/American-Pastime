@@ -1,0 +1,33 @@
+import { type IDisposable, type Nullable } from "@babylonjs/core/index.js";
+/**
+ * Gets the property descriptor for a property on an object, including inherited properties.
+ * @param target The object containing the property.
+ * @param propertyKey The key of the property to get the descriptor for.
+ * @returns The owner of the property (which may be different from the target in the case of inheritance) along with the property descriptor, or null if the property is not found.
+ */
+export declare function GetPropertyDescriptor<T extends object>(target: T, propertyKey: keyof T): Nullable<[owner: object, descriptor: PropertyDescriptor]>;
+/**
+ * Checks if a property is readonly.
+ * @param propertyDescriptor The property descriptor to check.
+ * @returns True if the property is readonly, false otherwise.
+ */
+export declare function IsPropertyReadonly(propertyDescriptor: PropertyDescriptor): boolean;
+/**
+ * Hooks that can be registered on a property to intercept its setter.
+ */
+export type PropertyHooks<T = unknown> = {
+    /**
+     * This function will be called after the hooked property is set.
+     * @param value The new value that was set on the property.
+     */
+    afterSet?: (value: T) => void;
+};
+/**
+ * Intercepts a property on an object and allows you to add hooks that will be called when the property is get or set.
+ * @param target The object containing the property to intercept.
+ * @param propertyKey The key of the property to intercept.
+ * @param hooks The hooks to call when the property is get or set.
+ * @returns A disposable that removes the hooks when disposed and returns the object to its original state.
+ */
+export declare function InterceptProperty<T extends object, K extends keyof T>(target: T, propertyKey: string extends K ? never : number extends K ? never : symbol extends K ? never : K, hooks: PropertyHooks<NonNullable<T[K]>>): IDisposable;
+export declare function InterceptProperty<T extends object>(target: T, propertyKey: keyof T, hooks: PropertyHooks): IDisposable;

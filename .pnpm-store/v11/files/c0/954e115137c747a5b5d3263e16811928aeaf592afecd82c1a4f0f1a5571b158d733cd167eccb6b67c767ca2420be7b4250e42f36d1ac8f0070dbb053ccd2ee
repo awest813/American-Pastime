@@ -1,0 +1,63 @@
+import { useEventCallback, useFluent } from '@fluentui/react-components';
+import * as React from 'react';
+import { EVENTS } from '../types';
+const multipliers = {
+    end: {
+        ArrowRight: 1,
+        ArrowLeft: -1
+    },
+    start: {
+        ArrowRight: -1,
+        ArrowLeft: 1
+    },
+    up: {
+        ArrowUp: 1,
+        ArrowDown: -1
+    },
+    down: {
+        ArrowUp: -1,
+        ArrowDown: 1
+    }
+};
+function isSupportedKey(growDirection, key) {
+    return Object.prototype.hasOwnProperty.call(multipliers, growDirection) && Object.prototype.hasOwnProperty.call(multipliers[growDirection], key);
+}
+export const useKeyboardHandler = (options)=>{
+    const { onValueChange, growDirection, getCurrentValue, unitHandle } = options;
+    const { dir } = useFluent();
+    const onKeyDown = useEventCallback((event)=>{
+        if (!isSupportedKey(growDirection, event.key)) {
+            return;
+        }
+        const currentValue = getCurrentValue();
+        var _multipliers_growDirection_event_key;
+        const multiplier = (_multipliers_growDirection_event_key = multipliers[growDirection][event.key]) != null ? _multipliers_growDirection_event_key : 1;
+        const directionMultiplier = dir === 'rtl' && [
+            'start',
+            'end'
+        ].includes(growDirection) ? -1 : 1;
+        const offset = multiplier * unitHandle.getOffsetStep() * directionMultiplier;
+        onValueChange(event, {
+            event,
+            value: unitHandle.roundValue(currentValue + offset),
+            type: EVENTS.keyboard,
+            unit: unitHandle.name
+        });
+    });
+    const attachHandlers = React.useCallback((node)=>{
+        node.addEventListener('keydown', onKeyDown);
+    }, [
+        onKeyDown
+    ]);
+    const detachHandlers = React.useCallback((node)=>{
+        node.removeEventListener('keydown', onKeyDown);
+    }, [
+        onKeyDown
+    ]);
+    return {
+        attachHandlers,
+        detachHandlers
+    };
+};
+
+//# sourceMappingURL=useKeyboardHandler.js.map

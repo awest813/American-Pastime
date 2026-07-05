@@ -1,0 +1,101 @@
+import { enableAnalyzer, getByteFrequencyData, getByteTimeDomainData } from './analyzer.js';
+
+const Defaults = {
+  fftSize: 2048,
+  smoothing: 0.8,
+  mode: "both",
+  backgroundColor: "#101014",
+  barColor: "#4fc3f7",
+  waveformColor: "#ffffff"
+};
+function createAudioVisualizer(host, canvas, options = {}) {
+  const fftSize = options.fftSize ?? Defaults.fftSize;
+  enableAnalyzer(host, { fftSize, smoothing: options.smoothing ?? Defaults.smoothing });
+  const ctx2d = canvas.getContext("2d");
+  if (!ctx2d) {
+    throw new Error("Unable to get a 2D context from the visualizer canvas.");
+  }
+  const viz = {
+    canvas,
+    _host: host,
+    _ctx2d: ctx2d,
+    _mode: options.mode ?? Defaults.mode,
+    _bgColor: options.backgroundColor ?? Defaults.backgroundColor,
+    _barColor: options.barColor ?? Defaults.barColor,
+    _waveColor: options.waveformColor ?? Defaults.waveformColor,
+    _freq: new Uint8Array(fftSize / 2),
+    _time: new Uint8Array(fftSize),
+    _raf: null,
+    _dispose: () => disposeAudioVisualizer(viz)
+  };
+  return viz;
+}
+function drawBars(viz, width, height) {
+  const ctx = viz._ctx2d;
+  const bins = viz._freq;
+  getByteFrequencyData(viz._host, bins);
+  const count = bins.length;
+  const barWidth = width / count;
+  ctx.fillStyle = viz._barColor;
+  for (let i = 0; i < count; i++) {
+    const magnitude = bins[i] / 255;
+    const barHeight = magnitude * height;
+    ctx.fillRect(i * barWidth, height - barHeight, Math.max(barWidth - 1, 1), barHeight);
+  }
+}
+function drawWaveform(viz, width, height) {
+  const ctx = viz._ctx2d;
+  const samples = viz._time;
+  getByteTimeDomainData(viz._host, samples);
+  const count = samples.length;
+  const step = width / count;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = viz._waveColor;
+  ctx.beginPath();
+  for (let i = 0; i < count; i++) {
+    const y = samples[i] / 255 * height;
+    const x = i * step;
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+}
+function renderAudioVisualizerFrame(viz) {
+  const { width, height } = viz.canvas;
+  const ctx = viz._ctx2d;
+  ctx.fillStyle = viz._bgColor;
+  ctx.fillRect(0, 0, width, height);
+  if (viz._mode === "bars" || viz._mode === "both") {
+    drawBars(viz, width, height);
+  }
+  if (viz._mode === "waveform" || viz._mode === "both") {
+    drawWaveform(viz, width, height);
+  }
+}
+function startAudioVisualizer(viz) {
+  if (viz._raf !== null || typeof requestAnimationFrame !== "function") {
+    return;
+  }
+  const loop = () => {
+    renderAudioVisualizerFrame(viz);
+    viz._raf = requestAnimationFrame(loop);
+  };
+  viz._raf = requestAnimationFrame(loop);
+}
+function stopAudioVisualizer(viz) {
+  if (viz._raf !== null) {
+    if (typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(viz._raf);
+    }
+    viz._raf = null;
+  }
+}
+function disposeAudioVisualizer(viz) {
+  stopAudioVisualizer(viz);
+}
+
+export { createAudioVisualizer, disposeAudioVisualizer, renderAudioVisualizerFrame, startAudioVisualizer, stopAudioVisualizer };
+//# sourceMappingURL=visualizer.js.map

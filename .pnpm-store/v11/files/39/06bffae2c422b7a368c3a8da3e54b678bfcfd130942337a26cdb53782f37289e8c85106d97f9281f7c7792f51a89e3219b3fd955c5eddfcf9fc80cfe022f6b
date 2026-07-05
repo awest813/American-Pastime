@@ -1,0 +1,5 @@
+import { type FunctionComponent } from "react";
+import { type PostProcessRenderPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/postProcessRenderPipeline.js";
+export declare const PostProcessRenderPipelineSamplesProperties: FunctionComponent<{
+    pipeline: PostProcessRenderPipeline;
+}>;

@@ -1,0 +1,33 @@
+async function loadMultiBuffer(json, baseUrl) {
+  const buffers = json.buffers ?? [];
+  const arrays = await Promise.all(buffers.map((b) => b?.uri ? fetch(resolveBufferUri(b.uri, baseUrl)).then((r) => r.arrayBuffer()) : Promise.resolve(new ArrayBuffer(0))));
+  const offsets = [];
+  let total = 0;
+  for (const a of arrays) {
+    offsets.push(total);
+    total += a.byteLength;
+    total = total + 3 & -4;
+  }
+  const out = new Uint8Array(total);
+  for (let i = 0; i < arrays.length; i++) {
+    out.set(new Uint8Array(arrays[i]), offsets[i]);
+  }
+  for (const bv of json.bufferViews ?? []) {
+    bv.byteOffset = (bv.byteOffset ?? 0) + offsets[bv.buffer ?? 0];
+    bv.buffer = 0;
+  }
+  return new DataView(out.buffer);
+}
+function resolveBufferUri(uri, baseUrl) {
+  if (baseUrl) {
+    return new URL(uri, baseUrl + "x").href;
+  }
+  try {
+    return new URL(uri).href;
+  } catch {
+    throw new Error("loadGltf: relative buffer URI needs a base URL.");
+  }
+}
+
+export { loadMultiBuffer };
+//# sourceMappingURL=gltf-multi-buffer.js.map

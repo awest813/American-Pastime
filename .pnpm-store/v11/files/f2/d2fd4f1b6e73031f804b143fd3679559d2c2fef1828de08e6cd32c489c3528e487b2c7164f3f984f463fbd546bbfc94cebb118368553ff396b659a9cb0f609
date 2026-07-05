@@ -1,0 +1,14 @@
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../services/selectionService";
+type MaterialsContentProps = {
+    scene: Scene;
+    selectionService: ISelectionService;
+};
+/**
+ * Materials content component
+ * @param props - Component props
+ * @returns React component
+ */
+export declare const MaterialsContent: FunctionComponent<MaterialsContentProps>;
+export {};

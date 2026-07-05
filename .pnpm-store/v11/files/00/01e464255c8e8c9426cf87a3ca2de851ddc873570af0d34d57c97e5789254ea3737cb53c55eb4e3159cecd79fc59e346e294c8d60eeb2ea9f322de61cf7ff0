@@ -1,0 +1,106 @@
+function parseNodeMaterialSource(source) {
+  const raw = source;
+  if (!raw || !Array.isArray(raw.blocks)) {
+    throw new Error("NodeMaterial: invalid source — expected `.blocks` array");
+  }
+  const blocks = /* @__PURE__ */ new Map();
+  for (const rb of raw.blocks) {
+    if (typeof rb.id !== "number") {
+      throw new Error(`NodeMaterial: block missing numeric id (name=${rb.name})`);
+    }
+    const className = stripBabylonPrefix(rb.customType);
+    const inputs = /* @__PURE__ */ new Map();
+    for (const ri of rb.inputs ?? []) {
+      const inName = (ri.name ?? "").trim();
+      const outName = typeof ri.targetConnectionName === "string" ? ri.targetConnectionName.trim() : void 0;
+      const source2 = typeof ri.targetBlockId === "number" && typeof outName === "string" ? { blockId: ri.targetBlockId, outputName: outName } : null;
+      inputs.set(inName, {
+        name: inName,
+        source: source2
+      });
+    }
+    const outputs = /* @__PURE__ */ new Set();
+    for (const ro of rb.outputs ?? []) {
+      outputs.add((ro.name ?? "").trim());
+    }
+    blocks.set(rb.id, {
+      id: rb.id,
+      className,
+      name: rb.name,
+      inputs,
+      outputs,
+      serialized: rb
+    });
+  }
+  const namedInputs = /* @__PURE__ */ new Map();
+  for (const b of blocks.values()) {
+    if (b.className !== "InputBlock") {
+      continue;
+    }
+    const mode = b.serialized["mode"] ?? b.serialized["_mode"];
+    if (mode === 0 || mode === void 0) {
+      if (typeof b.serialized["systemValue"] === "number") {
+        continue;
+      }
+      if (b.name) {
+        namedInputs.set(b.name, b.id);
+      }
+    }
+  }
+  const rawAlpha = raw;
+  const alphaMode = typeof rawAlpha.alphaMode === "number" ? rawAlpha.alphaMode : 0;
+  let needsAlphaBlending;
+  if (rawAlpha.forceAlphaBlending === true) {
+    needsAlphaBlending = true;
+  } else if (typeof rawAlpha._needAlphaBlending === "boolean") {
+    needsAlphaBlending = rawAlpha._needAlphaBlending;
+  } else {
+    const fragOut = findBlockByClassName({ blocks}, "FragmentOutputBlock");
+    const aConn = fragOut?.inputs.get("a");
+    needsAlphaBlending = alphaMode > 0 && !!aConn?.source;
+  }
+  return { blocks, namedInputs, alphaMode, needsAlphaBlending, backFaceCulling: rawAlpha.backFaceCulling !== false };
+}
+function stripBabylonPrefix(customType) {
+  return customType.startsWith("BABYLON.") ? customType.slice("BABYLON.".length) : customType;
+}
+function topoSort(graph, roots) {
+  const order = [];
+  const state = /* @__PURE__ */ new Map();
+  const visit = (id, path) => {
+    const s = state.get(id) ?? 0;
+    if (s === 2) {
+      return;
+    }
+    if (s === 1) {
+      throw new Error(`NodeMaterial: cycle detected through block ${id} (${path.join(" -> ")})`);
+    }
+    state.set(id, 1);
+    const block = graph.blocks.get(id);
+    if (!block) {
+      throw new Error(`NodeMaterial: dangling reference to block ${id}`);
+    }
+    for (const input of block.inputs.values()) {
+      if (input.source) {
+        visit(input.source.blockId, [...path, id]);
+      }
+    }
+    state.set(id, 2);
+    order.push(id);
+  };
+  for (const r of roots) {
+    visit(r, [r]);
+  }
+  return order;
+}
+function findBlockByClassName(graph, className) {
+  for (const b of graph.blocks.values()) {
+    if (b.className === className) {
+      return b;
+    }
+  }
+  return null;
+}
+
+export { findBlockByClassName, parseNodeMaterialSource, topoSort };
+//# sourceMappingURL=node-parser.js.map

@@ -1,0 +1,4 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ITextureEditorService } from "../../textureEditor/textureEditorService";
+import { type IPropertiesService } from "./propertiesService";
+export declare const TexturePropertiesServiceDefinition: ServiceDefinition<[], [IPropertiesService, ITextureEditorService]>;

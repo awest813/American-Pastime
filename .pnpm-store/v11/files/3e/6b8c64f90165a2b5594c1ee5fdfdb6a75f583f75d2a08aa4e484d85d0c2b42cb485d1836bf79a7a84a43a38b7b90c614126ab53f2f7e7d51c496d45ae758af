@@ -1,0 +1,9 @@
+function setAnimationWeight(group, weight) {
+  if (!Number.isFinite(weight) || weight < 0 || weight > 1) {
+    throw new Error(`Animation weight must be a finite number between 0 and 1, got ${weight}`);
+  }
+  group.weight = weight;
+}
+
+export { setAnimationWeight };
+//# sourceMappingURL=animation-weight.js.map

@@ -1,0 +1,13 @@
+import { type FunctionComponent } from "react";
+import { type BaseTexture } from "@babylonjs/core/index.js";
+type StatusBarProps = {
+    texture: BaseTexture;
+    mipLevel: number;
+};
+/**
+ * Displays status information about the texture
+ * @param props - The status bar properties
+ * @returns The status bar component
+ */
+export declare const StatusBar: FunctionComponent<StatusBarProps>;
+export {};

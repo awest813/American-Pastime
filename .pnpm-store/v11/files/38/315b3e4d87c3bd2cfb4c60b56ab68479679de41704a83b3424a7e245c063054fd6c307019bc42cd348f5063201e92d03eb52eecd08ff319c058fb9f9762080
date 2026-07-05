@@ -1,0 +1,10 @@
+function mipLevelCount(width, height) {
+  return Math.floor(Math.log2(Math.max(width, height))) + 1;
+}
+function biasedMipLevelCount(width, height, lodBias) {
+  const maxDim = Math.max(width, height);
+  return Math.max(1, Math.floor(Math.log2(maxDim) - lodBias) + 1);
+}
+
+export { biasedMipLevelCount, mipLevelCount };
+//# sourceMappingURL=mip-count.js.map

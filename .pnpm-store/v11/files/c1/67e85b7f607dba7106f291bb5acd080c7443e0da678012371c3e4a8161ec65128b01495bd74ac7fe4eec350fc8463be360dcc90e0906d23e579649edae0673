@@ -1,0 +1,34 @@
+import { F32 } from '../engine/typed-arrays.js';
+
+function localMatrixFromDirection(dx, dy, dz, px = 0, py = 0, pz = 0, out) {
+  const flen = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+  const fx = dx / flen, fy = dy / flen, fz = dz / flen;
+  let rx = -fz, rz = fx;
+  const ry = 0;
+  const rlen = Math.sqrt(rx * rx + ry * ry + rz * rz) || 1;
+  rx /= rlen;
+  rz /= rlen;
+  const ux = fy * rz - fz * ry, uy = fz * rx - fx * rz, uz = fx * ry - fy * rx;
+  const out4 = out ?? new F32(16);
+  const m = out4;
+  m[0] = rx;
+  m[1] = ry;
+  m[2] = rz;
+  m[3] = 0;
+  m[4] = ux;
+  m[5] = uy;
+  m[6] = uz;
+  m[7] = 0;
+  m[8] = fx;
+  m[9] = fy;
+  m[10] = fz;
+  m[11] = 0;
+  m[12] = px;
+  m[13] = py;
+  m[14] = pz;
+  m[15] = 1;
+  return out4;
+}
+
+export { localMatrixFromDirection };
+//# sourceMappingURL=light-matrix.js.map

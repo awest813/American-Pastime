@@ -1,0 +1,12 @@
+function mat4PerspectiveLHToRef(out, fov, aspect, near, far) {
+  const tan = 1 / Math.tan(fov * 0.5);
+  const range = far - near;
+  out[0] = tan / aspect;
+  out[5] = tan;
+  out[10] = -near / range;
+  out[11] = 1;
+  out[14] = far * near / range;
+}
+
+export { mat4PerspectiveLHToRef };
+//# sourceMappingURL=mat4-perspective-lh-to-ref.js.map

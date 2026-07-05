@@ -1,0 +1,52 @@
+import { unregisterMeshScene } from './mesh-scene-registry.js';
+import { disposeMeshGpu } from '../mesh/mesh-dispose.js';
+import { removeMeshFromTask } from '../frame-graph/render-task.js';
+
+function removeFromScene(scene, mesh) {
+  const fns = scene._meshDisposables.get(mesh);
+  let didMutate = false;
+  if (fns) {
+    didMutate = true;
+    for (const fn of fns) {
+      fn();
+    }
+    scene._meshDisposables.delete(mesh);
+  }
+  const mi2 = scene.meshes.indexOf(mesh);
+  if (mi2 >= 0) {
+    scene.meshes.splice(mi2, 1);
+    didMutate = true;
+  }
+  const i = scene._renderables.findIndex((r) => r.mesh === mesh);
+  if (i >= 0) {
+    scene._renderables.splice(i, 1);
+    didMutate = true;
+  }
+  if (didMutate) {
+    scene._renderableVersion++;
+  }
+  const build = mesh.material?._buildGroup;
+  const group = build ? scene._groups.get(build) : void 0;
+  if (group) {
+    const gi = group.indexOf(mesh);
+    if (gi >= 0) {
+      group.splice(gi, 1);
+    }
+  }
+  const qi = scene._materialSwapQueue.indexOf(mesh);
+  if (qi >= 0) {
+    scene._materialSwapQueue.splice(qi, 1);
+  }
+  mesh.parent = null;
+  for (const task of scene._frameGraph._tasks) {
+    if ("_renderables" in task) {
+      removeMeshFromTask(task, mesh);
+    }
+  }
+  if (unregisterMeshScene(scene, mesh)) {
+    disposeMeshGpu(mesh);
+  }
+}
+
+export { removeFromScene };
+//# sourceMappingURL=scene-remove.js.map

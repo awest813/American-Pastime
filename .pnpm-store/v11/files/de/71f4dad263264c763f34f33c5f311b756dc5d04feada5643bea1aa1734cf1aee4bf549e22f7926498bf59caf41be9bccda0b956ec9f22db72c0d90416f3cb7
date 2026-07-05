@@ -1,0 +1,113 @@
+import { U32 } from '../engine/typed-arrays.js';
+import { addSprite2DIndex, removeSprite2DIndex, setSprite2DFrameIndex, updateSprite2DIndex } from './sprite-2d.js';
+
+const MAX_HANDLE_ID = 4294967295;
+function getOrCreateState(layer) {
+  const withHandles = layer;
+  let state = withHandles._handleState;
+  if (state) {
+    ensureIndexCapacity(layer, state);
+    return state;
+  }
+  state = {
+    nextId: 1,
+    idToIndex: /* @__PURE__ */ new Map(),
+    indexToId: new U32(layer._capacity)
+  };
+  const hooks = {
+    removeIndex(index, last) {
+      onRemoveIndex(state, index, last);
+    },
+    clear() {
+      state.idToIndex.clear();
+      state.indexToId.fill(0);
+    }
+  };
+  withHandles._handleState = state;
+  withHandles._handleHooks = hooks;
+  return state;
+}
+function getState(layer) {
+  return layer._handleState;
+}
+function ensureIndexCapacity(layer, state) {
+  if (state.indexToId.length >= layer._capacity) {
+    return;
+  }
+  const next = new U32(layer._capacity);
+  next.set(state.indexToId);
+  state.indexToId = next;
+}
+function onRemoveIndex(state, index, last) {
+  const removedId = state.indexToId[index] ?? 0;
+  const movedId = state.indexToId[last] ?? 0;
+  if (removedId !== 0) {
+    state.idToIndex.delete(removedId);
+  }
+  if (index !== last) {
+    if (movedId !== 0) {
+      state.idToIndex.set(movedId, index);
+    }
+    if (index < state.indexToId.length) {
+      state.indexToId[index] = movedId;
+    }
+  } else if (index < state.indexToId.length) {
+    state.indexToId[index] = 0;
+  }
+  if (last < state.indexToId.length) {
+    state.indexToId[last] = 0;
+  }
+}
+function allocateId(state) {
+  const id = state.nextId;
+  if (id > MAX_HANDLE_ID) {
+    throw new Error("addSprite2D: handle id space exhausted.");
+  }
+  state.nextId = id + 1;
+  return id;
+}
+function lookupIndex(handle) {
+  const state = getState(handle.layer);
+  if (!state) {
+    return null;
+  }
+  const index = state.idToIndex.get(handle.id);
+  return index === void 0 ? null : index;
+}
+function requireIndex(handle, caller) {
+  const index = lookupIndex(handle);
+  if (index === null) {
+    throw new Error(`${caller}: Sprite2DHandle ${handle.id} has been removed.`);
+  }
+  return index;
+}
+function addSprite2D(layer, props) {
+  const index = addSprite2DIndex(layer, props);
+  const state = getOrCreateState(layer);
+  const id = allocateId(state);
+  state.idToIndex.set(id, index);
+  state.indexToId[index] = id;
+  return { _entityType: "sprite-2d-handle", layer, id };
+}
+function updateSprite2D(handle, patch) {
+  updateSprite2DIndex(handle.layer, requireIndex(handle, "updateSprite2D"), patch);
+}
+function removeSprite2D(handle) {
+  const index = lookupIndex(handle);
+  if (index === null) {
+    return;
+  }
+  removeSprite2DIndex(handle.layer, index);
+}
+function setSprite2DFrame(handle, frame) {
+  setSprite2DFrameIndex(handle.layer, requireIndex(handle, "setSprite2DFrame"), frame);
+}
+function getSprite2DHandleIndex(handle) {
+  return requireIndex(handle, "getSprite2DHandleIndex");
+}
+function isSprite2DHandleAlive(handle) {
+  return lookupIndex(handle) !== null;
+}
+
+export { addSprite2D, getSprite2DHandleIndex, isSprite2DHandleAlive, removeSprite2D, setSprite2DFrame, updateSprite2D };
+//# sourceMappingURL=sprite-2d-handle.js.map

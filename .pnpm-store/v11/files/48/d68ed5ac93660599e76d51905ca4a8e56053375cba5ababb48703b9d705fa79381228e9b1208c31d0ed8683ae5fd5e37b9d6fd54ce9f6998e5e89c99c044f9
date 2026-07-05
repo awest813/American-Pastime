@@ -1,0 +1,17 @@
+import { getOrCreateSampler } from './gpu-pool.js';
+
+const _nearestDesc = { magFilter: "nearest", minFilter: "nearest" };
+const _bilinearDesc = { magFilter: "linear", minFilter: "linear" };
+const _trilinearDesc = { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" };
+function getNearestSampler(engine) {
+  return getOrCreateSampler(engine, _nearestDesc);
+}
+function getBilinearSampler(engine) {
+  return getOrCreateSampler(engine, _bilinearDesc);
+}
+function getTrilinearSampler(engine) {
+  return getOrCreateSampler(engine, _trilinearDesc);
+}
+
+export { getBilinearSampler, getNearestSampler, getTrilinearSampler };
+//# sourceMappingURL=samplers.js.map

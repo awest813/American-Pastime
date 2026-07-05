@@ -1,0 +1,7 @@
+/**
+ * Generates a string representation of a value for clipboard copy.
+ * Handles primitives, vectors, colors, quaternions, and other Babylon.js types.
+ * @param value - The value to convert to a string
+ * @returns A string that can be used to recreate the value
+ */
+export declare function GenerateCopyString(value: unknown): string;

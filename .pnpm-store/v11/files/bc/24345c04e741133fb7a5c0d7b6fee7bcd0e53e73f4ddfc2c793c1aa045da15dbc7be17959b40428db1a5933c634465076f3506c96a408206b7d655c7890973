@@ -1,0 +1,7 @@
+import { type Scene } from "@babylonjs/core/scene.js";
+export declare const GIFCaptureTool: import("react").ForwardRefExoticComponent<{
+    scene: Scene;
+} & {
+    spinnerSize?: import("@fluentui/react-spinner").SpinnerProps["size"];
+    spinnerLabel?: string;
+} & import("react").RefAttributes<never>>;

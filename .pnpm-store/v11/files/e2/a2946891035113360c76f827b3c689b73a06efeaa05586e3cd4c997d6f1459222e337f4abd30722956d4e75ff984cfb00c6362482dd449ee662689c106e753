@@ -1,0 +1,13 @@
+const feature = {
+  id: "KHR_xmp_json_ld",
+  async applyAsset(_meshes, _root, ctx) {
+    const json = ctx._json;
+    const packets = json.extensions?.KHR_xmp_json_ld?.packets ?? [];
+    const assetPacketIndex = json.asset?.extensions?.KHR_xmp_json_ld?.packet;
+    const assetPacket = assetPacketIndex !== void 0 ? packets[assetPacketIndex] : void 0;
+    return { xmpMetadata: { packets, assetPacket } };
+  }
+};
+
+export { feature as default };
+//# sourceMappingURL=gltf-feature-xmp.js.map

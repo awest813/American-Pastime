@@ -1,0 +1,166 @@
+import { U32, F32 } from '../engine/typed-arrays.js';
+import { computeNormals } from './compute-normals.js';
+
+function len(v) {
+  return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+function sub(a, b) {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+function createRibbonData(options) {
+  let pathArray = options.pathArray;
+  const closeArray = options.closeArray || false;
+  const closePath = options.closePath || false;
+  const defaultOffset = Math.floor(pathArray[0].length / 2);
+  let offset = options.offset ?? defaultOffset;
+  offset = offset > defaultOffset ? defaultOffset : Math.floor(offset);
+  if (pathArray.length < 2) {
+    const ar1 = [];
+    const ar2 = [];
+    const src = pathArray[0];
+    for (let i = 0; i < src.length - offset; i++) {
+      ar1.push(src[i]);
+      ar2.push(src[i + offset]);
+    }
+    pathArray = [ar1, ar2];
+  }
+  const positions = [];
+  const indices = [];
+  const uvs = [];
+  const us = [];
+  const vs = [];
+  const uTotalDistance = [];
+  const vTotalDistance = [];
+  const lg = [];
+  const idx = [];
+  const closePathCorr = closePath ? 1 : 0;
+  const closeArrayCorr = closeArray ? 1 : 0;
+  let minlg = pathArray[0].length;
+  let idc = 0;
+  for (let p2 = 0; p2 < pathArray.length + closeArrayCorr; p2++) {
+    uTotalDistance[p2] = 0;
+    us[p2] = [0];
+    const path = p2 === pathArray.length ? pathArray[0] : pathArray[p2];
+    const l = path.length;
+    minlg = minlg < l ? minlg : l;
+    let j = 0;
+    while (j < l) {
+      const pt = path[j];
+      positions.push(pt.x, pt.y, pt.z);
+      if (j > 0) {
+        const vectlg = len(sub(path[j], path[j - 1]));
+        const dist = vectlg + uTotalDistance[p2];
+        us[p2].push(dist);
+        uTotalDistance[p2] = dist;
+      }
+      j++;
+    }
+    if (closePath) {
+      j--;
+      positions.push(path[0].x, path[0].y, path[0].z);
+      const vectlg = len(sub(path[j], path[0]));
+      const dist = vectlg + uTotalDistance[p2];
+      us[p2].push(dist);
+      uTotalDistance[p2] = dist;
+    }
+    lg[p2] = l + closePathCorr;
+    idx[p2] = idc;
+    idc += l + closePathCorr;
+  }
+  for (let i = 0; i < minlg + closePathCorr; i++) {
+    vTotalDistance[i] = 0;
+    vs[i] = [0];
+    for (let p2 = 0; p2 < pathArray.length - 1 + closeArrayCorr; p2++) {
+      const path1 = pathArray[p2];
+      const path2 = p2 === pathArray.length - 1 ? pathArray[0] : pathArray[p2 + 1];
+      let v1;
+      let v2;
+      if (i === minlg) {
+        v1 = path1[0];
+        v2 = path2[0];
+      } else {
+        v1 = path1[i];
+        v2 = path2[i];
+      }
+      const vectlg = len(sub(v2, v1));
+      const dist = vectlg + vTotalDistance[i];
+      vs[i].push(dist);
+      vTotalDistance[i] = dist;
+    }
+  }
+  for (let p2 = 0; p2 < pathArray.length + closeArrayCorr; p2++) {
+    for (let i = 0; i < minlg + closePathCorr; i++) {
+      const u = uTotalDistance[p2] !== 0 ? us[p2][i] / uTotalDistance[p2] : 0;
+      const v = vTotalDistance[i] !== 0 ? vs[i][p2] / vTotalDistance[i] : 0;
+      uvs.push(u, v);
+    }
+  }
+  let p = 0;
+  let pi = 0;
+  let l1 = lg[p] - 1;
+  let l2 = lg[p + 1] - 1;
+  let min = l1 < l2 ? l1 : l2;
+  let shft = idx[1] - idx[0];
+  const path1nb = lg.length - 1;
+  while (pi <= min && p < path1nb) {
+    indices.push(pi, pi + shft, pi + 1);
+    indices.push(pi + shft + 1, pi + 1, pi + shft);
+    pi += 1;
+    if (pi === min) {
+      p++;
+      shft = idx[p + 1] - idx[p];
+      l1 = lg[p] - 1;
+      l2 = lg[p + 1] - 1;
+      pi = idx[p];
+      min = l1 < l2 ? l1 + pi : l2 + pi;
+    }
+  }
+  const normals = computeNormals(positions, indices);
+  if (closePath) {
+    for (let p2 = 0; p2 < pathArray.length; p2++) {
+      const indexFirst = idx[p2] * 3;
+      const indexLast = p2 + 1 < pathArray.length ? (idx[p2 + 1] - 1) * 3 : normals.length - 3;
+      normals[indexFirst] = (normals[indexFirst] + normals[indexLast]) * 0.5;
+      normals[indexFirst + 1] = (normals[indexFirst + 1] + normals[indexLast + 1]) * 0.5;
+      normals[indexFirst + 2] = (normals[indexFirst + 2] + normals[indexLast + 2]) * 0.5;
+      const nl = Math.sqrt(
+        normals[indexFirst] * normals[indexFirst] + normals[indexFirst + 1] * normals[indexFirst + 1] + normals[indexFirst + 2] * normals[indexFirst + 2]
+      ) || 1;
+      normals[indexFirst] = normals[indexFirst] / nl;
+      normals[indexFirst + 1] = normals[indexFirst + 1] / nl;
+      normals[indexFirst + 2] = normals[indexFirst + 2] / nl;
+      normals[indexLast] = normals[indexFirst];
+      normals[indexLast + 1] = normals[indexFirst + 1];
+      normals[indexLast + 2] = normals[indexFirst + 2];
+    }
+  }
+  if (closeArray) {
+    let indexFirst = idx[0] * 3;
+    let indexLast = idx[pathArray.length] * 3;
+    for (let i = 0; i < minlg + closePathCorr; i++) {
+      normals[indexFirst] = (normals[indexFirst] + normals[indexLast]) * 0.5;
+      normals[indexFirst + 1] = (normals[indexFirst + 1] + normals[indexLast + 1]) * 0.5;
+      normals[indexFirst + 2] = (normals[indexFirst + 2] + normals[indexLast + 2]) * 0.5;
+      const nl = Math.sqrt(
+        normals[indexFirst] * normals[indexFirst] + normals[indexFirst + 1] * normals[indexFirst + 1] + normals[indexFirst + 2] * normals[indexFirst + 2]
+      ) || 1;
+      normals[indexFirst] = normals[indexFirst] / nl;
+      normals[indexFirst + 1] = normals[indexFirst + 1] / nl;
+      normals[indexFirst + 2] = normals[indexFirst + 2] / nl;
+      normals[indexLast] = normals[indexFirst];
+      normals[indexLast + 1] = normals[indexFirst + 1];
+      normals[indexLast + 2] = normals[indexFirst + 2];
+      indexFirst += 3;
+      indexLast += 3;
+    }
+  }
+  return {
+    positions: new F32(positions),
+    normals: new F32(normals),
+    uvs: new F32(uvs),
+    indices: new U32(indices)
+  };
+}
+
+export { createRibbonData };
+//# sourceMappingURL=create-ribbon.js.map

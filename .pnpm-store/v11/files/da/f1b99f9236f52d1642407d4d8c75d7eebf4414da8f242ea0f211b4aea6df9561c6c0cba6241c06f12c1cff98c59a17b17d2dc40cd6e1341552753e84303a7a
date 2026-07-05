@@ -1,0 +1,56 @@
+import { type Vector3 } from "@babylonjs/core/Maths/math.vector.js";
+import { Attractor } from "@babylonjs/core/Particles/attractor.js";
+import { type ParticleSystem } from "@babylonjs/core/Particles/particleSystem.js";
+import { type NodeParticleSystemSet } from "@babylonjs/core/Particles/Node/nodeParticleSystemSet.js";
+import { UpdateAttractorBlock } from "@babylonjs/core/Particles/Node/Blocks/Update/updateAttractorBlock.js";
+/**
+ * Represents an attractor in a normalized way that works for both CPU and Node particle systems.
+ */
+export interface IAttractorData {
+    /** The position of the attractor */
+    position: Vector3;
+    /** The strength of the attractor (null if dynamically computed) */
+    strength: number | null;
+    /** Sets the strength of the attractor */
+    setStrength: (value: number) => void;
+    /** The original attractor object (CPU) or UpdateAttractorBlock (Node) */
+    source: Attractor | UpdateAttractorBlock;
+    /** Whether this attractor is read-only (position and strength cannot be edited in inspector) */
+    isReadOnly: boolean;
+}
+/**
+ * Interface for an attractor source that provides attractors from different particle system types.
+ */
+export interface IAttractorSource {
+    /** The attractors from the source */
+    attractors: IAttractorData[];
+    /** Add a new attractor (only for CPU particle systems) */
+    addAttractor?: (attractor?: Attractor) => void;
+    /** Remove an attractor (only for CPU particle systems) */
+    removeAttractor?: (attractor: Attractor) => void;
+}
+/**
+ * Creates an IAttractorData adapter from a CPU particle system Attractor.
+ * @param attractor The CPU particle system attractor
+ * @returns The IAttractorData adapter
+ */
+export declare function CreateCPUAttractorData(attractor: Attractor): IAttractorData;
+/**
+ * Creates an IAttractorData adapter from a Node particle system UpdateAttractorBlock.
+ * @param block The UpdateAttractorBlock from a Node particle system
+ * @returns The IAttractorData adapter
+ */
+export declare function CreateNodeAttractorData(block: UpdateAttractorBlock): IAttractorData;
+/**
+ * Creates an IAttractorSource for a CPU particle system.
+ * @param system The CPU particle system
+ * @param attractors The current attractors array (from useObservableArray hook)
+ * @returns The IAttractorSource adapter
+ */
+export declare function CreateCPUAttractorSource(system: ParticleSystem, attractors: Attractor[]): IAttractorSource;
+/**
+ * Creates an IAttractorSource for a Node particle system.
+ * @param nodeSet The NodeParticleSystemSet
+ * @returns The IAttractorSource adapter
+ */
+export declare function CreateNodeAttractorSource(nodeSet: NodeParticleSystemSet): IAttractorSource;

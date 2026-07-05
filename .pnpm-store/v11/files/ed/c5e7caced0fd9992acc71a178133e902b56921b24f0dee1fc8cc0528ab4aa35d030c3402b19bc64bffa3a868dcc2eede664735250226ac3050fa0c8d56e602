@@ -1,0 +1,24 @@
+function _quatFromRotationBasis(m11, m12, m13, m21, m22, m23, m31, m32, m33) {
+  const trace = m11 + m22 + m33;
+  let s;
+  if (trace > 0) {
+    s = 0.5 / Math.sqrt(trace + 1);
+    return { x: (m32 - m23) * s, y: (m13 - m31) * s, z: (m21 - m12) * s, w: 0.25 / s };
+  }
+  if (m11 > m22 && m11 > m33) {
+    s = 2 * Math.sqrt(1 + m11 - m22 - m33);
+    return { x: 0.25 * s, y: (m12 + m21) / s, z: (m13 + m31) / s, w: (m32 - m23) / s };
+  }
+  if (m22 > m33) {
+    s = 2 * Math.sqrt(1 + m22 - m11 - m33);
+    return { x: (m12 + m21) / s, y: 0.25 * s, z: (m23 + m32) / s, w: (m13 - m31) / s };
+  }
+  s = 2 * Math.sqrt(1 + m33 - m11 - m22);
+  return { x: (m13 + m31) / s, y: (m23 + m32) / s, z: 0.25 * s, w: (m21 - m12) / s };
+}
+function quatFromRotationMatrix(matrix) {
+  return _quatFromRotationBasis(matrix[0], matrix[4], matrix[8], matrix[1], matrix[5], matrix[9], matrix[2], matrix[6], matrix[10]);
+}
+
+export { _quatFromRotationBasis, quatFromRotationMatrix };
+//# sourceMappingURL=quat-from-rotation-matrix.js.map

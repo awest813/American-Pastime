@@ -1,0 +1,9 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../sceneContext";
+import { type IBridgeCommandRegistry } from "@babylonjs/shared-ui-components/modularTool/services/cli/bridgeCommandRegistry.js";
+import "@babylonjs/core/Engines/AbstractEngine/abstractEngine.timeQuery.js";
+import "@babylonjs/core/Engines/Extensions/engine.query.js";
+/**
+ * Service that registers CLI commands for querying scene and engine statistics.
+ */
+export declare const StatsCommandServiceDefinition: ServiceDefinition<[], [IBridgeCommandRegistry, ISceneContext]>;

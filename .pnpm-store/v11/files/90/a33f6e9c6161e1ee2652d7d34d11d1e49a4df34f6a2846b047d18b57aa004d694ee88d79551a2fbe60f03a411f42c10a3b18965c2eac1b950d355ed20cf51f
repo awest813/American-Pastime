@@ -1,0 +1,4 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "./sceneContext";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+export declare const MiniStatsServiceDefinition: ServiceDefinition<[], [ISceneContext, IShellService]>;

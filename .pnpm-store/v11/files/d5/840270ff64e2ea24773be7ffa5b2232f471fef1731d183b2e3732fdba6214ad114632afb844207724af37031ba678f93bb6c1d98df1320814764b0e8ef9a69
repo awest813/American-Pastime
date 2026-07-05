@@ -1,0 +1,629 @@
+import { computeLocalBasis, computeYawPitchFromLookAt } from './geospatial-camera.js';
+import { flyGeospatialCameraToAsync } from './geospatial-camera-fly.js';
+import { GEO_EPSILON, clampZoomDistance } from './geospatial-limits.js';
+import { getViewProjectionMatrix } from './camera.js';
+import { createPickingRay } from '../picking/ray.js';
+import { mat4Invert } from '../math/mat4-invert.js';
+import { computePanSpeedMultiplier, integrateInertialVelocity, REFERENCE_FRAME_RATE, computeZoomSpeedMultiplier } from './geospatial-movement.js';
+
+function attachGeospatialControls(camera, canvas, scene, options) {
+  const zoomToCursor = options?.zoomToCursor ?? true;
+  const checkCollisions = options?.checkCollisions ?? false;
+  const doubleTapAnimationDurationMs = options?.doubleTapAnimationDurationMs ?? 1e3;
+  const doubleTapEasingFunction = options?.doubleTapEasingFunction ?? null;
+  const speed = 1;
+  const panSpeed = 1;
+  const rotationXSpeed = Math.PI / 500;
+  const rotationYSpeed = Math.PI / 500;
+  const zoomSpeed = 2;
+  const panInertia = 0;
+  const rotationInertia = 0;
+  const zoomInertia = 0.9;
+  const panAccumulated = { x: 0, y: 0, z: 0 };
+  const rotationAccumulated = { x: 0, y: 0 };
+  let zoomAccumulated = 0;
+  let activeInput = false;
+  const panVelocity = { x: 0, y: 0, z: 0 };
+  const rotationVelocity = { x: 0, y: 0 };
+  let zoomVelocity = 0;
+  let prevFrameTimeMs = 0;
+  let panSpeedMultiplier = 1;
+  let zoomSpeedMultiplier = 1;
+  const panDelta = { x: 0, y: 0, z: 0 };
+  const rotationDelta = { x: 0, y: 0 };
+  let zoomDelta = 0;
+  let computedZoomPickPoint = null;
+  let hitPointRadius;
+  const dragPlaneNormal = { x: 0, y: 0, z: 0 };
+  const dragPlaneOriginEcef = { x: 0, y: 0, z: 0 };
+  const dragPlaneHitPointLocal = { x: 0, y: 0, z: 0 };
+  const previousDragPlaneHitPointLocal = { x: 0, y: 0, z: 0 };
+  let pointerX = 0;
+  let pointerY = 0;
+  let mode = "none";
+  let lastX = 0;
+  let lastY = 0;
+  const keysDown = /* @__PURE__ */ new Set();
+  const activeTouches = /* @__PURE__ */ new Map();
+  let pinchPrevDist = 0;
+  let pinchStartCentroidX = 0;
+  let pinchStartCentroidY = 0;
+  let pinchPanning = false;
+  const PINCH_PAN_THRESHOLD = 20;
+  const PINCH_ZOOM_SCALE = 0.05;
+  function rectSize() {
+    const r = canvas.getBoundingClientRect();
+    return { width: r.width || canvas.width, height: r.height || canvas.height };
+  }
+  function toCanvas(e) {
+    const r = canvas.getBoundingClientRect();
+    pointerX = e.clientX - r.left;
+    pointerY = e.clientY - r.top;
+  }
+  function screenRay(x, y) {
+    const { width, height } = rectSize();
+    const vp = getViewProjectionMatrix(camera, width / height);
+    const ray = createPickingRay(x, y, vp, width, height);
+    if (!ray) {
+      return null;
+    }
+    return { origin: { x: ray.origin[0], y: ray.origin[1], z: ray.origin[2] }, direction: { x: ray.direction[0], y: ray.direction[1], z: ray.direction[2] } };
+  }
+  function intersectPlanet(origin, dir) {
+    const r = camera.limits.planetRadius;
+    const b = 2 * (origin.x * dir.x + origin.y * dir.y + origin.z * dir.z);
+    const c = origin.x * origin.x + origin.y * origin.y + origin.z * origin.z - r * r;
+    const disc = b * b - 4 * c;
+    if (disc < 0) {
+      return null;
+    }
+    const sq = Math.sqrt(disc);
+    let t = (-b - sq) / 2;
+    if (t < 0) {
+      t = (-b + sq) / 2;
+    }
+    if (t < 0) {
+      return null;
+    }
+    return { x: origin.x + dir.x * t, y: origin.y + dir.y * t, z: origin.z + dir.z * t };
+  }
+  function pickScreen(x, y) {
+    const ray = screenRay(x, y);
+    if (!ray) {
+      return { hit: false, point: null, ray: null };
+    }
+    const point = intersectPlanet(ray.origin, ray.direction);
+    return { hit: !!point, point, ray };
+  }
+  function pickAlongVector(dir) {
+    return intersectPlanet(camera.position, dir);
+  }
+  function recalcDragPlaneHitPoint(radius, ray, localToEcef) {
+    const posLen = Math.max(1e-5, Math.hypot(camera.position.x, camera.position.y, camera.position.z));
+    const s = radius / posLen;
+    dragPlaneOriginEcef.x = camera.position.x * s;
+    dragPlaneOriginEcef.y = camera.position.y * s;
+    dragPlaneOriginEcef.z = camera.position.z * s;
+    const east = { x: 0, y: 0, z: 0 };
+    const north = { x: 0, y: 0, z: 0 };
+    computeLocalBasis(dragPlaneOriginEcef, east, north, dragPlaneNormal);
+    localToEcef[0] = east.x;
+    localToEcef[1] = east.y;
+    localToEcef[2] = east.z;
+    localToEcef[3] = 0;
+    localToEcef[4] = north.x;
+    localToEcef[5] = north.y;
+    localToEcef[6] = north.z;
+    localToEcef[7] = 0;
+    localToEcef[8] = dragPlaneNormal.x;
+    localToEcef[9] = dragPlaneNormal.y;
+    localToEcef[10] = dragPlaneNormal.z;
+    localToEcef[11] = 0;
+    localToEcef[12] = dragPlaneOriginEcef.x;
+    localToEcef[13] = dragPlaneOriginEcef.y;
+    localToEcef[14] = dragPlaneOriginEcef.z;
+    localToEcef[15] = 1;
+    const ecefToLocal = mat4Invert(localToEcef);
+    if (!ecefToLocal) {
+      return;
+    }
+    const d = -(dragPlaneNormal.x * dragPlaneOriginEcef.x + dragPlaneNormal.y * dragPlaneOriginEcef.y + dragPlaneNormal.z * dragPlaneOriginEcef.z);
+    const denom = dragPlaneNormal.x * ray.direction.x + dragPlaneNormal.y * ray.direction.y + dragPlaneNormal.z * ray.direction.z;
+    if (Math.abs(denom) > 1e-9) {
+      const t = -(dragPlaneNormal.x * ray.origin.x + dragPlaneNormal.y * ray.origin.y + dragPlaneNormal.z * ray.origin.z + d) / denom;
+      if (t >= 0) {
+        const hx = ray.origin.x + ray.direction.x * t;
+        const hy = ray.origin.y + ray.direction.y * t;
+        const hz = ray.origin.z + ray.direction.z * t;
+        transformCoordinates(hx, hy, hz, ecefToLocal, dragPlaneHitPointLocal);
+      }
+    }
+  }
+  function startDrag(x, y) {
+    const pick = pickScreen(x, y);
+    if (pick.point && pick.ray) {
+      hitPointRadius = Math.hypot(pick.point.x, pick.point.y, pick.point.z);
+      const tmp = scratchMat;
+      recalcDragPlaneHitPoint(hitPointRadius, pick.ray, tmp);
+      previousDragPlaneHitPointLocal.x = dragPlaneHitPointLocal.x;
+      previousDragPlaneHitPointLocal.y = dragPlaneHitPointLocal.y;
+      previousDragPlaneHitPointLocal.z = dragPlaneHitPointLocal.z;
+    } else {
+      hitPointRadius = void 0;
+    }
+  }
+  function handleDrag(x, y) {
+    if (hitPointRadius === void 0) {
+      return;
+    }
+    const ray = screenRay(x, y);
+    if (!ray) {
+      return;
+    }
+    const localToEcef = scratchMat;
+    recalcDragPlaneHitPoint(hitPointRadius, ray, localToEcef);
+    let dx = dragPlaneHitPointLocal.x - previousDragPlaneHitPointLocal.x;
+    let dy = dragPlaneHitPointLocal.y - previousDragPlaneHitPointLocal.y;
+    let dz = dragPlaneHitPointLocal.z - previousDragPlaneHitPointLocal.z;
+    const maxDelta = hitPointRadius * 0.1;
+    const len = Math.hypot(dx, dy, dz);
+    if (len > maxDelta) {
+      const k = maxDelta / len;
+      dx *= k;
+      dy *= k;
+      dz *= k;
+    }
+    previousDragPlaneHitPointLocal.x = dragPlaneHitPointLocal.x;
+    previousDragPlaneHitPointLocal.y = dragPlaneHitPointLocal.y;
+    previousDragPlaneHitPointLocal.z = dragPlaneHitPointLocal.z;
+    const ex = dx * localToEcef[0] + dy * localToEcef[4] + dz * localToEcef[8];
+    const ey = dx * localToEcef[1] + dy * localToEcef[5] + dz * localToEcef[9];
+    const ez = dx * localToEcef[2] + dy * localToEcef[6] + dz * localToEcef[10];
+    dragPlaneOriginEcef.x += ex;
+    dragPlaneOriginEcef.y += ey;
+    dragPlaneOriginEcef.z += ez;
+    panAccumulated.x -= ex;
+    panAccumulated.y -= ey;
+    panAccumulated.z -= ez;
+  }
+  function stopDrag() {
+    hitPointRadius = void 0;
+  }
+  const scratchMat = new Float32Array(16);
+  function handleZoom(delta, toCursor) {
+    if (delta === 0) {
+      return;
+    }
+    zoomAccumulated += delta;
+    const pick = pickScreen(pointerX, pointerY);
+    if (pick.hit && pick.point && zoomToCursor) {
+      computedZoomPickPoint = pick.point;
+    } else {
+      computedZoomPickPoint = pickAlongVector(camera._lookAt);
+    }
+  }
+  function applyGeocentricTranslation() {
+    const cx = camera.center.x + panDelta.x;
+    const cy = camera.center.y + panDelta.y;
+    const cz = camera.center.z + panDelta.z;
+    const len = Math.hypot(cx, cy, cz) || 1;
+    const target = Math.hypot(camera.center.x, camera.center.y, camera.center.z);
+    const k = target / len;
+    camera._setOrientation(camera.yaw, camera.pitch, camera.radius, { x: cx * k, y: cy * k, z: cz * k });
+  }
+  function applyGeocentricRotation() {
+    if (rotationDelta.x === 0 && rotationDelta.y === 0) {
+      return;
+    }
+    const pitch = rotationDelta.x !== 0 ? clampNum(camera.pitch + rotationDelta.x, 0, 0.5 * Math.PI - GEO_EPSILON) : camera.pitch;
+    const yaw = rotationDelta.y !== 0 ? camera.yaw + rotationDelta.y : camera.yaw;
+    camera._setOrientation(yaw, pitch, camera.radius, camera.center);
+  }
+  function centerAndRadiusFromZoomToPoint(target, distance, out) {
+    const limits = camera.limits;
+    const dx = target.x - camera.position.x;
+    const dy = target.y - camera.position.y;
+    const dz = target.z - camera.position.z;
+    const distToTarget = Math.hypot(dx, dy, dz);
+    if (distToTarget < limits.radiusMin) {
+      out.x = camera.center.x;
+      out.y = camera.center.y;
+      out.z = camera.center.z;
+      return clampNum(camera.radius - distance, limits.radiusMin, limits.radiusMax);
+    }
+    const s = distance / distToTarget;
+    const npx = camera.position.x + dx * s;
+    const npy = camera.position.y + dy * s;
+    const npz = camera.position.z + dz * s;
+    const projected = dx * s * camera._lookAt.x + dy * s * camera._lookAt.y + dz * s * camera._lookAt.z;
+    const newRadius = clampNum(camera.radius - projected, limits.radiusMin, limits.radiusMax);
+    out.x = npx + camera._lookAt.x * newRadius;
+    out.y = npy + camera._lookAt.y * newRadius;
+    out.z = npz + camera._lookAt.z * newRadius;
+    return newRadius;
+  }
+  const zoomCenterScratch = { x: 0, y: 0, z: 0 };
+  function applyZoom() {
+    const limits = camera.limits;
+    const distToTarget = computedZoomPickPoint ? dist(camera.position, computedZoomPickPoint) : void 0;
+    const clamped = clampZoomDistance(limits, zoomDelta, camera.radius, distToTarget);
+    if (Math.abs(clamped) < GEO_EPSILON) {
+      return;
+    }
+    if (computedZoomPickPoint) {
+      const newRadius = centerAndRadiusFromZoomToPoint(computedZoomPickPoint, clamped, zoomCenterScratch);
+      camera._setOrientation(camera.yaw, camera.pitch, newRadius, zoomCenterScratch);
+    } else {
+      const newRadius = clampNum(camera.radius - clamped, limits.radiusMin, limits.radiusMax);
+      camera._setOrientation(camera.yaw, camera.pitch, newRadius, camera.center);
+    }
+  }
+  let wasCenterMovingLastFrame = false;
+  function recalculateCenter(isCenterMoving) {
+    const shouldRecalc = wasCenterMovingLastFrame && !isCenterMoving;
+    wasCenterMovingLastFrame = isCenterMoving;
+    if (!shouldRecalc) {
+      return;
+    }
+    const picked = pickAlongVector(camera._lookAt);
+    if (!picked) {
+      return;
+    }
+    const invLen = 1 / (Math.hypot(picked.x, picked.y, picked.z) || 1);
+    const dot = camera._lookAt.x * -picked.x * invLen + camera._lookAt.y * -picked.y * invLen + camera._lookAt.z * -picked.z * invLen;
+    if (dot <= 0) {
+      return;
+    }
+    const newRadius = dist(camera.position, picked);
+    if (newRadius <= GEO_EPSILON) {
+      return;
+    }
+    const yp = { x: 0, y: 0 };
+    computeYawPitchFromLookAt(camera._lookAt, picked, camera.yaw, yp);
+    camera._setOrientation(yp.x, yp.y, newRadius, picked);
+  }
+  function applyCollision() {
+    if (!checkCollisions) {
+      return;
+    }
+    const minDist = camera.limits.planetRadius + camera.limits.radiusMin;
+    const posLen = Math.hypot(camera.position.x, camera.position.y, camera.position.z);
+    if (posLen >= minDist || posLen < 1e-6) {
+      return;
+    }
+    const lift = minDist - posLen;
+    const inv = 1 / posLen;
+    const ox = camera.position.x * inv * lift;
+    const oy = camera.position.y * inv * lift;
+    const oz = camera.position.z * inv * lift;
+    camera._setOrientation(camera.yaw, camera.pitch, camera.radius, { x: camera.center.x + ox, y: camera.center.y + oy, z: camera.center.z + oz });
+  }
+  function effectiveDeltaMs(dt) {
+    if (dt > 0) {
+      return dt;
+    }
+    if (prevFrameTimeMs > 0) {
+      return prevFrameTimeMs;
+    }
+    return 1e3 / REFERENCE_FRAME_RATE;
+  }
+  function nextVelocity(vel, pixelDelta, inertia, dt) {
+    return integrateInertialVelocity(vel, pixelDelta, inertia, effectiveDeltaMs(dt), activeInput);
+  }
+  function isDragging() {
+    return hitPointRadius !== void 0;
+  }
+  function computeFrameDeltas(dt) {
+    const center = camera.center;
+    if (panAccumulated.x !== 0 || panAccumulated.y !== 0 || panAccumulated.z !== 0) {
+      panSpeedMultiplier = computePanSpeedMultiplier(center, camera.position);
+    } else {
+      panSpeedMultiplier = 1;
+    }
+    if (isDragging() || rotationAccumulated.x !== 0 || rotationAccumulated.y !== 0) {
+      zoomSpeedMultiplier = 0;
+      zoomVelocity = 0;
+    } else {
+      const target = computedZoomPickPoint ? dist(camera.position, computedZoomPickPoint) : dist(camera.position, center);
+      zoomSpeedMultiplier = computeZoomSpeedMultiplier(target);
+    }
+    const eff = effectiveDeltaMs(dt);
+    panVelocity.x = nextVelocity(panVelocity.x, panAccumulated.x, panInertia, dt);
+    panVelocity.y = nextVelocity(panVelocity.y, panAccumulated.y, panInertia, dt);
+    panVelocity.z = nextVelocity(panVelocity.z, panAccumulated.z, panInertia, dt);
+    const panScale = speed * panSpeed * panSpeedMultiplier * eff;
+    panDelta.x = panVelocity.x * panScale;
+    panDelta.y = panVelocity.y * panScale;
+    panDelta.z = panVelocity.z * panScale;
+    rotationVelocity.x = nextVelocity(rotationVelocity.x, rotationAccumulated.x, rotationInertia, dt);
+    rotationVelocity.y = nextVelocity(rotationVelocity.y, rotationAccumulated.y, rotationInertia, dt);
+    rotationDelta.x = rotationVelocity.x * speed * rotationXSpeed * eff;
+    rotationDelta.y = rotationVelocity.y * speed * rotationYSpeed * eff;
+    zoomVelocity = nextVelocity(zoomVelocity, zoomAccumulated, zoomInertia, dt);
+    zoomDelta = zoomVelocity * (speed * zoomSpeed * zoomSpeedMultiplier) * eff;
+    if (dt > 0) {
+      prevFrameTimeMs = dt;
+    }
+    zoomAccumulated = 0;
+    panAccumulated.x = panAccumulated.y = panAccumulated.z = 0;
+    rotationAccumulated.x = rotationAccumulated.y = 0;
+    activeInput = false;
+  }
+  function onBeforeRenderTick(deltaMs) {
+    pollKeyboard();
+    const hasInput = panAccumulated.x !== 0 || panAccumulated.y !== 0 || panAccumulated.z !== 0 || rotationAccumulated.x !== 0 || rotationAccumulated.y !== 0 || zoomAccumulated !== 0;
+    if (hasInput && camera._cancelFly) {
+      camera._cancelFly();
+    }
+    computeFrameDeltas(deltaMs);
+    let isCenterMoving = false;
+    if (panDelta.x !== 0 || panDelta.y !== 0 || panDelta.z !== 0) {
+      applyGeocentricTranslation();
+      isCenterMoving = true;
+    }
+    if (rotationDelta.x !== 0 || rotationDelta.y !== 0) {
+      applyGeocentricRotation();
+    }
+    if (Math.abs(zoomDelta) > GEO_EPSILON) {
+      applyZoom();
+      isCenterMoving = true;
+    }
+    recalculateCenter(isCenterMoving);
+    applyCollision();
+  }
+  function pollKeyboard() {
+    if (keysDown.size === 0) {
+      return;
+    }
+    activeInput = true;
+    const rotateStep = 6;
+    const zoomStep = 4;
+    const panStep = camera.radius * 15e-4;
+    const ctrl = keysDown.has("ControlLeft") || keysDown.has("ControlRight");
+    if (keysDown.has("Equal") || keysDown.has("NumpadAdd")) {
+      zoomAccumulated += zoomStep;
+      computedZoomPickPoint = null;
+    }
+    if (keysDown.has("Minus") || keysDown.has("NumpadSubtract")) {
+      zoomAccumulated -= zoomStep;
+      computedZoomPickPoint = null;
+    }
+    if (ctrl) {
+      if (keysDown.has("ArrowLeft")) {
+        rotationAccumulated.y -= rotateStep;
+      }
+      if (keysDown.has("ArrowRight")) {
+        rotationAccumulated.y += rotateStep;
+      }
+      if (keysDown.has("ArrowUp")) {
+        rotationAccumulated.x += rotateStep;
+      }
+      if (keysDown.has("ArrowDown")) {
+        rotationAccumulated.x -= rotateStep;
+      }
+      return;
+    }
+    const east = { x: 0, y: 0, z: 0 };
+    const north = { x: 0, y: 0, z: 0 };
+    const up = { x: 0, y: 0, z: 0 };
+    let dn = 0;
+    let de = 0;
+    if (keysDown.has("ArrowUp")) {
+      dn += 1;
+    }
+    if (keysDown.has("ArrowDown")) {
+      dn -= 1;
+    }
+    if (keysDown.has("ArrowRight")) {
+      de += 1;
+    }
+    if (keysDown.has("ArrowLeft")) {
+      de -= 1;
+    }
+    if (dn !== 0 || de !== 0) {
+      const invLen = 1 / Math.hypot(dn, de);
+      dn *= invLen;
+      de *= invLen;
+      computeLocalBasis(camera.center, east, north, up);
+      panAccumulated.x += (north.x * dn + east.x * de) * panStep;
+      panAccumulated.y += (north.y * dn + east.y * de) * panStep;
+      panAccumulated.z += (north.z * dn + east.z * de) * panStep;
+    }
+  }
+  function onPointerDown(e) {
+    canvas.setPointerCapture(e.pointerId);
+    toCanvas(e);
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (e.button === 0) {
+      mode = "pan";
+      startDrag(pointerX, pointerY);
+    } else {
+      mode = "rotate";
+    }
+  }
+  function onPointerMove(e) {
+    toCanvas(e);
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (activeTouches.size >= 2) {
+      return;
+    }
+    if (mode === "none") {
+      return;
+    }
+    activeInput = true;
+    if (mode === "pan") {
+      handleDrag(pointerX, pointerY);
+    } else if (mode === "rotate") {
+      rotationAccumulated.y += dx;
+      rotationAccumulated.x += dy;
+    }
+  }
+  function onPointerUp(e) {
+    canvas.releasePointerCapture(e.pointerId);
+    if (mode === "pan") {
+      stopDrag();
+    }
+    mode = "none";
+  }
+  function onWheel(e) {
+    e.preventDefault();
+    toCanvas(e);
+    handleZoom(-Math.sign(e.deltaY));
+  }
+  function onContextMenu(e) {
+    e.preventDefault();
+  }
+  function onDoubleClick(e) {
+    if (e.button !== 0 || e.buttons !== 0) {
+      return;
+    }
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const pick = pickScreen(e.clientX - r.left, e.clientY - r.top);
+    if (pick.hit && pick.point) {
+      void flyGeospatialCameraToAsync(camera, scene, {
+        center: { x: pick.point.x, y: pick.point.y, z: pick.point.z },
+        durationMs: doubleTapAnimationDurationMs,
+        ease: doubleTapEasingFunction ?? void 0
+      });
+    }
+  }
+  function onKeyDown(e) {
+    keysDown.add(e.code);
+  }
+  function onKeyUp(e) {
+    keysDown.delete(e.code);
+  }
+  function firstTwoTouches() {
+    const it = activeTouches.values();
+    const a = it.next().value;
+    const b = it.next().value;
+    return [a, b];
+  }
+  function onTouchStart(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+    }
+    if (activeTouches.size >= 2) {
+      e.preventDefault();
+      if (mode === "pan") {
+        stopDrag();
+      }
+      mode = "none";
+      const [p0, p1] = firstTwoTouches();
+      pinchPrevDist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      pinchStartCentroidX = (p0.x + p1.x) / 2;
+      pinchStartCentroidY = (p0.y + p1.y) / 2;
+      pinchPanning = false;
+    }
+  }
+  function onTouchMove(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      if (activeTouches.has(t.identifier)) {
+        activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+      }
+    }
+    if (activeTouches.size < 2) {
+      return;
+    }
+    e.preventDefault();
+    activeInput = true;
+    const [p0, p1] = firstTwoTouches();
+    const dist2 = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    const centroidClientX = (p0.x + p1.x) / 2;
+    const centroidClientY = (p0.y + p1.y) / 2;
+    const rect = canvas.getBoundingClientRect();
+    pointerX = centroidClientX - rect.left;
+    pointerY = centroidClientY - rect.top;
+    const centroidDrift = Math.hypot(centroidClientX - pinchStartCentroidX, centroidClientY - pinchStartCentroidY);
+    if (!pinchPanning && centroidDrift > PINCH_PAN_THRESHOLD) {
+      pinchPanning = true;
+      startDrag(pointerX, pointerY);
+    }
+    if (pinchPanning) {
+      handleDrag(pointerX, pointerY);
+    } else if (pinchPrevDist > 0) {
+      const dDist = dist2 - pinchPrevDist;
+      if (dDist !== 0) {
+        zoomAccumulated += dDist * PINCH_ZOOM_SCALE;
+        const pick = pickScreen(pointerX, pointerY);
+        computedZoomPickPoint = pick.hit && pick.point && zoomToCursor ? pick.point : pickAlongVector(camera._lookAt);
+      }
+    }
+    pinchPrevDist = dist2;
+  }
+  function onTouchEnd(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      activeTouches.delete(e.changedTouches[i].identifier);
+    }
+    if (activeTouches.size < 2) {
+      if (pinchPanning) {
+        stopDrag();
+        pinchPanning = false;
+      }
+      pinchPrevDist = 0;
+    }
+    if (activeTouches.size === 1) {
+      const p = activeTouches.values().next().value;
+      lastX = p.x;
+      lastY = p.y;
+    }
+  }
+  function onGesture(e) {
+    e.preventDefault();
+  }
+  scene._beforeRender.push(onBeforeRenderTick);
+  const listeners = [
+    [canvas, "pointerdown", onPointerDown],
+    [canvas, "pointermove", onPointerMove],
+    [canvas, "pointerup", onPointerUp],
+    [canvas, "wheel", onWheel, { passive: false }],
+    [canvas, "contextmenu", onContextMenu],
+    [canvas, "dblclick", onDoubleClick],
+    [canvas, "touchstart", onTouchStart, { passive: false }],
+    [canvas, "touchmove", onTouchMove, { passive: false }],
+    [canvas, "touchend", onTouchEnd],
+    [canvas, "gesturestart", onGesture, { passive: false }],
+    [canvas, "gesturechange", onGesture, { passive: false }],
+    [canvas, "gestureend", onGesture, { passive: false }],
+    [window, "keydown", onKeyDown],
+    [window, "keyup", onKeyUp]
+  ];
+  for (const [t, ev, h, opts] of listeners) {
+    t.addEventListener(ev, h, opts);
+  }
+  return () => {
+    const idx = scene._beforeRender.indexOf(onBeforeRenderTick);
+    if (idx >= 0) {
+      scene._beforeRender.splice(idx, 1);
+    }
+    for (const [t, ev, h] of listeners) {
+      t.removeEventListener(ev, h);
+    }
+  };
+}
+function clampNum(v, min, max) {
+  return v < min ? min : v > max ? max : v;
+}
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+function transformCoordinates(x, y, z, m, out) {
+  const rx = x * m[0] + y * m[4] + z * m[8] + m[12];
+  const ry = x * m[1] + y * m[5] + z * m[9] + m[13];
+  const rz = x * m[2] + y * m[6] + z * m[10] + m[14];
+  const rw = x * m[3] + y * m[7] + z * m[11] + m[15];
+  const inv = rw !== 0 ? 1 / rw : 1;
+  out.x = rx * inv;
+  out.y = ry * inv;
+  out.z = rz * inv;
+}
+
+export { attachGeospatialControls };
+//# sourceMappingURL=geospatial-camera-controls.js.map

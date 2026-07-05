@@ -1,0 +1,117 @@
+import { SS } from '../engine/gpu-flags.js';
+import { buildRenderTarget } from '../engine/render-target.js';
+
+const VERTEX_WGSL = `struct V{@builtin(position)p:vec4f};
+@vertex fn vs(@builtin(vertex_index)i:u32)->V{
+var pos=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));
+return V(vec4f(pos[i],0,1));}`;
+const FRAGMENT_WGSL = `@group(0)@binding(0)var src:texture_depth_multisampled_2d;
+@fragment fn fs(v:V)->@builtin(frag_depth)f32{return textureLoad(src,vec2i(v.p.xy),0);}`;
+let _cacheDevice = null;
+let _bgl = null;
+let _pipelines = null;
+function getOrCreatePipeline(engine, depthFormat) {
+  const device = engine._device;
+  if (_cacheDevice !== device) {
+    _cacheDevice = device;
+    _bgl = null;
+    _pipelines = /* @__PURE__ */ new Map();
+  }
+  const cached = _pipelines.get(depthFormat);
+  if (cached) {
+    return cached;
+  }
+  _bgl ??= device.createBindGroupLayout({
+    label: "depth-resolve-bgl",
+    entries: [{ binding: 0, visibility: SS.FRAGMENT, texture: { sampleType: "depth", multisampled: true } }]
+  });
+  const module = device.createShaderModule({ code: `${VERTEX_WGSL}
+${FRAGMENT_WGSL}`, label: "depth-resolve" });
+  const pipeline = device.createRenderPipeline({
+    label: `depth-resolve-${depthFormat}`,
+    layout: device.createPipelineLayout({ label: "depth-resolve-layout", bindGroupLayouts: [_bgl] }),
+    vertex: { module, entryPoint: "vs" },
+    fragment: { module, entryPoint: "fs", targets: [] },
+    // depth-only: no colour target
+    primitive: { topology: "triangle-list" },
+    depthStencil: { format: depthFormat, depthWriteEnabled: true, depthCompare: "always" }
+  });
+  _pipelines.set(depthFormat, pipeline);
+  return pipeline;
+}
+function createDepthResolveTask(config, engine, scene) {
+  const eng = engine;
+  const depthAttachment = {
+    view: void 0,
+    depthClearValue: 0,
+    // every fragment overwrites it (depthCompare "always"), so the clear value is moot
+    depthLoadOp: "clear",
+    depthStoreOp: "store"
+  };
+  const renderPassDescriptor = {
+    label: config.name ?? "depth-resolve",
+    colorAttachments: [],
+    depthStencilAttachment: depthAttachment
+  };
+  let pipeline = null;
+  let bindGroup = null;
+  let boundSrc = null;
+  let boundDst = null;
+  const build = () => {
+    const source = config.sourceTexture;
+    const target = config.targetTexture;
+    if (!source._depthTexture) {
+      throw new Error(`DepthResolveTask "${config.name}": sourceTexture has no depth attachment.`);
+    }
+    if ((source._descriptor.samples ?? 1) < 2) {
+      throw new Error(`DepthResolveTask "${config.name}": sourceTexture must be multisampled (sampleCount > 1).`);
+    }
+    if (!target._depthTexture || target._width !== (source._width || 0) || target._height !== (source._height || 0)) {
+      buildRenderTarget(target, eng);
+      if (target._width !== source._width || target._height !== source._height) {
+        throw new Error(
+          `DepthResolveTask "${config.name}": targetTexture size ${target._width}×${target._height} must match sourceTexture size ${source._width}×${source._height} (size the target's descriptor like the source, e.g. both \`size: surface\`).`
+        );
+      }
+    }
+    const depthFormat = target._descriptor.dFormat;
+    if (!depthFormat) {
+      throw new Error(`DepthResolveTask "${config.name}": targetTexture has no depth format.`);
+    }
+    pipeline = getOrCreatePipeline(eng, depthFormat);
+    const srcView = source._depthTexture.createView({ aspect: "depth-only" });
+    bindGroup = eng._device.createBindGroup({ label: `${config.name ?? "depth-resolve"}-bg`, layout: _bgl, entries: [{ binding: 0, resource: srcView }] });
+    depthAttachment.view = target._depthView;
+    boundSrc = source._depthTexture;
+    boundDst = target._depthTexture;
+  };
+  return {
+    name: config.name ?? "depth-resolve",
+    engine: eng,
+    scene,
+    _passes: [],
+    record() {
+      build();
+    },
+    execute() {
+      if (config.sourceTexture._depthTexture !== boundSrc || config.targetTexture._depthTexture !== boundDst) {
+        build();
+      }
+      const pass = eng._currentEncoder.beginRenderPass(renderPassDescriptor);
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(3);
+      pass.end();
+      return 1;
+    },
+    dispose() {
+      pipeline = null;
+      bindGroup = null;
+      boundSrc = null;
+      boundDst = null;
+    }
+  };
+}
+
+export { createDepthResolveTask };
+//# sourceMappingURL=depth-resolve-task.js.map

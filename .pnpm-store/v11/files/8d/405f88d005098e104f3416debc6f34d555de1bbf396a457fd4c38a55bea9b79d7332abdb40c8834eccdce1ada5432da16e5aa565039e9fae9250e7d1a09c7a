@@ -1,0 +1,328 @@
+import { SS } from '../engine/gpu-flags.js';
+import { buildRenderTarget } from '../engine/render-target.js';
+import { getTrilinearSampler, getBilinearSampler } from '../resource/samplers.js';
+
+const VERTEX_WGSL = `struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};
+@vertex fn vs(@builtin(vertex_index)i:u32)->V{
+var pos=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));
+var uv=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));
+return V(vec4f(pos[i],0,1),uv[i]);}`;
+function fragmentForSingle(lod) {
+  return `@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;
+@fragment fn fs(v:V)->@location(0)vec4f{return textureSampleLevel(t,s,v.u,${lod.toFixed(1)});}`;
+}
+const FRAGMENT_MSAA_WGSL = `@group(0)@binding(0)var t:texture_multisampled_2d<f32>;
+@fragment fn fs(v:V)->@location(0)vec4f{
+let d=vec2i(textureDimensions(t));
+let q=v.u*vec2f(d)-.5;
+let p0=vec2i(floor(q));
+let fr=fract(q);
+let dmax=d-vec2i(1);
+let p00=clamp(p0,vec2i(0),dmax);
+let p10=clamp(p0+vec2i(1,0),vec2i(0),dmax);
+let p01=clamp(p0+vec2i(0,1),vec2i(0),dmax);
+let p11=clamp(p0+vec2i(1,1),vec2i(0),dmax);
+let n=textureNumSamples(t);
+var c00=vec4f(0);var c10=vec4f(0);var c01=vec4f(0);var c11=vec4f(0);
+for(var i=0u;i<n;i++){
+c00+=textureLoad(t,p00,i);
+c10+=textureLoad(t,p10,i);
+c01+=textureLoad(t,p01,i);
+c11+=textureLoad(t,p11,i);}
+let inv=1./f32(n);
+c00*=inv;c10*=inv;c01*=inv;c11*=inv;
+return mix(mix(c00,c10,fr.x),mix(c01,c11,fr.x),fr.y);}`;
+let _cacheDevice = null;
+let _bglFiltering = null;
+let _bglMsaa = null;
+let _pipelines = null;
+let _shaderModules = null;
+function resetCache(device) {
+  if (_cacheDevice === device) {
+    return;
+  }
+  _cacheDevice = device;
+  _bglFiltering = null;
+  _bglMsaa = null;
+  _pipelines = /* @__PURE__ */ new Map();
+  _shaderModules = /* @__PURE__ */ new Map();
+}
+function createCopyToTextureTask(config, engine, scene) {
+  const eng = engine;
+  const sc = scene;
+  if (!config.targetTexture && !config.resolveTexture) {
+    throw new Error(`CopyToTextureTask "${config.name ?? "copy-to-texture"}": either targetTexture or resolveTexture must be provided.`);
+  }
+  const colorAttachment = {
+    view: void 0,
+    // When a viewport is set (explicit or null="use current"), preserve pixels outside
+    // the viewport rectangle so multiple copy tasks can composite onto the same target.
+    // Without a viewport the blit covers the whole attachment, so clearing is fine.
+    // Resolve-only mode also loads (we want to preserve the existing MSAA samples
+    // and just trigger the end-of-pass hardware resolve).
+    loadOp: config.viewport !== void 0 || config.resolveTexture && !config.targetTexture ? "load" : "clear",
+    storeOp: "store"
+  };
+  const task = {
+    name: config.name ?? "copy-to-texture",
+    engine: eng,
+    scene: sc,
+    _passes: [],
+    sourceTexture: config.sourceTexture,
+    targetTexture: config.targetTexture,
+    resolveTexture: config.resolveTexture,
+    viewport: config.viewport,
+    lodLevel: config.lodLevel ?? 0,
+    get outputTexture() {
+      return this.resolveTexture ?? this.targetTexture;
+    },
+    _fast: null,
+    _blit: null,
+    _resolve: null,
+    _colorAttachment: colorAttachment,
+    _renderPassDescriptor: { label: config.name ?? "copy-to-texture", colorAttachments: [colorAttachment] },
+    record() {
+      task._fast = null;
+      task._blit = null;
+      task._resolve = null;
+      const source = task.sourceTexture;
+      if (!source._colorTexture) {
+        throw new Error(`CopyToTextureTask "${task.name}": sourceTexture has no color texture. The source must be built before this task records.`);
+      }
+      const needsBuild = (rt) => !rt._colorTexture;
+      if (task.targetTexture && needsBuild(task.targetTexture)) {
+        buildRenderTarget(task.targetTexture, eng);
+      }
+      if (task.resolveTexture && needsBuild(task.resolveTexture)) {
+        buildRenderTarget(task.resolveTexture, eng);
+      }
+      if (task.resolveTexture && !task.targetTexture) {
+        buildResolvePath(task, source, task.resolveTexture, eng);
+        return;
+      }
+      const target = task.targetTexture;
+      if (tryBuildFastPath(task, source, target, eng)) {
+        return;
+      }
+      buildBlitPath(task, source, target, eng);
+    },
+    execute() {
+      const fast = task._fast;
+      if (fast) {
+        eng._currentEncoder.copyTextureToTexture(fast._source, fast._target, fast._size);
+        return 0;
+      }
+      const resolve = task._resolve;
+      if (resolve) {
+        if (resolve._swapAsResolve) {
+          colorAttachment.resolveTarget = eng.scRT._colorView;
+        }
+        const pass2 = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+        pass2.end();
+        return 0;
+      }
+      const blit = task._blit;
+      if (blit._swapAsView) {
+        colorAttachment.view = eng.scRT._colorView;
+      }
+      if (blit._swapAsResolve) {
+        colorAttachment.resolveTarget = eng.scRT._colorView;
+      }
+      const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+      const v = blit._viewport;
+      if (v) {
+        pass.setViewport(v.x, v.y, v.w, v.h, 0, 1);
+        pass.setScissorRect(v.x, v.y, v.w, v.h);
+      }
+      pass.setPipeline(blit._pipeline);
+      pass.setBindGroup(0, blit._bindGroup);
+      pass.draw(3);
+      pass.end();
+      return 1;
+    },
+    dispose() {
+      task._passes.length = 0;
+      task._fast = null;
+      task._blit = null;
+      task._resolve = null;
+    }
+  };
+  return task;
+}
+function buildResolvePath(task, source, resolveTexture, eng) {
+  const srcDesc = source._descriptor;
+  const dstDesc = resolveTexture._descriptor;
+  const srcSamples = srcDesc.samples ?? 1;
+  if (srcSamples < 2) {
+    throw new Error(`CopyToTextureTask "${task.name}": resolveTexture requires a multisampled sourceTexture (got sampleCount=${srcSamples}).`);
+  }
+  if ((dstDesc.samples ?? 1) !== 1) {
+    throw new Error(`CopyToTextureTask "${task.name}": resolveTexture must be single-sample (got sampleCount=${dstDesc.samples}).`);
+  }
+  const swapAsResolve = resolveTexture === eng.scRT;
+  if (!swapAsResolve && (source._width !== resolveTexture._width || source._height !== resolveTexture._height)) {
+    throw new Error(
+      `CopyToTextureTask "${task.name}": sourceTexture (${source._width}x${source._height}) and resolveTexture (${resolveTexture._width}x${resolveTexture._height}) must have matching dimensions.`
+    );
+  }
+  task._colorAttachment.view = source._colorView;
+  if (!swapAsResolve) {
+    task._colorAttachment.resolveTarget = resolveTexture._colorView;
+  }
+  task._resolve = { _swapAsResolve: swapAsResolve };
+}
+function tryBuildFastPath(task, source, target, engine) {
+  if (task.viewport !== void 0) {
+    return false;
+  }
+  if (task.resolveTexture) {
+    return false;
+  }
+  const targetTexture = target._colorTexture;
+  if (target === engine.scRT || !targetTexture) {
+    return false;
+  }
+  const sourceTexture = source._colorTexture;
+  if (!sourceTexture) {
+    return false;
+  }
+  const srcDesc = source._descriptor;
+  const dstDesc = target._descriptor;
+  const srcFormat = srcDesc.format;
+  const dstFormat = dstDesc.format;
+  if (!srcFormat || srcFormat !== dstFormat) {
+    return false;
+  }
+  const srcSamples = srcDesc.samples ?? 1;
+  const dstSamples = dstDesc.samples ?? 1;
+  if (srcSamples !== dstSamples) {
+    return false;
+  }
+  const lod = task.lodLevel;
+  if (lod >= sourceTexture.mipLevelCount) {
+    return false;
+  }
+  const srcMipW = Math.max(1, source._width >> lod);
+  const srcMipH = Math.max(1, source._height >> lod);
+  if (srcMipW !== target._width || srcMipH !== target._height) {
+    return false;
+  }
+  task._fast = {
+    _source: { texture: sourceTexture, mipLevel: lod },
+    _target: { texture: targetTexture },
+    _size: { width: srcMipW, height: srcMipH }
+  };
+  return true;
+}
+function buildBlitPath(task, source, target, engine) {
+  resetCache(engine._device);
+  const targetFormat = effectiveTargetFormat(target);
+  const targetSamples = target._descriptor.samples ?? 1;
+  const multisampledSource = (source._descriptor.samples ?? 1) > 1;
+  const pipeline = getOrCreateCopyPipeline(engine, targetFormat, targetSamples, multisampledSource, task.lodLevel);
+  const bgl = multisampledSource ? _bglMsaa : _bglFiltering;
+  const entries = multisampledSource ? [{ binding: 0, resource: source._colorView }] : [
+    { binding: 0, resource: source._colorView },
+    { binding: 1, resource: task.lodLevel > 0 ? getTrilinearSampler(engine) : getBilinearSampler(engine) }
+  ];
+  const bindGroup = engine._device.createBindGroup({ label: `${task.name}-bg`, layout: bgl, entries });
+  const isSwap = target === engine.scRT;
+  const swapAsView = isSwap && targetSamples === 1;
+  let swapAsResolve = false;
+  if (task.resolveTexture) {
+    if (targetSamples < 2) {
+      throw new Error(`CopyToTextureTask "${task.name}": resolveTexture requires a multisampled targetTexture (got sampleCount=${targetSamples}).`);
+    }
+    const resolveDesc = task.resolveTexture._descriptor;
+    if ((resolveDesc.samples ?? 1) !== 1) {
+      throw new Error(`CopyToTextureTask "${task.name}": resolveTexture must be single-sample (got sampleCount=${resolveDesc.samples}).`);
+    }
+    if (resolveDesc.format !== target._descriptor.format) {
+      throw new Error(`CopyToTextureTask "${task.name}": resolveTexture format (${resolveDesc.format}) must match targetTexture format (${target._descriptor.format}).`);
+    }
+    if (task.resolveTexture === engine.scRT) {
+      swapAsResolve = true;
+    } else {
+      task._colorAttachment.resolveTarget = task.resolveTexture._colorView;
+    }
+  } else if (isSwap && targetSamples > 1) {
+    swapAsResolve = true;
+  }
+  if (!swapAsView) {
+    task._colorAttachment.view = target._colorView;
+  }
+  if (!swapAsResolve && !task.resolveTexture) {
+    task._colorAttachment.resolveTarget = void 0;
+  }
+  let viewportRect = null;
+  const v = task.viewport;
+  if (v) {
+    const w = target._width;
+    const h = target._height;
+    const x = Math.floor(v.x * w);
+    const vw = Math.floor((v.x + v.width) * w) - x;
+    const yTop = Math.floor(v.y * h);
+    const vh = Math.floor((v.y + v.height) * h) - yTop;
+    viewportRect = { x, y: h - yTop - vh, w: vw, h: vh };
+  }
+  task._blit = {
+    _pipeline: pipeline,
+    _bindGroup: bindGroup,
+    _viewport: viewportRect,
+    _swapAsView: swapAsView,
+    _swapAsResolve: swapAsResolve
+  };
+}
+function getOrCreateCopyPipeline(engine, targetFormat, targetSamples, multisampledSource, lodLevel) {
+  const device = engine._device;
+  const pipelineKey = `${targetFormat}|t${targetSamples}|${multisampledSource ? "m" : "s"}|l${lodLevel}`;
+  let pipeline = _pipelines.get(pipelineKey);
+  if (pipeline) {
+    return pipeline;
+  }
+  const moduleKey = multisampledSource ? "msaa" : `s|l${lodLevel}`;
+  let shaderModule = _shaderModules.get(moduleKey);
+  if (!shaderModule) {
+    const fragment = multisampledSource ? FRAGMENT_MSAA_WGSL : fragmentForSingle(lodLevel);
+    shaderModule = device.createShaderModule({ code: `${VERTEX_WGSL}
+${fragment}`, label: `copy-to-texture-${moduleKey}` });
+    _shaderModules.set(moduleKey, shaderModule);
+  }
+  let bgl;
+  if (multisampledSource) {
+    _bglMsaa ??= device.createBindGroupLayout({
+      label: "copy-to-texture-msaa-bgl",
+      entries: [{ binding: 0, visibility: SS.FRAGMENT, texture: { sampleType: "unfilterable-float", multisampled: true } }]
+    });
+    bgl = _bglMsaa;
+  } else {
+    _bglFiltering ??= device.createBindGroupLayout({
+      label: "copy-to-texture-bgl",
+      entries: [
+        { binding: 0, visibility: SS.FRAGMENT, texture: { sampleType: "float" } },
+        { binding: 1, visibility: SS.FRAGMENT, sampler: { type: "filtering" } }
+      ]
+    });
+    bgl = _bglFiltering;
+  }
+  pipeline = device.createRenderPipeline({
+    label: `copy-to-texture-${pipelineKey}`,
+    layout: device.createPipelineLayout({ label: `copy-to-texture-layout-${pipelineKey}`, bindGroupLayouts: [bgl] }),
+    vertex: { module: shaderModule, entryPoint: "vs" },
+    fragment: { module: shaderModule, entryPoint: "fs", targets: [{ format: targetFormat }] },
+    primitive: { topology: "triangle-list" },
+    multisample: { count: targetSamples }
+  });
+  _pipelines.set(pipelineKey, pipeline);
+  return pipeline;
+}
+function effectiveTargetFormat(target) {
+  const fmt = target._descriptor.format;
+  if (!fmt) {
+    throw new Error("CopyToTextureTask: targetTexture has no color format.");
+  }
+  return fmt;
+}
+
+export { createCopyToTextureTask };
+//# sourceMappingURL=copy-to-texture-task.js.map

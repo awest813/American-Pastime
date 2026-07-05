@@ -1,0 +1,139 @@
+import { F32, I8, I16, U8, U32, U16 } from '../engine/typed-arrays.js';
+import { mat4ComposeInto } from '../math/mat4-compose-into.js';
+import { mat4MultiplyInto } from '../math/mat4-multiply-into.js';
+import { getLoaderTmpLocal } from './_loader-scratch.js';
+
+const FLOAT = 5126;
+const UNSIGNED_SHORT = 5123;
+const UNSIGNED_INT = 5125;
+const UNSIGNED_BYTE = 5121;
+const TYPE_SIZES = {
+  SCALAR: 1,
+  VEC2: 2,
+  VEC3: 3,
+  VEC4: 4,
+  MAT2: 4,
+  MAT3: 9,
+  MAT4: 16
+};
+function resolveAccessor(json, binChunk, accessorIdx) {
+  const accessor = json.accessors[accessorIdx];
+  const componentCount = TYPE_SIZES[accessor.type] ?? 1;
+  const count = accessor.count;
+  const len = count * componentCount;
+  let Ctor;
+  switch (accessor.componentType) {
+    case FLOAT:
+      Ctor = F32;
+      break;
+    case UNSIGNED_SHORT:
+      Ctor = U16;
+      break;
+    case UNSIGNED_INT:
+      Ctor = U32;
+      break;
+    case UNSIGNED_BYTE:
+      Ctor = U8;
+      break;
+    case 5122:
+      Ctor = I16;
+      break;
+    case 5120:
+      Ctor = I8;
+      break;
+    default:
+      throw new Error(`Unsupported component type: ${accessor.componentType}`);
+  }
+  const data = accessor.bufferView === void 0 ? new Ctor(len) : new Ctor(binChunk.buffer, binChunk.byteOffset + (json.bufferViews[accessor.bufferView].byteOffset ?? 0) + (accessor.byteOffset ?? 0), len);
+  return { _data: data, _count: count, _componentCount: componentCount };
+}
+function getTextureImageIndex(tex) {
+  return tex.extensions?.EXT_texture_webp?.source ?? tex.source;
+}
+function anyPrimitive(json, pred) {
+  for (const m of json.meshes ?? []) {
+    for (const p of m.primitives ?? []) {
+      if (pred(p)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+function needsOrmComposite(json) {
+  const mats = json.materials ?? [];
+  const textures = json.textures ?? [];
+  for (const m of mats) {
+    const mr = m.pbrMetallicRoughness?.metallicRoughnessTexture;
+    const occ = m.occlusionTexture;
+    if (mr && occ && textures[mr.index] && textures[occ.index] && getTextureImageIndex(textures[mr.index]) !== getTextureImageIndex(textures[occ.index])) {
+      return true;
+    }
+  }
+  return false;
+}
+async function resolveImage(json, binChunk, imageIdx, baseUrl) {
+  const image = json.images[imageIdx];
+  if (image.bufferView !== void 0) {
+    const bv = json.bufferViews[image.bufferView];
+    const offset = binChunk.byteOffset + (bv.byteOffset ?? 0);
+    const slice = binChunk.buffer.slice(offset, offset + bv.byteLength);
+    const blob = new Blob([slice], { type: image.mimeType ?? "image/png" });
+    return createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+  }
+  if (image.uri) {
+    const imageUrl = new URL(image.uri, baseUrl + "x").href;
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to load image: ${response.status} ${response.statusText}`);
+    }
+    const blob = await response.blob();
+    const bmp = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    return bmp;
+  }
+  throw new Error("Image has neither bufferView nor uri");
+}
+const RH_TO_LH_ROOT = new F32([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+function buildParentMap(json) {
+  const parentMap = /* @__PURE__ */ new Map();
+  const nodes = json.nodes ?? [];
+  for (let i = 0; i < nodes.length; i++) {
+    const children = nodes[i].children;
+    if (children) {
+      for (const childIdx of children) {
+        parentMap.set(childIdx, i);
+      }
+    }
+  }
+  return parentMap;
+}
+function findParent(parentMap, childIdx) {
+  return parentMap.get(childIdx) ?? -1;
+}
+function computeNodeWorldMatrix(json, nodeIdx, parentMap, cache) {
+  const cached = cache.get(nodeIdx);
+  if (cached) {
+    return cached;
+  }
+  const node = json.nodes[nodeIdx];
+  const parentIdx = findParent(parentMap, nodeIdx);
+  const parentWorld = parentIdx !== -1 ? computeNodeWorldMatrix(json, parentIdx, parentMap, cache) : RH_TO_LH_ROOT;
+  let localBuf;
+  if (node.matrix) {
+    localBuf = new F32(node.matrix);
+  } else {
+    const t = node.translation ?? [0, 0, 0];
+    const r = node.rotation ?? [0, 0, 0, 1];
+    const s = node.scale ?? [1, 1, 1];
+    const local = getLoaderTmpLocal();
+    mat4ComposeInto(local, 0, t[0], t[1], t[2], r[0], r[1], r[2], r[3], s[0], s[1], s[2]);
+    localBuf = local;
+  }
+  const world = new F32(16);
+  mat4MultiplyInto(world, 0, parentWorld, 0, localBuf, 0);
+  cache.set(nodeIdx, world);
+  return world;
+}
+
+export { TYPE_SIZES, anyPrimitive, buildParentMap, computeNodeWorldMatrix, findParent, getTextureImageIndex, needsOrmComposite, resolveAccessor, resolveImage };
+//# sourceMappingURL=gltf-parser.js.map

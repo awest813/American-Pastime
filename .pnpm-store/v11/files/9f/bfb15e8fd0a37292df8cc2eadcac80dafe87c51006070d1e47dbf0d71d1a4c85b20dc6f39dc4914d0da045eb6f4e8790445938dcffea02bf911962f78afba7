@@ -1,0 +1,4 @@
+import { type SettingDescriptor } from "@babylonjs/shared-ui-components/modularTool/services/settingsStore.js";
+export { CompactModeSettingDescriptor, DisableCopySettingDescriptor } from "@babylonjs/shared-ui-components/modularTool/services/globalSettings.js";
+export declare const UseDegreesSettingDescriptor: SettingDescriptor<boolean>;
+export declare const UseEulerSettingDescriptor: SettingDescriptor<boolean>;

@@ -1,0 +1,143 @@
+import "@babylonjs/core/Loading/Plugins/babylonFileLoader.js";
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type ISerializedSmartAssetMap } from "@babylonjs/core/SmartAssets/smartAssetSerializer.js";
+import { type IOverrideEntry } from "./overrideEntry";
+/**
+ * ## `.babylonproj` project file format
+ *
+ * The `.babylonproj` zip on disk packages three layers:
+ * 1. **SmartAsset registry** — URL references to external assets (glb/gltf/textures
+ *    loaded via SAM). Local blob/data assets are bundled inside the zip and
+ *    extracted to fresh blob URLs on load.
+ * 2. **OverrideManager state** — declarative property overrides applied after load.
+ * 3. **Companion `.babylon`** — meshes, lights, cameras, transform nodes, and
+ *    materials that are *not* tracked by SAM (i.e. user-created scene content).
+ *    Plus a `companionBindings` side table mapping material texture slots back
+ *    to SAM-tracked textures so re-attachment works without embedding texture
+ *    bytes in the companion.
+ *
+ * ### What round-trips cleanly
+ * - SAM-tracked assets (re-fetched from their URLs or extracted from the zip)
+ * - User-created `Mesh` geometry, `Material`s (Standard/PBR/Multi/Node), and
+ *   `*Texture` slot bindings to SAM textures
+ * - `Light`s, `Camera`s, `TransformNode`s, scene/material image processing,
+ *   clear color, fog, environment intensity
+ * - Property overrides on any of the above
+ *
+ * ### Known gaps (not preserved on save/load)
+ * - `PostProcess` attachments to cameras (a post-process attaches to a *specific*
+ *   camera instance; we dispose+recreate cameras, leaving post-processes orphaned).
+ * - `AdvancedDynamicTexture` GUI controls — not in `.babylon` format.
+ * - Audio (`Sound` / `AudioEngine` state).
+ * - Particle systems with runtime state, baked vertex animations.
+ * - Complex shader-driven content like GaussianSplatting: the mesh round-trips
+ *   but its companion utility materials (`gaussianSplattingDepth`, `ProxyMaterial`)
+ *   get duplicated on each load cycle.
+ * - Skeleton animation playback state.
+ *
+ * If you hit a "the scene looks different after load" issue, it's almost
+ * certainly one of the gaps above rather than camera or mesh state drift.
+ */
+/**
+ * Reserved smart asset key for user-created objects (materials, lights, cameras)
+ * that are persisted as a companion `.babylon` file alongside the project JSON.
+ */
+export declare const ProjectLocalsKey = "__project_locals__";
+/**
+ * The result of serializing a project. Contains the project JSON and,
+ * if the scene has user-created objects, a companion `.babylon` blob.
+ */
+export interface IProjectBundle {
+    /** The project JSON document (assets + overrides, no embedded scene data). */
+    readonly project: ISerializedProject;
+    /**
+     * A companion `.babylon` file containing user-created objects not owned by
+     * any smart asset. Undefined if there are no such objects.
+     */
+    readonly companionBabylon?: Blob;
+}
+/**
+ * Maps each user-created material (by name) to its texture-slot bindings.
+ * A binding records "this `*Texture` slot on this material should be
+ * re-attached to the SmartAsset registered under this key" so that texture
+ * references survive a save/load round-trip without embedding the texture
+ * data inside the companion `.babylon`.
+ */
+export type CompanionTextureBindings = Record<string, Record<string, string>>;
+/**
+ * A versioned project file that composes a smart asset map with overrides.
+ * This is the unified on-disk format for persisting a complete project.
+ */
+export interface ISerializedProject {
+    /** Schema version. Must be 2 for the current version. */
+    readonly version: 2;
+    /** Smart asset key→URL mappings (from SmartAssetManager). */
+    readonly assets: ISerializedSmartAssetMap["assets"];
+    /** Property overrides (from OverrideManager). */
+    readonly overrides: IOverrideEntry[];
+    /**
+     * Optional bindings that re-attach SmartAsset-tracked textures to
+     * user-created material slots after the companion `.babylon` loads.
+     * Omitted when no user-created material references a SmartAsset texture.
+     */
+    readonly companionBindings?: CompanionTextureBindings;
+}
+/**
+ * Serializes a scene's smart asset map and override registry into a project
+ * bundle. User-created objects (materials, lights, cameras not owned by any
+ * smart asset) are serialized into a companion `.babylon` file rather than
+ * embedded in the project JSON.
+ *
+ * Both managers are looked up (and created if missing) via their respective
+ * `Get…Manager(scene)` accessors, so this function can be called on any scene.
+ *
+ * @param scene - The scene to serialize.
+ * @param baseUrl - Optional base URL for making asset paths relative.
+ * @returns A project bundle containing the JSON document and optional companion file.
+ */
+export declare function SerializeProject(scene: Scene, baseUrl?: string): IProjectBundle;
+/**
+ * Loads a project file from a URL, File, or pre-parsed object.
+ * Registers all asset entries on the scene's SmartAssetManager, loads all
+ * assets (including the companion `.babylon` for user-created objects), then
+ * applies all overrides via the OverrideManager.
+ *
+ * For loading the `.babylonproj` zip on-disk format, use {@link LoadProjectFileAsync}
+ * instead — it extracts the zip and then calls this function with the embedded
+ * JSON document.
+ *
+ * @param scene - The scene to populate.
+ * @param source - A URL string, File object, or pre-parsed ISerializedProject.
+ * @param rootUrl - Optional root URL for resolving relative asset paths.
+ */
+export declare function LoadProjectAsync(scene: Scene, source: string | File | ISerializedProject, rootUrl?: string): Promise<void>;
+/**
+ * Validates and parses a serialized project document.
+ * @param data - The raw data to validate (typically parsed JSON).
+ * @returns The validated project document.
+ * @throws If the data does not conform to the expected schema.
+ */
+export declare function DeserializeProject(data: unknown): ISerializedProject;
+/**
+ * Serializes a scene's project (smart assets + overrides) into a `.babylonproj`
+ * zip bundle.
+ *
+ * The zip contains:
+ * - `project.json` — the project document (assets + overrides)
+ * - `__project_locals__.babylon` — companion file for user-created objects (if any)
+ * - Bundled local asset files (blobs the user dragged in from disk)
+ *
+ * Remote URLs (http/https) are left as references and not bundled.
+ *
+ * @param scene - The scene to serialize.
+ * @returns A Blob containing the zip bundle.
+ */
+export declare function SaveProjectFileAsync(scene: Scene): Promise<Blob>;
+/**
+ * Loads a `.babylonproj` zip bundle into a scene. Extracts all files, creates
+ * blob URLs for bundled assets, and loads the project through SAM.
+ *
+ * @param scene - The scene to load the project into.
+ * @param zipFile - The `.babylonproj` zip file to load.
+ */
+export declare function LoadProjectFileAsync(scene: Scene, zipFile: File): Promise<void>;

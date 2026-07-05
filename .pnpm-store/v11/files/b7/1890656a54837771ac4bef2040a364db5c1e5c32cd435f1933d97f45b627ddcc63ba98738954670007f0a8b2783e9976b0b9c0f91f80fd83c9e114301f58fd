@@ -1,0 +1,27 @@
+import { createMorphFragment } from '../../../shader/fragments/morph-fragment-core.js';
+import { MSH_HAS_MORPH_TARGETS } from '../../mesh-features.js';
+
+const pbrExt = {
+  id: "morph",
+  phase: "vertex",
+  frag(ctx) {
+    if (!(ctx._meshFeatures & MSH_HAS_MORPH_TARGETS)) {
+      return null;
+    }
+    return createMorphFragment();
+  },
+  bind(ctx, entries, b) {
+    const mesh = ctx._mesh;
+    if (!(ctx._meshFeatures & MSH_HAS_MORPH_TARGETS) || !mesh?.morphTargets) {
+      return b;
+    }
+    entries.push({ binding: b++, resource: { buffer: mesh.morphTargets.deltasBuffer } });
+    if (mesh.morphTargets.weightsBuffer) {
+      entries.push({ binding: b++, resource: { buffer: mesh.morphTargets.weightsBuffer } });
+    }
+    return b;
+  }
+};
+
+export { createMorphFragment, pbrExt };
+//# sourceMappingURL=morph-fragment.js.map

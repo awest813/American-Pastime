@@ -1,0 +1,11 @@
+import { type FunctionComponent } from "react";
+import { type Mesh } from "@babylonjs/core/index.js";
+export declare const MeshGeneralProperties: FunctionComponent<{
+    mesh: Mesh;
+}>;
+export declare const MeshDisplayProperties: FunctionComponent<{
+    mesh: Mesh;
+}>;
+export declare const MeshMorphTargetsProperties: FunctionComponent<{
+    mesh: Mesh;
+}>;

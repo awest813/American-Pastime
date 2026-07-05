@@ -1,0 +1,139 @@
+import { goToFrame, stopAnimation } from '../animation/animation-group.js';
+import { _registerPbrExt } from '../material/pbr/pbr-flags.js';
+import { pbrExt } from '../material/pbr/fragments/vat-fragment.js';
+
+const DEFAULT_FRAME_RATE = 60;
+function clipFrameCount(group) {
+  const fps = group.frameRate || DEFAULT_FRAME_RATE;
+  return Math.max(1, Math.round(group.duration * fps) + 1);
+}
+function bindingsOf(group) {
+  return group._gltfMixer?.[2];
+}
+function bakeVat(engine, mesh, groups) {
+  const skel = mesh.skeleton;
+  if (!skel) {
+    throw new Error("bakeVat: mesh has no skeleton to bake.");
+  }
+  const boneCount = skel.boneCount;
+  const texWidth = boneCount * 4;
+  const floatsPerFrame = boneCount * 16;
+  let frameCount = 0;
+  for (const g of groups) {
+    frameCount += clipFrameCount(g);
+  }
+  frameCount = Math.max(1, frameCount);
+  const data = new Float32Array(frameCount * floatsPerFrame);
+  const clips = {};
+  let row = 0;
+  for (const g of groups) {
+    const frames = clipFrameCount(g);
+    const fps = g.frameRate || DEFAULT_FRAME_RATE;
+    clips[g.name] = { fromRow: row, frameCount: frames, fps };
+    const binding = bindingsOf(g)?.[0];
+    for (let f = 0; f < frames; f++) {
+      goToFrame(g, f, engine);
+      const m = binding?.boneMatrices;
+      if (m) {
+        data.set(m.subarray(0, floatsPerFrame), row * floatsPerFrame);
+      }
+      row++;
+    }
+    stopAnimation(g);
+  }
+  const device = engine._device;
+  const texture = device.createTexture({
+    size: [texWidth, frameCount],
+    format: "rgba32float",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+  });
+  device.queue.writeTexture({ texture }, data.buffer, { bytesPerRow: texWidth * 16, rowsPerImage: frameCount }, { width: texWidth, height: frameCount });
+  return { texture, boneCount, frameCount, clips };
+}
+function attachVat(engine, mesh, baked, clip) {
+  const skel = mesh.skeleton;
+  if (!skel) {
+    throw new Error("attachVat: mesh has no skeleton (bake first, attach before clearing it).");
+  }
+  _registerPbrExt(pbrExt);
+  const device = engine._device;
+  const settingsBuffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const ubo = new Float32Array(8);
+  const vat = {
+    boneCount: baked.boneCount,
+    texture: baked.texture,
+    frameCount: baked.frameCount,
+    settingsBuffer,
+    jointsBuffer: skel.jointsBuffer,
+    weightsBuffer: skel.weightsBuffer,
+    joints1Buffer: skel.joints1Buffer,
+    weights1Buffer: skel.weights1Buffer
+  };
+  mesh.vat = vat;
+  mesh.skeleton = null;
+  let time = 0;
+  let instanceTex = null;
+  let instanceTexCap = 0;
+  const writeUbo = () => {
+    device.queue.writeBuffer(settingsBuffer, 0, ubo.buffer, ubo.byteOffset, 32);
+  };
+  const uploadInstances = (params) => {
+    const texels = Math.max(2, params.length >> 2);
+    if (!instanceTex || texels > instanceTexCap) {
+      instanceTex?.destroy();
+      instanceTex = device.createTexture({
+        size: [texels, 1],
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+      });
+      instanceTexCap = texels;
+      vat.instanceTexture = instanceTex;
+    }
+    device.queue.writeTexture({ texture: instanceTex }, params.buffer, { offset: params.byteOffset, bytesPerRow: texels * 16, rowsPerImage: 1 }, { width: texels, height: 1 });
+  };
+  const handle = {
+    mesh,
+    clips: baked.clips,
+    play(name, opts) {
+      const c = baked.clips[name];
+      if (!c) {
+        return;
+      }
+      ubo[0] = c.fromRow;
+      ubo[1] = c.fromRow + c.frameCount - 1;
+      ubo[2] = opts?.offset ?? 0;
+      ubo[3] = opts?.fps ?? c.fps;
+      writeUbo();
+    },
+    update(dt) {
+      time += dt;
+      ubo[4] = time;
+      writeUbo();
+    },
+    setInstances(params) {
+      const n = params.length >> 2;
+      const dual = new Float32Array(n * 8);
+      for (let i = 0; i < n; i++) {
+        const s = i * 4;
+        const o = i * 8;
+        dual[o] = params[s];
+        dual[o + 1] = params[s + 1];
+        dual[o + 2] = params[s + 2];
+        dual[o + 3] = params[s + 3];
+        dual[o + 4] = params[s];
+        dual[o + 5] = params[s + 1];
+        dual[o + 6] = 0;
+        dual[o + 7] = params[s + 3];
+      }
+      uploadInstances(dual);
+    },
+    setInstancesBlend(params) {
+      uploadInstances(params);
+    }
+  };
+  handle.play(clip ?? Object.keys(baked.clips)[0] ?? "");
+  return handle;
+}
+
+export { attachVat, bakeVat };
+//# sourceMappingURL=vat-baker.js.map

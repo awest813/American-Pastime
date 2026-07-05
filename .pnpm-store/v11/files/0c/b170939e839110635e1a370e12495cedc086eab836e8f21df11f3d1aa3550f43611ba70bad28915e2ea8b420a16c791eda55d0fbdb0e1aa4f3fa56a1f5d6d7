@@ -1,0 +1,78 @@
+import { _registerStdExt } from './standard-flags.js';
+
+const _STD_MAT_EXTS = [
+  ["bumpTexture", () => import('./fragments/normal-map-fragment.js'), "bumpStdExt"],
+  ["emissiveTexture", () => import('./fragments/std-emissive-fragment.js'), "stdEmissiveExt"],
+  ["specularTexture", () => import('./fragments/std-specular-fragment.js'), "stdSpecularExt"],
+  ["ambientTexture", () => import('./fragments/std-ambient-fragment.js'), "stdAmbientExt"],
+  ["lightmapTexture", () => import('./fragments/std-lightmap-fragment.js'), "stdLightmapExt"],
+  ["opacityTexture", () => import('./fragments/std-opacity-fragment.js'), "stdOpacityExt"],
+  ["reflectionTexture", () => import('./fragments/std-reflection-fragment.js'), "stdReflectionExt"],
+  ["reflectionCubeTexture", () => import('./fragments/std-cube-reflection-fragment.js'), "stdCubeReflectionExt"]
+];
+let _standardGroupBuilder = null;
+function getStandardGroupBuilder() {
+  if (_standardGroupBuilder) {
+    return _standardGroupBuilder;
+  }
+  const builder = async (scene, meshes) => {
+    const hasTI = meshes.some((m) => !!m.thinInstances);
+    const hasCulling = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled);
+    const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l) => !!l.shadowGenerator);
+    const hasMorph = meshes.some((m) => !!m.morphTargets);
+    let tiSync;
+    let tiFragment;
+    let shadowFragment;
+    let morphFragment;
+    let cull;
+    const imports = [];
+    if (hasTI) {
+      imports.push(
+        import('../../mesh/thin-instance-gpu.js').then((m) => {
+          tiSync = m.syncThinInstanceBuffers;
+        }),
+        import('../../shader/fragments/thin-instance-fragment.js').then((m) => {
+          tiFragment = m.createThinInstanceFragment;
+        })
+      );
+      if (hasCulling) {
+        imports.push(
+          import('../../mesh/thin-instance-cull-binding.js').then((m) => {
+            cull = m;
+          })
+        );
+      }
+    }
+    if (hasShadow) {
+      imports.push(
+        import('./fragments/std-shadow-fragment.js').then((m) => {
+          shadowFragment = m.createStdShadowFragment;
+        })
+      );
+    }
+    if (hasMorph) {
+      imports.push(
+        import('../../shader/fragments/morph-fragment-core.js').then((m) => {
+          morphFragment = m.createMorphFragment;
+        })
+      );
+    }
+    for (const [prop, load, key] of _STD_MAT_EXTS) {
+      if (meshes.some((m) => !!m.material[prop])) {
+        imports.push(load().then((mod) => _registerStdExt(mod[key])));
+      }
+    }
+    if (imports.length > 0) {
+      await Promise.all(imports);
+    }
+    const renderableMod = await import('./standard-renderable.js');
+    const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiFragment, shadowFragment, morphFragment, cull });
+    builder._rebuildSingle = result.rebuildSingle;
+    return result;
+  };
+  builder._materialFamily = "standard";
+  return _standardGroupBuilder = builder;
+}
+
+export { getStandardGroupBuilder };
+//# sourceMappingURL=standard-group-builder.js.map

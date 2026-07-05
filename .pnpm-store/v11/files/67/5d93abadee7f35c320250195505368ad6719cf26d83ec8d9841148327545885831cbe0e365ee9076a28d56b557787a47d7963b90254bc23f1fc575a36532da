@@ -1,0 +1,7 @@
+import { type FunctionComponent } from "react";
+import { type TargetedAnimation } from "@babylonjs/core/index.js";
+import { type ISelectionService } from "../../../services/selectionService";
+export declare const TargetedAnimationGeneralProperties: FunctionComponent<{
+    targetedAnimation: TargetedAnimation;
+    selectionService: ISelectionService;
+}>;

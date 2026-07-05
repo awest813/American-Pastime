@@ -1,0 +1,2 @@
+import { type NodeMaterial } from "@babylonjs/core/index.js";
+export declare function EditNodeMaterial(material: NodeMaterial): Promise<void>;

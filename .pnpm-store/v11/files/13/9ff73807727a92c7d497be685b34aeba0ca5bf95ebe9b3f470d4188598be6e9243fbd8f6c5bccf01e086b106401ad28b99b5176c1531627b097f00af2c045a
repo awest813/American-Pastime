@@ -1,0 +1,5 @@
+import { type FunctionComponent } from "react";
+import { type GaussianSplattingMesh } from "@babylonjs/core/index.js";
+export declare const GaussianSplattingDisplayProperties: FunctionComponent<{
+    mesh: GaussianSplattingMesh;
+}>;

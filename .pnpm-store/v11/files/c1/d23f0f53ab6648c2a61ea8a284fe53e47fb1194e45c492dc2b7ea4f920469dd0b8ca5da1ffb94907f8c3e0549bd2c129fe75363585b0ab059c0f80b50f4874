@@ -1,0 +1,11 @@
+import { loadBlockEmitter } from './node-registry.js';
+
+async function loadNodeBlockEmitterWithGeometry(className) {
+  if (className === "GeometryTextureOutputBlock") {
+    return (await import('./blocks/geometry-texture-output.js')).emitter;
+  }
+  return loadBlockEmitter(className);
+}
+
+export { loadNodeBlockEmitterWithGeometry };
+//# sourceMappingURL=node-geometry-block-loader.js.map

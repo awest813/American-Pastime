@@ -1,0 +1,13 @@
+import { type GPUParticleSystem } from "@babylonjs/core/Particles/gpuParticleSystem.js";
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../../services/selectionService";
+import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem.js";
+/**
+ * Display general (high-level) information about a particle system.
+ * @param props Component props.
+ * @returns Render property lines.
+ */
+export declare const ParticleSystemSystemProperties: FunctionComponent<{
+    particleSystem: ParticleSystem | GPUParticleSystem;
+    selectionService: ISelectionService;
+}>;

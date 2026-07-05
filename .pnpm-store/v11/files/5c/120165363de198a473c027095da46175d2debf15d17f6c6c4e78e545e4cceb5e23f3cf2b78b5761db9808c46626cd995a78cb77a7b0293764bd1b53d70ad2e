@@ -1,0 +1,8 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IGizmoService } from "./gizmoService";
+import { type ISceneContext } from "./sceneContext";
+import { type ISelectionService } from "./selectionService";
+import { type ISettingsStore, type SettingDescriptor } from "@babylonjs/shared-ui-components/modularTool/services/settingsStore.js";
+import { type IThemeService } from "@babylonjs/shared-ui-components/modularTool/services/themeService.js";
+export declare const HighlightSelectedEntitySettingDescriptor: SettingDescriptor<boolean>;
+export declare const HighlightServiceDefinition: ServiceDefinition<[], [ISelectionService, ISceneContext, ISettingsStore, IThemeService, IGizmoService]>;

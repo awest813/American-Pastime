@@ -1,0 +1,10 @@
+function lerpVec3(a, b, t) {
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    z: a.z + (b.z - a.z) * t
+  };
+}
+
+export { lerpVec3 };
+//# sourceMappingURL=lerp-vec3.js.map

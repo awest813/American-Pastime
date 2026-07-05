@@ -1,0 +1,98 @@
+import { createRenderTarget } from './render-target.js';
+
+function isDomCanvas(canvas) {
+  return "clientWidth" in canvas;
+}
+function toSrgbFormat(format) {
+  return format.endsWith("-srgb") ? format : `${format}-srgb`;
+}
+let _nextSurfaceId = 1;
+function createSurface(engine, canvas, options) {
+  const surface = _buildSurface(engine, canvas, options);
+  engine._surfaces.push(surface);
+  resizeSurface(surface);
+  _refreshScRT(surface);
+  return surface;
+}
+function _buildSurface(engine, canvas, options) {
+  const context = canvas.getContext("webgpu");
+  if (!context) {
+    throw new Error("WebGPU context not available");
+  }
+  const configureFormat = options?.format ?? navigator.gpu.getPreferredCanvasFormat();
+  const renderFormat = options?.srgb ? toSrgbFormat(configureFormat) : configureFormat;
+  const alphaMode = options?.alphaMode ?? "opaque";
+  context.configure({ device: engine._device, format: configureFormat, alphaMode, viewFormats: [renderFormat] });
+  const msaaSamples = options?.msaaSamples === 1 ? 1 : 4;
+  const scRT = createRenderTarget({ lbl: "swapchain", format: renderFormat, samples: 1, size: { width: 0, height: 0 } });
+  scRT._eager = true;
+  return {
+    engine,
+    canvas,
+    format: renderFormat,
+    msaaSamples,
+    scRT,
+    maxDevicePixelRatio: options?.maxDevicePixelRatio ?? Infinity,
+    _uniqueId: _nextSurfaceId++,
+    _context: context,
+    _configureFormat: configureFormat,
+    _alphaMode: alphaMode,
+    _renderingContexts: []
+  };
+}
+function _refreshScRT(surface) {
+  const tex = surface._context.getCurrentTexture();
+  const swap = surface.scRT;
+  swap._colorTexture = tex;
+  swap._colorView = tex.createView({ format: surface.format });
+  swap._width = tex.width;
+  swap._height = tex.height;
+}
+function resizeSurface(surface) {
+  const canvas = surface.canvas;
+  if (!isDomCanvas(canvas)) {
+    return;
+  }
+  const clientWidth = canvas.clientWidth;
+  const clientHeight = canvas.clientHeight;
+  if (!(clientWidth > 0 && clientHeight > 0)) {
+    return;
+  }
+  const scale = Math.min(globalThis.devicePixelRatio || 1, surface.maxDevicePixelRatio);
+  const w = clientWidth * scale | 0;
+  const h = clientHeight * scale | 0;
+  setSurfaceSize(surface, w, h);
+}
+function setSurfaceSize(surface, widthPx, heightPx) {
+  const canvas = surface.canvas;
+  const w = widthPx | 0;
+  const h = heightPx | 0;
+  if (!(w > 0 && h > 0)) {
+    return;
+  }
+  if (w === canvas.width && h === canvas.height) {
+    return;
+  }
+  canvas.width = w;
+  canvas.height = h;
+  surface.scRT._width = w;
+  surface.scRT._height = h;
+  for (const c of surface._renderingContexts) {
+    c._resize?.();
+  }
+}
+function disposeSurface(surface) {
+  if (surface === surface.engine) {
+    throw new Error("Babylon Lite: disposeSurface cannot dispose the engine's primary surface — use disposeEngine instead.");
+  }
+  surface._renderingContexts.length = 0;
+  surface._context.unconfigure();
+  const list = surface.engine._surfaces;
+  const i = list.indexOf(surface);
+  if (i !== -1) {
+    list.splice(i, 1);
+  }
+}
+
+export { _buildSurface, _refreshScRT, createSurface, disposeSurface, isDomCanvas, resizeSurface, setSurfaceSize, toSrgbFormat };
+//# sourceMappingURL=surface.js.map

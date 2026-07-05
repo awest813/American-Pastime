@@ -1,0 +1,17 @@
+let _stdFactory = null;
+function setCsmStdReceiverFactory(f) {
+  _stdFactory = f;
+}
+function getCsmStdReceiverFactory() {
+  return _stdFactory;
+}
+let _pbrFactory = null;
+function setCsmPbrReceiverFactory(f) {
+  _pbrFactory = f;
+}
+function getCsmPbrReceiverFactory() {
+  return _pbrFactory;
+}
+
+export { getCsmPbrReceiverFactory, getCsmStdReceiverFactory, setCsmPbrReceiverFactory, setCsmStdReceiverFactory };
+//# sourceMappingURL=csm-receiver-registry.js.map

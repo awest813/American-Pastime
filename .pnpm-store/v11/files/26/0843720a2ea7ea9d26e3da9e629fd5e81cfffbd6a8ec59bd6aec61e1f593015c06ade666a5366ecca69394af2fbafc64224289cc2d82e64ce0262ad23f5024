@@ -1,0 +1,7 @@
+import { type IReadonlyObservable } from "@babylonjs/core/index.js";
+/**
+ * Creates a polling observable that notifies its observers at a specified interval.
+ * @param delay The polling interval in milliseconds.
+ * @returns A readonly observable that can be used to subscribe to polling notifications.
+ */
+export declare function usePollingObservable(delay: number): IReadonlyObservable<void>;

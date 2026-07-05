@@ -1,0 +1,5 @@
+import { type FunctionComponent } from "react";
+import { type Scene } from "@babylonjs/core/index.js";
+export declare const CountStats: FunctionComponent<{
+    context: Scene;
+}>;

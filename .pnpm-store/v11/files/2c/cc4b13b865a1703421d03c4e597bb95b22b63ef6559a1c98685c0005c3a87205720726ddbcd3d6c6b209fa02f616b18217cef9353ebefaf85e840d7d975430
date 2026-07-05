@@ -1,0 +1,11 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { mat4PerspectiveLHToRef } from './mat4-perspective-lh-to-ref.js';
+
+function mat4PerspectiveLH(fov, aspect, near, far) {
+  const out = new F32(16);
+  mat4PerspectiveLHToRef(out, fov, aspect, near, far);
+  return out;
+}
+
+export { mat4PerspectiveLH };
+//# sourceMappingURL=mat4-perspective-lh.js.map

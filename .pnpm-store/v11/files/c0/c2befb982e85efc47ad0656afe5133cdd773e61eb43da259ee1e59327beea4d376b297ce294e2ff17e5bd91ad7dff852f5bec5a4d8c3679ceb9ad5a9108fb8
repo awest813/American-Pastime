@@ -1,0 +1,47 @@
+/**
+ * Helper type to make all properties of T nullable.
+ */
+export type NullableProperties<T> = {
+    [K in keyof T]: T[K] | null;
+};
+export declare const LoaderOptionDefaults: {
+    capturePerformanceCounters: false;
+    loggingEnabled: false;
+} & {
+    alwaysComputeBoundingBox: boolean;
+    alwaysComputeSkeletonRootNode: boolean;
+    animationStartMode: import("@babylonjs/loaders/glTF/glTFFileLoader.pure.js").GLTFLoaderAnimationStartMode;
+    compileMaterials: boolean;
+    compileShadowGenerators: boolean;
+    coordinateSystemMode: import("@babylonjs/loaders/glTF/glTFFileLoader.pure.js").GLTFLoaderCoordinateSystemMode;
+    createInstances: boolean;
+    loadAllMaterials: boolean;
+    loadMorphTargets: boolean;
+    useMaxMorphTargetInfluencers: boolean;
+    loadNodeAnimations: boolean;
+    loadOnlyMaterials: boolean;
+    loadSkins: boolean;
+    skipMaterials: boolean;
+    targetFps: number;
+    transparencyAsCoverage: boolean;
+    useClipPlane: boolean;
+    useGltfTextureNames: boolean;
+    useRangeRequests: boolean;
+    useSRGBBuffers: boolean;
+    validate: boolean;
+    useOpenPBR: boolean;
+    dontUseTransmissionHelper: boolean;
+};
+export type GLTFLoaderOptionsType = NullableProperties<typeof LoaderOptionDefaults>;
+export declare const ExtensionOptionDefaults: {
+    MSFT_lod: {
+        maxLODsToLoad: number;
+    };
+};
+export type GLTFExtensionOptionsType = Record<string, {
+    /**
+     *
+     */
+    enabled: boolean | null;
+    [key: string]: unknown;
+}>;

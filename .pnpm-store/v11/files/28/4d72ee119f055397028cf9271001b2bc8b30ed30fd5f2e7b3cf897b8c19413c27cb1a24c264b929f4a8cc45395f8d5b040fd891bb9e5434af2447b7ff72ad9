@@ -1,0 +1,1 @@
+{"version":3,"file":"scene-uniforms-size.js","sources":["../../../src/shader/scene-uniforms-size.ts"],"sourcesContent":["/** Total size of SceneUniforms in bytes (must equal shaders/scene-uniforms.wgsl). */\nexport const SCENE_UBO_BYTES = 368;\n"],"names":[],"mappings":"AACO,MAAM,eAAA,GAAkB;;;;"}

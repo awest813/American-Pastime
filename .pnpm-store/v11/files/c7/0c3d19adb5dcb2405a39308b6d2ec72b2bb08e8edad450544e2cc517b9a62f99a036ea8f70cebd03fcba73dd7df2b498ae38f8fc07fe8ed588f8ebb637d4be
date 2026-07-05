@@ -1,0 +1,262 @@
+import { F32, I32, U8 } from '../engine/typed-arrays.js';
+import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_POINTER, PATH_WEIGHTS } from '../animation/types.js';
+import { evaluateSampler } from '../animation/evaluate.js';
+import { mat4ComposeInto } from '../math/mat4-compose-into.js';
+import { mat4MultiplyInto } from '../math/mat4-multiply-into.js';
+import { _boneApplier } from './bone-control-hooks.js';
+
+const _boneTmp = new F32(16);
+let _maskResolver = null;
+function _installAnimationMaskResolver(resolver) {
+  _maskResolver = resolver;
+}
+const RH_TO_LH = new F32([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+const TRS_STRIDE = 12;
+const T_OFF = 0;
+const R_OFF = 3;
+const S_OFF = 7;
+function computeTopoOrder(nodes) {
+  const n = nodes.length;
+  const order = new I32(n);
+  const visited = new U8(n);
+  let cursor = 0;
+  function visit(idx) {
+    if (visited[idx]) {
+      return;
+    }
+    visited[idx] = 1;
+    const p = nodes[idx].parentIdx;
+    if (p >= 0) {
+      visit(p);
+    }
+    order[cursor++] = idx;
+  }
+  for (let i = 0; i < n; i++) {
+    visit(i);
+  }
+  return order;
+}
+function createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames) {
+  const requiresEngine = skeletons.length > 0 || morphBindings.length > 0;
+  const numNodes = nodes.length;
+  const nodeTrsBindings = [];
+  if (nodeTargets) {
+    const maskByNode = /* @__PURE__ */ new Map();
+    for (let ci = 0; ci < clip.channels.length; ci++) {
+      const ch = clip.channels[ci];
+      const bit = ch.path === PATH_TRANSLATION ? 1 : ch.path === PATH_ROTATION ? 2 : ch.path === PATH_SCALE ? 4 : 0;
+      if (bit === 0) {
+        continue;
+      }
+      const ni = ch.nodeIdx;
+      if (ni < 0 || excludedNodeIndices?.has(ni) || !nodeTargets[ni]) {
+        continue;
+      }
+      maskByNode.set(ni, (maskByNode.get(ni) ?? 0) | bit);
+    }
+    for (const [ni, mask] of maskByNode) {
+      nodeTrsBindings.push({ target: nodeTargets[ni], off: ni * TRS_STRIDE, mask });
+    }
+  }
+  const currentTRS = new F32(numNodes * TRS_STRIDE);
+  const localMat = new F32(numNodes * 16);
+  const worldMat = new F32(numNodes * 16);
+  const topoOrder = computeTopoOrder(nodes);
+  const boneScratch = skeletons.map((s) => s.boneMatrices);
+  const morphBindingsByNode = [];
+  for (let morphIndex = 0; morphIndex < morphBindings.length; morphIndex++) {
+    const mb = morphBindings[morphIndex];
+    let arr = morphBindingsByNode[mb.nodeIdx];
+    if (!arr) {
+      arr = [];
+      morphBindingsByNode[mb.nodeIdx] = arr;
+    }
+    arr.push(mb);
+  }
+  const pointerScratch = new F32(16);
+  let morphUploadF32 = pointerScratch;
+  let cachedEngine;
+  let maskedNodes = null;
+  let maskActive = false;
+  let cMask = null;
+  let cNames = null;
+  let cLen = -1;
+  let cMode = -1;
+  let cDisabled = false;
+  const _setMask = (mask) => {
+    if (!mask || mask.disabled || !nodeNames || !_maskResolver) {
+      maskActive = false;
+      return;
+    }
+    const names = mask.names;
+    if (mask === cMask && names === cNames && names.length === cLen && mask.mode === cMode && mask.disabled === cDisabled) {
+      maskActive = true;
+      return;
+    }
+    cMask = mask;
+    cNames = names;
+    cLen = names.length;
+    cMode = mask.mode;
+    cDisabled = mask.disabled;
+    if (!maskedNodes) {
+      maskedNodes = new U8(numNodes);
+    }
+    _maskResolver(mask, nodeNames, maskedNodes, numNodes);
+    maskActive = true;
+  };
+  const ctrl = {
+    time: 0,
+    playing: true,
+    speedRatio: 1,
+    loop: true,
+    _setMask,
+    _debugWorldMat: worldMat,
+    tick: clip.duration <= 0 ? noopAnimationTick : (deltaMs, engine) => {
+      if (engine) {
+        cachedEngine = engine;
+      }
+      const activeEngine = engine ?? cachedEngine;
+      if (requiresEngine && !activeEngine) {
+        throw new Error("AnimationController.tick requires an EngineContext for skeleton or morph animation");
+      }
+      const device = requiresEngine ? activeEngine._device : null;
+      if (ctrl.playing) {
+        ctrl.time += deltaMs / 1e3 * ctrl.speedRatio;
+      }
+      if (ctrl.loop) {
+        ctrl.time %= clip.duration;
+        if (ctrl.time < 0) {
+          ctrl.time += clip.duration;
+        }
+      } else {
+        ctrl.time = Math.min(Math.max(ctrl.time, 0), clip.duration);
+      }
+      const t = ctrl.time;
+      for (let i = 0; i < numNodes; i++) {
+        const n = nodes[i];
+        const off = i * TRS_STRIDE;
+        currentTRS[off + T_OFF] = n.tx;
+        currentTRS[off + T_OFF + 1] = n.ty;
+        currentTRS[off + T_OFF + 2] = n.tz;
+        currentTRS[off + R_OFF] = n.rx;
+        currentTRS[off + R_OFF + 1] = n.ry;
+        currentTRS[off + R_OFF + 2] = n.rz;
+        currentTRS[off + R_OFF + 3] = n.rw;
+        currentTRS[off + S_OFF] = n.sx;
+        currentTRS[off + S_OFF + 1] = n.sy;
+        currentTRS[off + S_OFF + 2] = n.sz;
+      }
+      if (boneOverrides !== void 0 && boneOverrides.size > 0) {
+        _boneApplier?.(boneOverrides, currentTRS, numNodes);
+      }
+      for (let channelIndex = 0; channelIndex < clip.channels.length; channelIndex++) {
+        const ch = clip.channels[channelIndex];
+        if (_maskResolver !== null && maskActive && ch.nodeIdx >= 0 && maskedNodes[ch.nodeIdx]) {
+          continue;
+        }
+        const sampler = clip.samplers[ch.samplerIdx];
+        const base = ch.nodeIdx * TRS_STRIDE;
+        switch (ch.path) {
+          case PATH_TRANSLATION:
+            evaluateSampler(sampler, t, 3, false, currentTRS, base + T_OFF);
+            break;
+          case PATH_ROTATION:
+            evaluateSampler(sampler, t, 4, true, currentTRS, base + R_OFF);
+            break;
+          case PATH_SCALE:
+            evaluateSampler(sampler, t, 3, false, currentTRS, base + S_OFF);
+            break;
+          case PATH_WEIGHTS: {
+            const bindings = morphBindingsByNode[ch.nodeIdx];
+            if (bindings) {
+              const tc = bindings[0].targetCount;
+              if (tc > morphUploadF32.length) {
+                morphUploadF32 = new F32(tc);
+              }
+              morphUploadF32.fill(0);
+              evaluateSampler(sampler, t, tc, false, morphUploadF32, 0);
+              for (let bindingIndex = 0; bindingIndex < bindings.length; bindingIndex++) {
+                const mb = bindings[bindingIndex];
+                mb.weights.set(morphUploadF32.subarray(0, tc));
+                device.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 16, morphUploadF32.buffer, 0, tc * 4);
+              }
+            }
+            break;
+          }
+          case PATH_POINTER: {
+            if (ch.pointerArity && ch.pointerWriter) {
+              evaluateSampler(sampler, t, ch.pointerArity, ch.pointerQuaternion === true, pointerScratch, 0);
+              ch.pointerWriter(pointerScratch, 0);
+            }
+            break;
+          }
+        }
+      }
+      for (let bi = 0; bi < nodeTrsBindings.length; bi++) {
+        const b = nodeTrsBindings[bi];
+        const o = b.off;
+        if (b.mask & 1) {
+          b.target.position.set(currentTRS[o + T_OFF], currentTRS[o + T_OFF + 1], currentTRS[o + T_OFF + 2]);
+        }
+        if (b.mask & 2) {
+          b.target.rotationQuaternion.set(currentTRS[o + R_OFF], currentTRS[o + R_OFF + 1], currentTRS[o + R_OFF + 2], currentTRS[o + R_OFF + 3]);
+        }
+        if (b.mask & 4) {
+          b.target.scaling.set(currentTRS[o + S_OFF], currentTRS[o + S_OFF + 1], currentTRS[o + S_OFF + 2]);
+        }
+      }
+      for (let idx = 0; idx < numNodes; idx++) {
+        const nodeIdx = topoOrder[idx];
+        const node = nodes[nodeIdx];
+        const off = nodeIdx * TRS_STRIDE;
+        if (node._matrix) {
+          localMat.set(node._matrix, nodeIdx * 16);
+        } else {
+          mat4ComposeInto(
+            localMat,
+            nodeIdx * 16,
+            currentTRS[off + T_OFF],
+            currentTRS[off + T_OFF + 1],
+            currentTRS[off + T_OFF + 2],
+            currentTRS[off + R_OFF],
+            currentTRS[off + R_OFF + 1],
+            currentTRS[off + R_OFF + 2],
+            currentTRS[off + R_OFF + 3],
+            currentTRS[off + S_OFF],
+            currentTRS[off + S_OFF + 1],
+            currentTRS[off + S_OFF + 2]
+          );
+        }
+        const parentIdx = node.parentIdx;
+        if (parentIdx >= 0) {
+          mat4MultiplyInto(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
+        } else {
+          mat4MultiplyInto(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+        }
+      }
+      for (let si = 0; si < skeletons.length; si++) {
+        const skel = skeletons[si];
+        const boneData = boneScratch[si];
+        for (let bi = 0; bi < skel.boneCount; bi++) {
+          const jointIdx = skel.jointNodes[bi];
+          const ibmOff = bi * 16;
+          mat4MultiplyInto(_boneTmp, 0, skel.invMeshWorld, 0, worldMat, jointIdx * 16);
+          mat4MultiplyInto(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
+        }
+        const texWidth = skel.boneCount * 4;
+        device.queue.writeTexture(
+          { texture: skel.runtimeSkeleton?.boneTexture ?? skel.boneTexture },
+          boneData.buffer,
+          { bytesPerRow: texWidth * 16 },
+          { width: texWidth, height: 1 }
+        );
+      }
+    }
+  };
+  return ctrl;
+}
+function noopAnimationTick() {
+}
+
+export { _installAnimationMaskResolver, createAnimationController };
+//# sourceMappingURL=skeleton-updater.js.map

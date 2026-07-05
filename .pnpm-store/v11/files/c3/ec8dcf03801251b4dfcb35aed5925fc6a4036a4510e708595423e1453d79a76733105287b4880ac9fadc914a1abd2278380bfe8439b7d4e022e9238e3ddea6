@@ -1,0 +1,12 @@
+import { type FunctionComponent } from "react";
+type FrameBarProps = {
+    /** Width of the frame bar */
+    width: number;
+};
+/**
+ * Frame bar showing frame numbers along the top of the graph
+ * @param props - The component props
+ * @returns The frame bar component
+ */
+export declare const FrameBar: FunctionComponent<FrameBarProps>;
+export {};

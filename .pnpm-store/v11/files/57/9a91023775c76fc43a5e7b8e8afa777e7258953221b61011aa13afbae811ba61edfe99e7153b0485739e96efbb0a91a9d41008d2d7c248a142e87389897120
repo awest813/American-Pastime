@@ -1,0 +1,5 @@
+import { type MultiRenderTarget } from "@babylonjs/core/index.js";
+import { type FunctionComponent } from "react";
+export declare const MultiRenderTargetGeneralProperties: FunctionComponent<{
+    texture: MultiRenderTarget;
+}>;

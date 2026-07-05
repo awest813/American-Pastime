@@ -1,0 +1,492 @@
+import { removeMeshFromTask, createRenderTask } from '../frame-graph/render-task.js';
+import { getViewProjectionMatrix } from '../camera/camera.js';
+import { mat4Invert } from '../math/mat4-invert.js';
+import { createShadowCamera, casterVersionSum, updateShadowCameraBase, buildLightViewMatrix, multiply4x4 } from './shadow-base.js';
+import { preloadPcfShadowTaskState, getNoColorView } from './pcf-shadow-task-hooks.js';
+
+function effectiveCasterGen(material) {
+  const eff = material._shadowCasterMaterial ?? material;
+  return eff._csmGen ?? 0;
+}
+const preloadCsmShadowTaskState = preloadPcfShadowTaskState;
+function ensureCsmShadowTaskState(engine, scene, sg, cfg, casterMeshes, existingState) {
+  const existing = existingState;
+  if (existing) {
+    if (existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
+      return existing;
+    }
+    if (existing._casterMeshes === casterMeshes && existing._materialEpoch === scene._materialEpoch) {
+      existing._renderableVersion = scene._renderableVersion;
+      return existing;
+    }
+    let casterMatChanged = false;
+    for (const m of casterMeshes) {
+      const mat = m.material;
+      if (!mat) {
+        continue;
+      }
+      const stored = existing._casterMatGens.get(mat);
+      if (stored !== void 0 && stored !== effectiveCasterGen(mat)) {
+        casterMatChanged = true;
+        break;
+      }
+    }
+    if (!casterMatChanged) {
+      const prevSet = new Set(existing._casterMeshes);
+      const nextSet = new Set(casterMeshes);
+      const views = existing._materialViews;
+      const gens = existing._casterMatGens;
+      for (const m of existing._casterMeshes) {
+        if (!nextSet.has(m)) {
+          for (const t of existing._tasks) {
+            removeMeshFromTask(t, m);
+          }
+        }
+      }
+      for (const m of casterMeshes) {
+        if (!prevSet.has(m) && m.material) {
+          const view = getNoColorView(m.material, views);
+          for (const t of existing._tasks) {
+            t.addMesh(m, { material: view });
+          }
+          gens.set(m.material, effectiveCasterGen(m.material));
+        }
+      }
+      for (const t of existing._tasks) {
+        t._lastVersion = -1;
+      }
+      existing._casterMeshes = casterMeshes;
+      existing._renderableVersion = scene._renderableVersion;
+      return existing;
+    }
+    const old = existing._task;
+    void engine._device.queue.onSubmittedWorkDone().then(() => {
+      try {
+        old.dispose();
+      } catch {
+      }
+    }).catch(() => {
+    });
+  }
+  const materialViews = /* @__PURE__ */ new Map();
+  const n = cfg._numCascades;
+  const tasks = [];
+  const cameras = [];
+  for (let i = 0; i < n; i++) {
+    const layerView = sg._depthTexture.createView({ dimension: "2d", baseArrayLayer: i, arrayLayerCount: 1 });
+    const rt = {
+      _descriptor: {
+        size: { width: cfg._mapSize, height: cfg._mapSize },
+        dFormat: "depth32float",
+        _depthClearValue: 1,
+        _depthCompare: "less-equal",
+        samples: 1
+      },
+      _colorTexture: null,
+      _colorView: null,
+      _depthTexture: sg._depthTexture,
+      _depthView: layerView,
+      _width: cfg._mapSize,
+      _height: cfg._mapSize,
+      _eager: true,
+      _ownsDepthTexture: false
+      // borrowed: the shared CSM depth array is owned by the generator
+    };
+    const camera = createShadowCamera(sg);
+    const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera }, engine, scene);
+    for (const mesh of casterMeshes) {
+      const material = mesh.material;
+      if (material) {
+        task.addMesh(mesh, { material: getNoColorView(material, materialViews) });
+      }
+    }
+    tasks.push(task);
+    cameras.push(camera);
+  }
+  const compositeTask = {
+    record() {
+      for (const t of tasks) {
+        t.record();
+      }
+    },
+    execute() {
+      let draws = 0;
+      for (const t of tasks) {
+        draws += t.execute?.() ?? 0;
+      }
+      return draws;
+    },
+    dispose() {
+      for (const t of tasks) {
+        t.dispose();
+      }
+    }
+  };
+  const casterMatGens = /* @__PURE__ */ new Map();
+  for (const m of casterMeshes) {
+    if (m.material) {
+      casterMatGens.set(m.material, effectiveCasterGen(m.material));
+    }
+  }
+  return {
+    _task: compositeTask,
+    _tasks: tasks,
+    _cameras: cameras,
+    _scene: scene,
+    _cameraVersion: 0,
+    _lastCasterVersion: -1,
+    _lastLightVersion: -1,
+    _lastCamVersion: -1,
+    _uboData: new Float32Array(80),
+    _casterMeshes: casterMeshes,
+    _renderableVersion: scene._renderableVersion,
+    _materialEpoch: scene._materialEpoch,
+    _materialViews: materialViews,
+    _casterMatGens: casterMatGens
+  };
+}
+function renderCsmShadowMap(engine, sg, state, cfg) {
+  const casterMeshes = state._casterMeshes;
+  const camera = state._scene.camera;
+  if (!camera) {
+    return 0;
+  }
+  const casterVersion = casterVersionSum(casterMeshes);
+  const lightVersion = sg._light.worldMatrixVersion;
+  const camVersion = camera.worldMatrixVersion;
+  if (!cfg._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion && camVersion === state._lastCamVersion) {
+    return 0;
+  }
+  const cascades = _computeCsmCascades(engine, camera, sg._light, cfg, casterMeshes);
+  _writeCsmUbo(state._uboData, cascades, cfg);
+  sg._version++;
+  engine._device.queue.writeBuffer(sg._shadowUBO, 0, state._uboData);
+  const receiverCbs = sg._onReceiverData;
+  if (receiverCbs) {
+    for (let i = 0; i < receiverCbs.length; i++) {
+      receiverCbs[i](state._uboData);
+    }
+  }
+  state._cameraVersion++;
+  for (let i = 0; i < cascades._transforms.length; i++) {
+    const cam = state._cameras[i];
+    cam.fov = 1;
+    updateShadowCameraBase(cam, state._cameraVersion, cascades._near[i], cascades._far[i], cascades._views[i], _biasViewProjection(cascades._biased[i], cfg._bias));
+  }
+  state._lastCasterVersion = casterVersion;
+  state._lastLightVersion = lightVersion;
+  state._lastCamVersion = camVersion;
+  return state._task.execute?.() ?? 0;
+}
+const FRUSTUM_NDC = [
+  [-1, 1, 1],
+  [1, 1, 1],
+  [1, -1, 1],
+  [-1, -1, 1],
+  [-1, 1, 0],
+  [1, 1, 0],
+  [1, -1, 0],
+  [-1, -1, 0]
+];
+function transformCoord(m, x, y, z) {
+  const X = m[0] * x + m[4] * y + m[8] * z + m[12];
+  const Y = m[1] * x + m[5] * y + m[9] * z + m[13];
+  const Z = m[2] * x + m[6] * y + m[10] * z + m[14];
+  const W = m[3] * x + m[7] * y + m[11] * z + m[15];
+  return [X / W, Y / W, Z / W];
+}
+function orthoOffCenterLH(l, r, b, t, n, f) {
+  const m = new Float32Array(16);
+  m[0] = 2 / (r - l);
+  m[5] = 2 / (t - b);
+  m[10] = 1 / (f - n);
+  m[12] = -(r + l) / (r - l);
+  m[13] = -(t + b) / (t - b);
+  m[14] = -n / (f - n);
+  m[15] = 1;
+  return m;
+}
+function _computeCsmCascades(engine, camera, light, cfg, casterMeshes) {
+  const near = camera.nearPlane;
+  const far = camera.farPlane;
+  const cameraRange = far - near;
+  const shadowMaxZ = cfg._shadowMaxZ ?? far;
+  const maxDistance = shadowMaxZ < far && shadowMaxZ >= near ? Math.min((shadowMaxZ - near) / (far - near), 1) : 1;
+  const minDistance = 0;
+  const minZ = near + minDistance * cameraRange;
+  const maxZ = near + maxDistance * cameraRange;
+  const range = maxZ - minZ;
+  const ratio = maxZ / minZ;
+  const n = cfg._numCascades;
+  const breakDist = [];
+  const viewFrustumZ = [];
+  const frustumLengths = [];
+  for (let i = 0; i < n; i++) {
+    const p = (i + 1) / n;
+    const log = minZ * ratio ** p;
+    const uniform = minZ + range * p;
+    const d = cfg._lambda * (log - uniform) + uniform;
+    const prevBreak = i === 0 ? minDistance : breakDist[i - 1];
+    breakDist[i] = (d - near) / cameraRange;
+    viewFrustumZ[i] = d;
+    frustumLengths[i] = (breakDist[i] - prevBreak) * cameraRange;
+  }
+  let dx = light.direction.x;
+  let dy = light.direction.y;
+  let dz = light.direction.z;
+  const dl = Math.hypot(dx, dy, dz) || 1;
+  dx /= dl;
+  dy /= dl;
+  dz /= dl;
+  if (Math.abs(dy) >= 1) {
+    dz = 1e-13;
+  }
+  const aspect = engine.canvas.width / engine.canvas.height;
+  const vp = getViewProjectionMatrix(camera, aspect);
+  const inv = mat4Invert(vp);
+  const invViewProj = inv ?? vp;
+  const aabb = _castersWorldAabb(casterMeshes);
+  const transforms = [];
+  const views = [];
+  const nearOut = [];
+  const farOut = [];
+  for (let c = 0; c < n; c++) {
+    const prevSplit = c === 0 ? 0 : breakDist[c - 1];
+    const split = breakDist[c];
+    const corners = [];
+    for (let k = 0; k < 8; k++) {
+      const ndc = FRUSTUM_NDC[k];
+      corners.push(transformCoord(invViewProj, ndc[0], ndc[1], ndc[2]));
+    }
+    for (let k = 0; k < 4; k++) {
+      const nearC = corners[k];
+      const farC = corners[k + 4];
+      const rx = farC[0] - nearC[0];
+      const ry = farC[1] - nearC[1];
+      const rz = farC[2] - nearC[2];
+      corners[k + 4] = [nearC[0] + rx * split, nearC[1] + ry * split, nearC[2] + rz * split];
+      corners[k] = [nearC[0] + rx * prevSplit, nearC[1] + ry * prevSplit, nearC[2] + rz * prevSplit];
+    }
+    let cx = 0, cy = 0, cz = 0;
+    for (const p of corners) {
+      cx += p[0];
+      cy += p[1];
+      cz += p[2];
+    }
+    cx /= 8;
+    cy /= 8;
+    cz /= 8;
+    let minX, maxX, minY, maxY, minEz, maxEz;
+    let stableRadius = 0;
+    if (cfg._stabilizeCascades) {
+      let radius = 0;
+      for (const p of corners) {
+        radius = Math.max(radius, Math.hypot(p[0] - cx, p[1] - cy, p[2] - cz));
+      }
+      radius = Math.ceil(radius * 16) / 16;
+      stableRadius = radius;
+      minX = minY = minEz = -radius;
+      maxX = maxY = maxEz = radius;
+    } else {
+      const tmpView = buildLightViewMatrix(dx, dy, dz, cx, cy, cz);
+      minX = minY = minEz = Infinity;
+      maxX = maxY = maxEz = -Infinity;
+      for (const p of corners) {
+        const lp = transformCoord(tmpView, p[0], p[1], p[2]);
+        minX = Math.min(minX, lp[0]);
+        maxX = Math.max(maxX, lp[0]);
+        minY = Math.min(minY, lp[1]);
+        maxY = Math.max(maxY, lp[1]);
+        minEz = Math.min(minEz, lp[2]);
+        maxEz = Math.max(maxEz, lp[2]);
+      }
+    }
+    const eyeX = cx + dx * minEz;
+    const eyeY = cy + dy * minEz;
+    const eyeZ = cz + dz * minEz;
+    const view = buildLightViewMatrix(dx, dy, dz, eyeX, eyeY, eyeZ);
+    let viewMinZ = 0;
+    let viewMaxZ = maxEz - minEz;
+    if (aabb) {
+      let cMinZ = Infinity;
+      let cMaxZ = -Infinity;
+      for (let k = 0; k < 8; k++) {
+        const wx = k & 1 ? aabb._max[0] : aabb._min[0];
+        const wy = k & 2 ? aabb._max[1] : aabb._min[1];
+        const wz = k & 4 ? aabb._max[2] : aabb._min[2];
+        const lz = view[2] * wx + view[6] * wy + view[10] * wz + view[14];
+        cMinZ = Math.min(cMinZ, lz);
+        cMaxZ = Math.max(cMaxZ, lz);
+      }
+      if (cMinZ <= viewMaxZ) {
+        viewMinZ = Math.min(viewMinZ, cMinZ);
+        viewMaxZ = Math.min(viewMaxZ, cMaxZ);
+      }
+    }
+    const proj0 = orthoOffCenterLH(minX, maxX, minY, maxY, viewMinZ, viewMaxZ);
+    let transform = multiply4x4(proj0, view);
+    let aClipX = transform[12];
+    let aClipY = transform[13];
+    if (cfg._stabilizeCascades && stableRadius > 0) {
+      const texelWorld = 2 * stableRadius / cfg._mapSize;
+      const rX = view[0], rY = view[4], rZ = view[8];
+      const uX = view[1], uY = view[5], uZ = view[9];
+      const sr = Math.round((rX * cx + rY * cy + rZ * cz) / texelWorld) * texelWorld;
+      const tr = Math.round((uX * cx + uY * cy + uZ * cz) / texelWorld) * texelWorld;
+      const ax = sr * rX + tr * uX;
+      const ay = sr * rY + tr * uY;
+      const az = sr * rZ + tr * uZ;
+      aClipX = transform[0] * ax + transform[4] * ay + transform[8] * az + transform[12];
+      aClipY = transform[1] * ax + transform[5] * ay + transform[9] * az + transform[13];
+    }
+    const ox = aClipX * (cfg._mapSize / 2);
+    const oy = aClipY * (cfg._mapSize / 2);
+    const offX = (Math.round(ox) - ox) * (2 / cfg._mapSize);
+    const offY = (Math.round(oy) - oy) * (2 / cfg._mapSize);
+    const snap = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, offX, offY, 0, 1]);
+    const proj = multiply4x4(snap, proj0);
+    transform = multiply4x4(proj, view);
+    transforms.push(transform);
+    views.push(view);
+    nearOut.push(viewMinZ);
+    farOut.push(viewMaxZ);
+  }
+  return {
+    _transforms: transforms,
+    _biased: transforms.map((t) => new Float32Array(t)),
+    _views: views,
+    _near: nearOut,
+    _far: farOut,
+    _viewFrustumZ: viewFrustumZ,
+    _frustumLengths: frustumLengths
+  };
+}
+function _castersWorldAabb(casterMeshes) {
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const mesh of casterMeshes) {
+    const ti = mesh.thinInstances;
+    if (ti && ti.count > 0 && ti.matrices) {
+      const a = _thinInstanceWorldAabb(mesh, ti);
+      if (a) {
+        minX = Math.min(minX, a._min[0]);
+        maxX = Math.max(maxX, a._max[0]);
+        minY = Math.min(minY, a._min[1]);
+        maxY = Math.max(maxY, a._max[1]);
+        minZ = Math.min(minZ, a._min[2]);
+        maxZ = Math.max(maxZ, a._max[2]);
+      }
+      continue;
+    }
+    const world = mesh.worldMatrix;
+    const bmin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
+    const bmax = mesh.boundMax ?? [0.5, 0.5, 0.5];
+    for (let k = 0; k < 8; k++) {
+      const lx = k & 1 ? bmax[0] : bmin[0];
+      const ly = k & 2 ? bmax[1] : bmin[1];
+      const lz = k & 4 ? bmax[2] : bmin[2];
+      const wx = world[0] * lx + world[4] * ly + world[8] * lz + world[12];
+      const wy = world[1] * lx + world[5] * ly + world[9] * lz + world[13];
+      const wz = world[2] * lx + world[6] * ly + world[10] * lz + world[14];
+      minX = Math.min(minX, wx);
+      maxX = Math.max(maxX, wx);
+      minY = Math.min(minY, wy);
+      maxY = Math.max(maxY, wy);
+      minZ = Math.min(minZ, wz);
+      maxZ = Math.max(maxZ, wz);
+    }
+  }
+  if (!Number.isFinite(minX)) {
+    return null;
+  }
+  return { _min: [minX, minY, minZ], _max: [maxX, maxY, maxZ] };
+}
+let _thinCasterAabbCache = null;
+function _getThinCasterAabbCache() {
+  if (!_thinCasterAabbCache) {
+    _thinCasterAabbCache = /* @__PURE__ */ new WeakMap();
+  }
+  return _thinCasterAabbCache;
+}
+function _thinInstanceWorldAabb(mesh, ti) {
+  const cache = _getThinCasterAabbCache();
+  const worldVersion = mesh.worldMatrixVersion;
+  const cached = cache.get(mesh);
+  if (cached && cached._version === ti._version && cached._worldVersion === worldVersion) {
+    return cached._aabb;
+  }
+  const world = mesh.worldMatrix;
+  const bmin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
+  const bmax = mesh.boundMax ?? [0.5, 0.5, 0.5];
+  const mats = ti.matrices;
+  const count = Math.min(ti.count, mats.length / 16 | 0);
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const o = i * 16;
+    const lin = Math.abs(mats[o]) + Math.abs(mats[o + 1]) + Math.abs(mats[o + 2]) + Math.abs(mats[o + 4]) + Math.abs(mats[o + 5]) + Math.abs(mats[o + 6]) + Math.abs(mats[o + 8]) + Math.abs(mats[o + 9]) + Math.abs(mats[o + 10]);
+    if (lin < 1e-9) {
+      continue;
+    }
+    for (let k = 0; k < 8; k++) {
+      const lx = k & 1 ? bmax[0] : bmin[0];
+      const ly = k & 2 ? bmax[1] : bmin[1];
+      const lz = k & 4 ? bmax[2] : bmin[2];
+      const ix = mats[o] * lx + mats[o + 4] * ly + mats[o + 8] * lz + mats[o + 12];
+      const iy = mats[o + 1] * lx + mats[o + 5] * ly + mats[o + 9] * lz + mats[o + 13];
+      const iz = mats[o + 2] * lx + mats[o + 6] * ly + mats[o + 10] * lz + mats[o + 14];
+      const wx = world[0] * ix + world[4] * iy + world[8] * iz + world[12];
+      const wy = world[1] * ix + world[5] * iy + world[9] * iz + world[13];
+      const wz = world[2] * ix + world[6] * iy + world[10] * iz + world[14];
+      if (wx < minX) {
+        minX = wx;
+      }
+      if (wx > maxX) {
+        maxX = wx;
+      }
+      if (wy < minY) {
+        minY = wy;
+      }
+      if (wy > maxY) {
+        maxY = wy;
+      }
+      if (wz < minZ) {
+        minZ = wz;
+      }
+      if (wz > maxZ) {
+        maxZ = wz;
+      }
+    }
+  }
+  const aabb = Number.isFinite(minX) ? { _min: [minX, minY, minZ], _max: [maxX, maxY, maxZ] } : null;
+  cache.set(mesh, { _version: ti._version, _worldVersion: worldVersion, _aabb: aabb });
+  return aabb;
+}
+function _writeCsmUbo(out, cascades, cfg) {
+  out.fill(0);
+  const n = cascades._transforms.length;
+  for (let i = 0; i < n; i++) {
+    out.set(cascades._transforms[i], i * 16);
+  }
+  for (let i = 0; i < n; i++) {
+    out[64 + i] = cascades._viewFrustumZ[i];
+    out[68 + i] = cascades._frustumLengths[i];
+  }
+  out[72] = cfg._darkness;
+  out[73] = cfg._mapSize;
+  out[74] = 1 / cfg._mapSize;
+  out[75] = cfg._frustumEdgeFalloff;
+  out[76] = n;
+  out[77] = cfg._cascadeBlendPercentage === 0 ? 1e4 : 1 / cfg._cascadeBlendPercentage;
+}
+function _biasViewProjection(viewProj, bias) {
+  const biased = new Float32Array(viewProj);
+  const b = bias * 0.5;
+  for (let col = 0; col < 4; col++) {
+    const z = 2 + col * 4;
+    const w = 3 + col * 4;
+    biased[z] = biased[z] + b * biased[w];
+  }
+  return biased;
+}
+
+export { ensureCsmShadowTaskState, preloadCsmShadowTaskState, renderCsmShadowMap };
+//# sourceMappingURL=csm-shadow-task-hooks.js.map

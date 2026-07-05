@@ -1,0 +1,15 @@
+import { addDeferredSceneRenderables } from '../scene/scene-core.js';
+import { buildSpriteRenderable } from './sprite-renderable.js';
+
+function addDepthHostedSpriteLayer(scene, layer) {
+  if (layer.depth === "none") {
+    throw new Error('Depth-hosted sprites require depth != "none".');
+  }
+  addDeferredSceneRenderables(scene, (engine) => {
+    const built = buildSpriteRenderable(engine, layer);
+    return { renderables: [built.renderable], dispose: built.dispose };
+  });
+}
+
+export { addDepthHostedSpriteLayer };
+//# sourceMappingURL=sprite-scene.js.map

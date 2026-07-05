@@ -1,0 +1,12 @@
+export const UNMEASURED = -1;
+export const EVENTS = {
+    keyboard: 'keyboard',
+    touch: 'touch',
+    mouse: 'mouse',
+    setValue: 'setValue',
+    handleRef: 'handleRef',
+    wrapperRef: 'wrapperRef',
+    elementRef: 'elementRef'
+};
+
+//# sourceMappingURL=types.js.map

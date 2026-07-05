@@ -1,0 +1,14 @@
+import { type FunctionComponent } from "react";
+import { Material } from "@babylonjs/core/Materials/material.js";
+export declare const MaterialGeneralProperties: FunctionComponent<{
+    material: Material;
+}>;
+export declare const MaterialTransparencyProperties: FunctionComponent<{
+    material: Material;
+}>;
+export declare const MaterialTextureRepetitionProperties: FunctionComponent<{
+    material: Material;
+}>;
+export declare const MaterialStencilProperties: FunctionComponent<{
+    material: Material;
+}>;

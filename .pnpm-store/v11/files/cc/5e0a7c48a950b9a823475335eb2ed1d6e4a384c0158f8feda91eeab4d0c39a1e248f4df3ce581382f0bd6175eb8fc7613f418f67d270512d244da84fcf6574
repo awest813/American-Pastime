@@ -1,0 +1,224 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { computeNodeWorldMatrix, findParent, resolveAccessor } from '../loader-gltf/gltf-parser.js';
+import { mat4Invert } from '../math/mat4-invert.js';
+import { mat4Identity } from '../math/mat4-identity.js';
+import { T_OFF, R_OFF, S_OFF, computeTopoOrder, TRS_STRIDE, resetTRS, computeNodeWorldMatrices, writeBoneTextures } from './skeleton-pose.js';
+import { _installBoneControl } from './bone-control-hooks.js';
+
+function getBoneByName(skeleton, name) {
+  return skeleton._byName.get(name);
+}
+function ensureOverride(skeleton, bone) {
+  let o = skeleton._overrides.get(bone._nodeIndex);
+  if (!o) {
+    o = { mask: 0, tx: 0, ty: 0, tz: 0, rx: 0, ry: 0, rz: 0, rw: 1, sx: 1, sy: 1, sz: 1 };
+    skeleton._overrides.set(bone._nodeIndex, o);
+  }
+  return o;
+}
+function setBonePosition(skeleton, bone, x, y, z) {
+  const o = ensureOverride(skeleton, bone);
+  o.tx = x;
+  o.ty = y;
+  o.tz = z;
+  o.mask |= 1;
+  skeleton._bake();
+}
+function setBoneRotationQuaternion(skeleton, bone, x, y, z, w) {
+  const o = ensureOverride(skeleton, bone);
+  o.rx = x;
+  o.ry = y;
+  o.rz = z;
+  o.rw = w;
+  o.mask |= 2;
+  skeleton._bake();
+}
+function setBoneScaling(skeleton, bone, x, y, z) {
+  const o = ensureOverride(skeleton, bone);
+  o.sx = x;
+  o.sy = y;
+  o.sz = z;
+  o.mask |= 4;
+  skeleton._bake();
+}
+function setBoneVisible(skeleton, bone, visible) {
+  if (!visible) {
+    setBoneScaling(skeleton, bone, 0, 0, 0);
+    return;
+  }
+  const o = skeleton._overrides.get(bone._nodeIndex);
+  if (o) {
+    o.mask &= -5;
+    if (o.mask === 0) {
+      skeleton._overrides.delete(bone._nodeIndex);
+    }
+    skeleton._bake();
+  }
+}
+function clearBoneOverride(skeleton, bone) {
+  if (skeleton._overrides.delete(bone._nodeIndex)) {
+    skeleton._bake();
+  }
+}
+function applyOverridesToTRS(overrides, currentTRS, numNodes) {
+  for (const [ni, o] of overrides) {
+    if (ni < 0 || ni >= numNodes) {
+      continue;
+    }
+    const off = ni * TRS_STRIDE;
+    const m = o.mask;
+    if (m & 1) {
+      currentTRS[off + T_OFF] = o.tx;
+      currentTRS[off + T_OFF + 1] = o.ty;
+      currentTRS[off + T_OFF + 2] = o.tz;
+    }
+    if (m & 2) {
+      currentTRS[off + R_OFF] = o.rx;
+      currentTRS[off + R_OFF + 1] = o.ry;
+      currentTRS[off + R_OFF + 2] = o.rz;
+      currentTRS[off + R_OFF + 3] = o.rw;
+    }
+    if (m & 4) {
+      currentTRS[off + S_OFF] = o.sx;
+      currentTRS[off + S_OFF + 1] = o.sy;
+      currentTRS[off + S_OFF + 2] = o.sz;
+    }
+  }
+}
+function buildRestNodes(json, parentMap) {
+  const nodeCount = json.nodes?.length ?? 0;
+  const nodes = [];
+  for (let i = 0; i < nodeCount; i++) {
+    const n = json.nodes[i];
+    const t = n.translation ?? [0, 0, 0];
+    const r = n.rotation ?? [0, 0, 0, 1];
+    const s = n.scale ?? [1, 1, 1];
+    nodes.push({
+      parentIdx: findParent(parentMap, i),
+      _matrix: n.matrix,
+      tx: t[0],
+      ty: t[1],
+      tz: t[2],
+      rx: r[0],
+      ry: r[1],
+      rz: r[2],
+      rw: r[3],
+      sx: s[0],
+      sy: s[1],
+      sz: s[2]
+    });
+  }
+  return nodes;
+}
+function resolveIBMs(json, binChunk, skin) {
+  const jointCount = skin.joints.length;
+  if (skin.inverseBindMatrices !== void 0) {
+    const ibm = resolveAccessor(json, binChunk, skin.inverseBindMatrices);
+    return new F32(ibm._data.buffer, ibm._data.byteOffset, jointCount * 16);
+  }
+  const out = new F32(jointCount * 16);
+  for (let i = 0; i < jointCount; i++) {
+    const o = i * 16;
+    out[o] = out[o + 5] = out[o + 10] = out[o + 15] = 1;
+  }
+  return out;
+}
+function buildNodeToMeshIndices(json) {
+  const nodeCount = json.nodes?.length ?? 0;
+  const map = /* @__PURE__ */ new Map();
+  let gpuIdx = 0;
+  for (let ni = 0; ni < nodeCount; ni++) {
+    const node = json.nodes[ni];
+    if (node.mesh === void 0) {
+      continue;
+    }
+    const indices = [];
+    for (let p = 0; p < json.meshes[node.mesh].primitives.length; p++) {
+      indices.push(gpuIdx++);
+    }
+    map.set(ni, indices);
+  }
+  return map;
+}
+function extractSkinGroups(json, binChunk, meshes, parentMap, worldMatrixCache) {
+  const nodeCount = json.nodes?.length ?? 0;
+  const nodeToMeshIndices = buildNodeToMeshIndices(json);
+  const groups = [];
+  for (let nodeIdx = 0; nodeIdx < nodeCount; nodeIdx++) {
+    const node = json.nodes[nodeIdx];
+    if (node.skin === void 0 || !json.skins) {
+      continue;
+    }
+    const meshIndices = nodeToMeshIndices.get(nodeIdx);
+    if (!meshIndices) {
+      continue;
+    }
+    const skin = json.skins[node.skin];
+    const jointNodes = skin.joints;
+    const inverseBindMatrices = resolveIBMs(json, binChunk, skin);
+    const meshWorldMatrix = computeNodeWorldMatrix(json, nodeIdx, parentMap, worldMatrixCache);
+    const invMeshWorld = mat4Invert(meshWorldMatrix) ?? mat4Identity();
+    const bindings = [];
+    for (const mi of meshIndices) {
+      const skeleton = meshes[mi]?.skeleton;
+      if (!skeleton) {
+        continue;
+      }
+      bindings.push({
+        jointNodes,
+        inverseBindMatrices,
+        invMeshWorld,
+        boneTexture: skeleton.boneTexture,
+        boneCount: jointNodes.length,
+        boneMatrices: skeleton.boneMatrices,
+        runtimeSkeleton: skeleton
+      });
+    }
+    if (bindings.length > 0) {
+      groups.push({ jointNodes, bindings });
+    }
+  }
+  return groups;
+}
+async function buildSkeletons(ctx, meshes, overrides) {
+  const { _json: json, _binChunk: binChunk, _engine: engine, _parentMap: parentMap, _worldMatrixCache: worldMatrixCache } = ctx;
+  const groups = extractSkinGroups(json, binChunk, meshes, parentMap, worldMatrixCache);
+  if (groups.length === 0) {
+    return {};
+  }
+  const nodes = buildRestNodes(json, parentMap);
+  const numNodes = nodes.length;
+  const topoOrder = computeTopoOrder(nodes);
+  const currentTRS = new F32(numNodes * TRS_STRIDE);
+  const localMat = new F32(numNodes * 16);
+  const worldMat = new F32(numNodes * 16);
+  const device = engine._device;
+  const allBindings = groups.flatMap((g) => g.bindings);
+  const bake = () => {
+    resetTRS(nodes, numNodes, currentTRS);
+    if (overrides.size > 0) {
+      applyOverridesToTRS(overrides, currentTRS, numNodes);
+    }
+    computeNodeWorldMatrices(nodes, numNodes, topoOrder, currentTRS, localMat, worldMat);
+    writeBoneTextures(device, allBindings, worldMat);
+  };
+  const skeletons = groups.map((g) => {
+    const bones = [];
+    const byName = /* @__PURE__ */ new Map();
+    for (const ni of g.jointNodes) {
+      const bone = { name: json.nodes?.[ni]?.name ?? `bone_${ni}`, _nodeIndex: ni };
+      bones.push(bone);
+      if (!byName.has(bone.name)) {
+        byName.set(bone.name, bone);
+      }
+    }
+    return { bones, _byName: byName, _overrides: overrides, _bake: bake };
+  });
+  return { skeletons };
+}
+function enableBoneControl() {
+  _installBoneControl(buildSkeletons, applyOverridesToTRS);
+}
+
+export { clearBoneOverride, enableBoneControl, getBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling, setBoneVisible };
+//# sourceMappingURL=bone-control.js.map

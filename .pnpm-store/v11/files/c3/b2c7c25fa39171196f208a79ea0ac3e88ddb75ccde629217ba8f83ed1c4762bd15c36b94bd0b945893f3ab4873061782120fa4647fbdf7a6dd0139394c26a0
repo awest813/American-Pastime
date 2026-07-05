@@ -1,0 +1,230 @@
+import { F32 } from '../../engine/typed-arrays.js';
+import { getShaderGroupBuilder } from './shader-group-builder.js';
+
+function isIdentifier(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+}
+function assertIdentifier(kind, name) {
+  if (!isIdentifier(name)) {
+    throw new Error(`ShaderMaterial: ${kind} name "${name}" is not a valid WGSL identifier.`);
+  }
+}
+function isSupportedAttribute(name) {
+  return name === "position" || name === "normal" || name === "uv" || name === "uv2" || name === "tangent" || name === "color" || name === "joints" || name === "weights" || name === "joints1" || name === "weights1";
+}
+function isSystemUniform(name) {
+  return name === "world" || name === "view" || name === "projection" || name === "viewProjection" || name === "worldView" || name === "worldViewProjection" || name === "cameraPosition" || name === "screenSize" || name === "alphaCutoff";
+}
+function systemUniformType(name) {
+  if (name === "cameraPosition") {
+    return "vec3<f32>";
+  }
+  if (name === "screenSize") {
+    return "vec2<f32>";
+  }
+  if (name === "alphaCutoff") {
+    return "f32";
+  }
+  return "mat4x4<f32>";
+}
+function _isShaderSystemUniform(name) {
+  return isSystemUniform(name);
+}
+function createShaderMaterial(options) {
+  if (!options.vertexSource || !options.fragmentSource) {
+    throw new Error("ShaderMaterial: vertexSource and fragmentSource must be non-empty WGSL strings.");
+  }
+  const attributes = [];
+  const seenAttributes = /* @__PURE__ */ new Set();
+  for (const attr of options.attributes) {
+    if (!isSupportedAttribute(attr)) {
+      throw new Error(
+        `ShaderMaterial: unsupported attribute "${String(attr)}". Supported attributes: position, normal, uv, uv2, tangent, color, joints, weights, joints1, weights1.`
+      );
+    }
+    if (seenAttributes.has(attr)) {
+      throw new Error(`ShaderMaterial: duplicate attribute "${attr}".`);
+    }
+    seenAttributes.add(attr);
+    attributes.push(attr);
+  }
+  if (!seenAttributes.has("position")) {
+    throw new Error('ShaderMaterial: "position" attribute is required for mesh rendering.');
+  }
+  const uniformDecls = [];
+  const uniformValues = /* @__PURE__ */ new Map();
+  const usedNames = /* @__PURE__ */ new Set();
+  for (const opt of options.uniforms ?? []) {
+    const decl = typeof opt === "string" ? normalizeSystemUniform(opt) : normalizeCustomUniform(opt);
+    assertUniqueName(usedNames, "uniform", decl.name);
+    uniformDecls.push(decl);
+    uniformValues.set(decl.name, { decl, value: normalizeUniformValue(decl, decl.defaultValue ?? defaultUniformValue(decl)) });
+  }
+  const samplerDecls = [];
+  const textureSlots = /* @__PURE__ */ new Map();
+  for (const opt of options.samplers ?? []) {
+    const decl = typeof opt === "string" ? { name: opt, sampleType: "float" } : {
+      name: opt.name,
+      sampleType: opt.sampleType ?? (opt.comparison ? "depth" : "float"),
+      viewDimension: opt.viewDimension ?? "2d",
+      comparison: opt.comparison ?? false
+    };
+    assertIdentifier("sampler", decl.name);
+    assertUniqueName(usedNames, "sampler", decl.name);
+    assertUniqueName(usedNames, "sampler", `${decl.name}Sampler`);
+    samplerDecls.push(decl);
+    textureSlots.set(decl.name, { decl, current: null });
+  }
+  const storageBufferDecls = [];
+  const storageBufferSlots = /* @__PURE__ */ new Map();
+  for (const opt of options.storageBuffers ?? []) {
+    assertIdentifier("storage buffer", opt.name);
+    assertUniqueName(usedNames, "storage buffer", opt.name);
+    storageBufferDecls.push(opt);
+    storageBufferSlots.set(opt.name, { decl: opt, current: null });
+  }
+  const defines = [];
+  for (const [name, value] of Object.entries(options.defines ?? {})) {
+    assertIdentifier("define", name);
+    assertUniqueName(usedNames, "define", name);
+    if (typeof value !== "boolean" && typeof value !== "number") {
+      throw new Error(`ShaderMaterial: define "${name}" must be a boolean or number.`);
+    }
+    defines.push({ name, value });
+  }
+  defines.sort((a, b) => a.name.localeCompare(b.name));
+  if (options.transmissive && !(options.needAlphaBlending ?? false)) {
+    throw new Error("ShaderMaterial: `transmissive` requires `needAlphaBlending` (the surface composites over the grabbed opaque scene color).");
+  }
+  return {
+    name: options.name,
+    vertexSource: options.vertexSource,
+    fragmentSource: options.fragmentSource,
+    attributes,
+    uniformDecls,
+    samplerDecls,
+    storageBufferDecls,
+    defines,
+    needAlphaBlending: options.needAlphaBlending ?? false,
+    blendMode: options.blendMode ?? "alpha",
+    transmissive: options.transmissive ?? false,
+    needAlphaTesting: options.needAlphaTesting ?? false,
+    backFaceCulling: options.backFaceCulling ?? true,
+    depthWrite: options.depthWrite ?? true,
+    depthCompare: options.depthCompare ?? "greater-equal",
+    depthOnlyFragment: options.depthOnlyFragment ?? false,
+    depthBias: options.depthBias ?? 0,
+    depthBiasSlopeScale: options.depthBiasSlopeScale ?? 0,
+    _buildGroup: getShaderGroupBuilder(),
+    _uboVersion: 0,
+    _uniformValues: uniformValues,
+    _textureSlots: textureSlots,
+    _storageBufferSlots: storageBufferSlots,
+    _uniformVersion: 0,
+    _resourceVersion: 0
+  };
+}
+function normalizeSystemUniform(name) {
+  if (!isSystemUniform(name)) {
+    throw new Error(`ShaderMaterial: custom uniform "${name}" must use an explicit typed declaration.`);
+  }
+  return { name, type: systemUniformType(name) };
+}
+function normalizeCustomUniform(decl) {
+  assertIdentifier("uniform", decl.name);
+  if (!isUniformType(decl.type)) {
+    throw new Error(`ShaderMaterial: unsupported uniform type "${String(decl.type)}" for "${decl.name}".`);
+  }
+  return decl;
+}
+function isUniformType(type) {
+  return type === "f32" || type === "u32" || type === "i32" || type === "vec2<f32>" || type === "vec3<f32>" || type === "vec4<f32>" || type === "mat4x4<f32>";
+}
+function assertUniqueName(usedNames, kind, name) {
+  if (usedNames.has(name)) {
+    throw new Error(`ShaderMaterial: duplicate generated identifier "${name}" while adding ${kind}.`);
+  }
+  usedNames.add(name);
+}
+function elementCount(type) {
+  switch (type) {
+    case "f32":
+    case "u32":
+    case "i32":
+      return 1;
+    case "vec2<f32>":
+      return 2;
+    case "vec3<f32>":
+      return 3;
+    case "vec4<f32>":
+      return 4;
+    case "mat4x4<f32>":
+      return 16;
+  }
+}
+function defaultUniformValue(decl) {
+  if (decl.name === "alphaCutoff") {
+    return 0.4;
+  }
+  const count = elementCount(decl.type);
+  return count === 1 ? 0 : new Array(count).fill(0);
+}
+function normalizeUniformValue(decl, value) {
+  const count = elementCount(decl.type);
+  const arr = typeof value === "number" ? new F32([value]) : value instanceof F32 ? new F32(value) : new F32(value);
+  if (arr.length !== count) {
+    throw new Error(`ShaderMaterial: uniform "${decl.name}" of type ${decl.type} expects ${count} value(s), got ${arr.length}.`);
+  }
+  return arr;
+}
+function setShaderUniform(material, name, value) {
+  const slot = material._uniformValues.get(name);
+  if (!slot) {
+    throw new Error(`ShaderMaterial: uniform "${name}" was not declared.`);
+  }
+  slot.value.set(normalizeUniformValue(slot.decl, value));
+  material._uniformVersion++;
+  material._uboVersion = material._uniformVersion;
+}
+function setShaderTexture(material, name, texture) {
+  const slot = material._textureSlots.get(name);
+  if (!slot) {
+    throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
+  }
+  if (texture) {
+    const expectsDepth = slot.decl.comparison || slot.decl.sampleType === "depth";
+    const isDepthTexture = texture._sampleType === "depth";
+    if (expectsDepth && !isDepthTexture) {
+      throw new Error(`ShaderMaterial: sampler "${name}" expects a depth Texture2D.`);
+    }
+    if (!expectsDepth && isDepthTexture) {
+      throw new Error(`ShaderMaterial: sampler "${name}" cannot use a depth Texture2D.`);
+    }
+  }
+  if (slot.current !== texture) {
+    slot.current = texture;
+    material._resourceVersion++;
+  }
+}
+function setShaderStorageBuffer(material, name, buffer) {
+  const slot = material._storageBufferSlots.get(name);
+  if (!slot) {
+    throw new Error(`ShaderMaterial: storage buffer "${name}" was not declared.`);
+  }
+  if (slot.current !== buffer) {
+    slot.current = buffer;
+    material._resourceVersion++;
+  }
+}
+function setShaderFloat(material, name, value) {
+  setShaderUniform(material, name, value);
+}
+function setShaderVector3(material, name, value) {
+  setShaderUniform(material, name, value);
+}
+function setShaderMatrix(material, name, value) {
+  setShaderUniform(material, name, value instanceof Float32Array ? value : Array.from(value));
+}
+
+export { _isShaderSystemUniform, createShaderMaterial, setShaderFloat, setShaderMatrix, setShaderStorageBuffer, setShaderTexture, setShaderUniform, setShaderVector3 };
+//# sourceMappingURL=shader-material.js.map

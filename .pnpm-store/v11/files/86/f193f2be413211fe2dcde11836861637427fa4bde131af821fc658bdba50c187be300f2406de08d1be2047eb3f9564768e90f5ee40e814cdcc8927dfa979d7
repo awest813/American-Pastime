@@ -1,0 +1,15 @@
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../services/selectionService";
+import "@babylonjs/core/Particles/webgl2ParticleSystem.js";
+type ParticlesContentProps = {
+    scene: Scene;
+    selectionService: ISelectionService;
+};
+/**
+ * Particles content component
+ * @param props - Component props
+ * @returns React component
+ */
+export declare const ParticlesContent: FunctionComponent<ParticlesContentProps>;
+export {};

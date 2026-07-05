@@ -1,0 +1,8 @@
+import { type FunctionComponent } from "react";
+import { type TargetCamera } from "@babylonjs/core/index.js";
+export declare const TargetCameraTransformProperties: FunctionComponent<{
+    camera: TargetCamera;
+}>;
+export declare const TargetCameraControlProperties: FunctionComponent<{
+    camera: TargetCamera;
+}>;

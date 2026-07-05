@@ -1,0 +1,268 @@
+import { F32 } from '../../engine/typed-arrays.js';
+import { parseNodeMaterialSource, findBlockByClassName } from './node-parser.js';
+import { loadGraphEmitters, emitGraph } from './node-emitter.js';
+import { compileNodePipeline } from './node-pipeline.js';
+
+async function parseNodeMaterialFromSnippet(engine, snippetId, options = {}) {
+  const source = options.json !== void 0 ? typeof options.json === "string" ? JSON.parse(options.json) : options.json : await (await import('./node-snippet.js')).fetchSnippetSource(snippetId, options.snippetServer);
+  const graph = parseNodeMaterialSource(source);
+  const emitters = await loadGraphEmitters(graph, options.blockLoader);
+  const fragRoot = findBlockByClassName(graph, "FragmentOutputBlock");
+  if (!fragRoot) {
+    throw new Error("NodeMaterial: graph has no FragmentOutputBlock");
+  }
+  const vertRoot = findBlockByClassName(graph, "VertexOutputBlock");
+  const shadowLightsPre = [];
+  if (options.shadowGenerators && options.shadowGenerators.length > 0) {
+    const defaultIdx = options.shadowGenerators.map((_, i) => i);
+    const indices = options.shadowLightIndices ?? defaultIdx;
+    for (let i = 0; i < options.shadowGenerators.length; i++) {
+      shadowLightsPre.push({ lightIndex: indices[i], shadowType: options.shadowGenerators[i]._shadowType });
+    }
+  }
+  const { vertexWgsl, fragmentWgsl, state } = emitGraph(graph, emitters, fragRoot.id, vertRoot ? vertRoot.id : null, shadowLightsPre, {
+    hasSkeleton: options.hasSkeleton ?? false,
+    hasInstances: options.hasInstances ?? false
+  });
+  await resolvePbrMrHelpers(state);
+  let envHelpers = null;
+  let _envEmitter;
+  if (state.usesEnv) {
+    envHelpers = await import('./node-env.js');
+    _envEmitter = envHelpers.emitEnv;
+  }
+  let _shadowEmitter;
+  if (options.shadowGenerators && options.shadowGenerators.length > 0) {
+    _shadowEmitter = (await import('./node-shadow.js')).emitShadow;
+  }
+  const compile = compileNodePipeline(state, vertexWgsl, fragmentWgsl, {
+    _engine: engine,
+    _format: engine.format,
+    _msaaSamples: engine.msaaSamples,
+    _backFaceCulling: graph.backFaceCulling,
+    _alphaMode: graph.needsAlphaBlending ? graph.alphaMode : 0,
+    _envEmitter,
+    _shadowEmitter
+  });
+  const inputs = {};
+  const uniformValues = /* @__PURE__ */ new Map();
+  for (const [name, blockId] of graph.namedInputs) {
+    const block = graph.blocks.get(blockId);
+    const _name = sanitize(block.name || `input${block.id}`);
+    const _offsetBytes = compile._nodeUboOffsets.get(_name);
+    if (_offsetBytes === void 0) {
+      continue;
+    }
+    const _type = bjsTypeToNodeType(block.serialized["type"] ?? 16);
+    if (_type === "mat4f") {
+      continue;
+    }
+    const len = floatCount(_type);
+    const defaultValues = extractDefault(block.serialized["value"], _type);
+    const _values = new F32(len);
+    _values.set(defaultValues);
+    const slot = { _name, _type, _offsetBytes, _values };
+    uniformValues.set(_name, slot);
+    const handleType = handleTypeOf(_type);
+    const setDirty = () => {
+      material._uboDirty = true;
+    };
+    const handle = {
+      type: handleType,
+      get value() {
+        return handleType === "f32" ? slot._values[0] : Array.from(slot._values);
+      },
+      set value(v) {
+        if (typeof v === "number") {
+          slot._values[0] = v;
+        } else {
+          slot._values.set(v);
+        }
+        setDirty();
+      }
+    };
+    inputs[name] = handle;
+  }
+  for (const block of graph.blocks.values()) {
+    if (block.className !== "InputBlock") {
+      continue;
+    }
+    const _name = sanitize(block.name || `input${block.id}`);
+    if (uniformValues.has(_name)) {
+      continue;
+    }
+    const _offsetBytes = compile._nodeUboOffsets.get(_name);
+    if (_offsetBytes === void 0) {
+      continue;
+    }
+    const _type = bjsTypeToNodeType(block.serialized["type"] ?? 16);
+    if (_type === "mat4f") {
+      continue;
+    }
+    const len = floatCount(_type);
+    const defaultValues = extractDefault(block.serialized["value"], _type);
+    const _values = new F32(len);
+    _values.set(defaultValues);
+    uniformValues.set(_name, { _name, _type, _offsetBytes, _values });
+  }
+  const attrNames = state.vertexAttributes.map((a) => a._name);
+  const textureSlots = /* @__PURE__ */ new Map();
+  for (const tb of compile._textureBindings) {
+    const slot = { current: options.textures?.[tb._name] ?? null };
+    textureSlots.set(tb._name, slot);
+    const handle = {
+      type: "texture2d",
+      get texture() {
+        return slot.current;
+      },
+      set texture(v) {
+        slot.current = v;
+      }
+    };
+    inputs[tb._name] = handle;
+  }
+  const _buildGroup = async (scene, meshes) => {
+    const { buildNodeMeshRenderables } = await import('./node-renderable.js');
+    const result = buildNodeMeshRenderables(scene, meshes);
+    _buildGroup._rebuildSingle = result.rebuildSingle;
+    return result;
+  };
+  _buildGroup._materialFamily = "node";
+  const material = {
+    inputs,
+    _renderFeatures: { features: 0 },
+    _buildGroup,
+    _uboVersion: 0,
+    _compile: compile,
+    _state: state,
+    _graph: graph,
+    _vertexBody: vertexWgsl,
+    _fragmentBody: fragmentWgsl,
+    _vertexAttrNames: attrNames,
+    _shadowGenerators: options.shadowGenerators ?? [],
+    _needsAlphaBlending: graph.needsAlphaBlending,
+    _nodeUBO: null,
+    _uboDirty: false,
+    _uniformValues: uniformValues,
+    _textureSlots: textureSlots,
+    _envHelpers: envHelpers,
+    _emitters: emitters,
+    _hasSkeleton: options.hasSkeleton ?? false,
+    _hasInstances: options.hasInstances ?? false
+  };
+  return material;
+}
+function isCorePbrMrRequest(request) {
+  return !request.useClearcoat && !request.useSheen && !request.useRefraction && !request.useSubsurface && !request.useAnisotropy && !request.useShAlbedoScaling && !request.useCcBump && !request.useCcTint && !request.useSpecularAA && !request.remapClearcoatF0;
+}
+async function resolvePbrMrHelpers(state) {
+  if (state.pbrMrHelperRequests.length === 0) {
+    return;
+  }
+  if (state.pbrMrHelperRequests.some((request) => !isCorePbrMrRequest(request))) {
+    throw new Error("NodeMaterial: advanced PBR-MR helper request must be emitted by the full PBR-MR block");
+  }
+  const core = await import('./blocks/pbr-mr-helper-core.js');
+  for (const request of state.pbrMrHelperRequests) {
+    state.fragment.helpers.set(request.key, core.buildPbrMrHelperCore(request));
+  }
+}
+function sanitize(name) {
+  return name.replace(/[^A-Za-z0-9_]/g, "_");
+}
+function bjsTypeToNodeType(t) {
+  if (t === 1 || t === 2) {
+    return "f32";
+  }
+  if (t === 4) {
+    return "vec2f";
+  }
+  if (t === 8 || t === 32) {
+    return "vec3f";
+  }
+  if (t === 16 || t === 64) {
+    return "vec4f";
+  }
+  if (t === 128) {
+    return "mat4f";
+  }
+  throw new Error(`NodeMaterial: unsupported BJS connection point type 0x${t.toString(16)}`);
+}
+function floatCount(type) {
+  switch (type) {
+    case "f32":
+      return 1;
+    case "vec2f":
+      return 2;
+    case "vec3f":
+      return 3;
+    case "vec4f":
+      return 4;
+    case "mat4f":
+      return 16;
+    default:
+      return 0;
+  }
+}
+function handleTypeOf(t) {
+  if (t === "mat4f" || t === "texture2d" || t === "textureCube") {
+    return "vec4f";
+  }
+  return t;
+}
+function extractDefault(raw, type) {
+  const n = floatCount(type);
+  if (typeof raw === "number") {
+    return [raw];
+  }
+  if (Array.isArray(raw)) {
+    const out = raw.slice(0, n).map((v) => typeof v === "number" ? v : 0);
+    while (out.length < n) {
+      out.push(0);
+    }
+    return out;
+  }
+  if (raw && typeof raw === "object") {
+    const obj = raw;
+    const picks = [];
+    for (const k of ["x", "y", "z", "w"]) {
+      if (typeof obj[k] === "number") {
+        picks.push(obj[k]);
+      }
+    }
+    if (picks.length > 0) {
+      while (picks.length < n) {
+        picks.push(0);
+      }
+      return picks.slice(0, n);
+    }
+    const rgba = [];
+    for (const k of ["r", "g", "b", "a"]) {
+      if (typeof obj[k] === "number") {
+        rgba.push(obj[k]);
+      }
+    }
+    if (rgba.length > 0) {
+      while (rgba.length < n) {
+        rgba.push(1);
+      }
+      return rgba.slice(0, n);
+    }
+  }
+  return new Array(n).fill(0);
+}
+function writeNodeUBO(engine, buffer, material) {
+  const size = material._compile._nodeUboSize;
+  if (size === 0) {
+    return;
+  }
+  const scratch = new F32(size / 4);
+  for (const slot of material._uniformValues.values()) {
+    const dstIdx = slot._offsetBytes >> 2;
+    scratch.set(slot._values, dstIdx);
+  }
+  engine._device.queue.writeBuffer(buffer, 0, scratch);
+}
+
+export { bjsTypeToNodeType, extractDefault, floatCount, parseNodeMaterialFromSnippet, sanitize, writeNodeUBO };
+//# sourceMappingURL=node-material.js.map

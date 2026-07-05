@@ -1,0 +1,64 @@
+function isRenderTaskGpuTimingSupported(engine) {
+  return engine._device.features.has("timestamp-query");
+}
+function getRenderTaskGpuTimings(engine) {
+  if (!isRenderTaskGpuTimingSupported(engine)) {
+    return makeTimingSnapshot("unsupported", false, false, 0, [], 0);
+  }
+  const snapshot = engine._gpuTaskTimingResult;
+  if (snapshot) {
+    return snapshot;
+  }
+  if (engine._gpuTaskTimerWanted) {
+    return makeTimingSnapshot("pending", true, true, 0, [], 0);
+  }
+  return makeTimingSnapshot("disabled", true, false, 0, [], 0);
+}
+async function setRenderTaskGpuTimingEnabled(engine, enabled) {
+  if (!enabled) {
+    engine._gpuTaskTimerEpoch = (engine._gpuTaskTimerEpoch ?? 0) + 1;
+    engine._gpuTaskTimerWanted = false;
+    engine._gpuTaskTimerDisable?.();
+    engine._gpuTaskTimerDisable = void 0;
+    const supported = isRenderTaskGpuTimingSupported(engine);
+    engine._gpuTaskTimingResult = makeTimingSnapshot(supported ? "disabled" : "unsupported", supported, false, 0, [], 0);
+    return engine._gpuTaskTimingResult;
+  }
+  if (!isRenderTaskGpuTimingSupported(engine)) {
+    engine._gpuTaskTimerWanted = false;
+    engine._gpuTaskTimingResult = makeTimingSnapshot("unsupported", false, false, 0, [], 0);
+    return engine._gpuTaskTimingResult;
+  }
+  if (engine._gpuTaskTimerWanted) {
+    return getRenderTaskGpuTimings(engine);
+  }
+  const epoch = (engine._gpuTaskTimerEpoch ?? 0) + 1;
+  engine._gpuTaskTimerEpoch = epoch;
+  engine._gpuTaskTimerWanted = true;
+  engine._gpuTaskTimingResult = makeTimingSnapshot("pending", true, true, 0, [], 0);
+  const { createGpuTaskTimer, installGpuTaskTimer } = await import('./gpu-task-timer.js');
+  if (!engine._gpuTaskTimerWanted || engine._gpuTaskTimerEpoch !== epoch) {
+    return getRenderTaskGpuTimings(engine);
+  }
+  if (engine._gpuTaskTimer === void 0) {
+    engine._gpuTaskTimer = createGpuTaskTimer(engine._device);
+  }
+  const timer = engine._gpuTaskTimer;
+  if (!timer) {
+    engine._gpuTaskTimerWanted = false;
+    engine._gpuTaskTimingResult = makeTimingSnapshot("unsupported", false, false, 0, [], 0);
+    return engine._gpuTaskTimingResult;
+  }
+  engine._gpuTaskTimerDisable = installGpuTaskTimer(timer, engine, (snapshot) => {
+    if (engine._gpuTaskTimerWanted && engine._gpuTaskTimerEpoch === epoch) {
+      engine._gpuTaskTimingResult = snapshot;
+    }
+  });
+  return getRenderTaskGpuTimings(engine);
+}
+function makeTimingSnapshot(status, supported, enabled, frameIndex, tasks, droppedTaskCount, error) {
+  return { status, supported, enabled, frameIndex, tasks, droppedTaskCount, error };
+}
+
+export { getRenderTaskGpuTimings, isRenderTaskGpuTimingSupported, makeTimingSnapshot, setRenderTaskGpuTimingEnabled };
+//# sourceMappingURL=gpu-task-timing.js.map

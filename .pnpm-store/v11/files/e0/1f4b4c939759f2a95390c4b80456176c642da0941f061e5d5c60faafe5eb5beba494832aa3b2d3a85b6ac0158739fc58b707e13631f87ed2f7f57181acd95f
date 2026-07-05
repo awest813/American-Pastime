@@ -1,0 +1,3 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IPropertiesService } from "../services/panes/properties/propertiesService";
+export declare const LegacyInspectableObjectPropertiesServiceDefinition: ServiceDefinition<[], [IPropertiesService]>;

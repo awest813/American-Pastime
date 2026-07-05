@@ -1,0 +1,5 @@
+import { type TextureEditorToolProvider } from "../../../components/textureEditor/textureEditor";
+/**
+ * Rectangle selection tool for selecting regions of the texture
+ */
+export declare const RectangleSelect: TextureEditorToolProvider;

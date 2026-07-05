@@ -1,0 +1,22 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get EVENTS () {
+        return _types.EVENTS;
+    },
+    get useResizeHandle () {
+        return _useResizeHandle.useResizeHandle;
+    }
+});
+const _useResizeHandle = require("./hooks/useResizeHandle");
+const _types = require("./types");
+
+//# sourceMappingURL=index.js.map

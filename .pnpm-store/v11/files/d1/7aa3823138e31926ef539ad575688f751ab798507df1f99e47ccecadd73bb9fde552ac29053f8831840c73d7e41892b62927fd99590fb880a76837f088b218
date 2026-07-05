@@ -1,0 +1,8 @@
+import { type FunctionComponent } from "react";
+import { type GLTFExtensionOptionsType, type GLTFLoaderOptionsType } from "../../../services/panes/tools/import/gltfLoaderOptionsDefaults";
+export declare const GLTFLoaderOptionsTool: FunctionComponent<{
+    loaderOptions: GLTFLoaderOptionsType;
+}>;
+export declare const GLTFExtensionOptionsTool: FunctionComponent<{
+    extensionOptions: GLTFExtensionOptionsType;
+}>;

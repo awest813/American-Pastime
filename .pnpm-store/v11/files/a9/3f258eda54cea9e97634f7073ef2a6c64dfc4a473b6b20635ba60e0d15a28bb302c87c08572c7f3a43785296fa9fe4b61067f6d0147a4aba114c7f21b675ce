@@ -1,0 +1,5 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+import { type IGizmoService } from "./gizmoService";
+import { type ISceneContext } from "./sceneContext";
+export declare const GizmoToolbarServiceDefinition: ServiceDefinition<[], [IShellService, IGizmoService, ISceneContext]>;

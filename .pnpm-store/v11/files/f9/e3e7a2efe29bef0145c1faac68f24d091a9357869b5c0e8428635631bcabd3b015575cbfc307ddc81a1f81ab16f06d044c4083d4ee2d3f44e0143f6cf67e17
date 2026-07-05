@@ -1,0 +1,49 @@
+import { F32, U32, U8 } from '../engine/typed-arrays.js';
+import { BU } from '../engine/gpu-flags.js';
+import { createMappedBuffer } from '../resource/gpu-buffers.js';
+
+const MORPH_WEIGHTS_HEADER_BYTES = 16;
+const MORPH_FLOATS_PER_VERTEX = 6;
+function createMorphTargets(engine, targets, vertexCount, morphWeights) {
+  const targetCount = targets.length;
+  const deltaData = new F32(targetCount * vertexCount * MORPH_FLOATS_PER_VERTEX);
+  for (let t = 0; t < targetCount; t++) {
+    const tgt = targets[t];
+    const tBase = t * vertexCount * MORPH_FLOATS_PER_VERTEX;
+    for (let v = 0; v < vertexCount; v++) {
+      const o = tBase + v * MORPH_FLOATS_PER_VERTEX;
+      deltaData[o] = tgt.positions[v * 3];
+      deltaData[o + 1] = tgt.positions[v * 3 + 1];
+      deltaData[o + 2] = tgt.positions[v * 3 + 2];
+      if (tgt.normals) {
+        deltaData[o + 3] = tgt.normals[v * 3];
+        deltaData[o + 4] = tgt.normals[v * 3 + 1];
+        deltaData[o + 5] = tgt.normals[v * 3 + 2];
+      }
+    }
+  }
+  const deltasBuffer = createMappedBuffer(engine, deltaData, BU.STORAGE);
+  const headerBuf = new ArrayBuffer(MORPH_WEIGHTS_HEADER_BYTES + targetCount * 4);
+  const headerU32 = new U32(headerBuf, 0, 2);
+  headerU32[0] = targetCount;
+  headerU32[1] = vertexCount;
+  const headerWeights = new F32(headerBuf, MORPH_WEIGHTS_HEADER_BYTES, targetCount);
+  for (let i = 0; i < targetCount; i++) {
+    headerWeights[i] = morphWeights?.[i] ?? 0;
+  }
+  const weightsBuffer = createMappedBuffer(engine, new U8(headerBuf), BU.STORAGE);
+  const weights = new F32(targetCount);
+  weights.set(headerWeights);
+  return { deltasBuffer, count: targetCount, weightsBuffer, targets, weights };
+}
+function setMorphTargetWeights(engine, morphTargets, weights) {
+  const count = Math.min(morphTargets.count, weights.length);
+  morphTargets.weights.fill(0);
+  for (let i = 0; i < count; i++) {
+    morphTargets.weights[i] = weights[i] ?? 0;
+  }
+  engine._device.queue.writeBuffer(morphTargets.weightsBuffer, MORPH_WEIGHTS_HEADER_BYTES, morphTargets.weights);
+}
+
+export { MORPH_WEIGHTS_HEADER_BYTES, createMorphTargets, setMorphTargetWeights };
+//# sourceMappingURL=create-morph-targets.js.map

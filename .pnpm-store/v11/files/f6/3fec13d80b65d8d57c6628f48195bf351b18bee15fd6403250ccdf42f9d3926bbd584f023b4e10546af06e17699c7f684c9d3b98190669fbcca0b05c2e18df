@@ -1,0 +1,140 @@
+import { F32 } from '../engine/typed-arrays.js';
+
+function setThinInstances(mesh, matrices, count) {
+  if (!mesh.thinInstances) {
+    mesh.thinInstances = {
+      matrices,
+      count,
+      _capacity: count,
+      _version: 1,
+      _gpuBuffer: null,
+      _gpuBufferStorage: false,
+      _gpuVersion: 0,
+      _dirtyMin: 0,
+      _dirtyMax: count,
+      _colorVersion: 0,
+      _colorDirtyMin: 0,
+      _colorDirtyMax: 0,
+      _colorGpuBuffer: null,
+      _colorGpuBufferStorage: false,
+      _colorGpuVersion: 0,
+      _gpuCullingEnabled: false
+    };
+  } else {
+    mesh.thinInstances.matrices = matrices;
+    mesh.thinInstances.count = count;
+    mesh.thinInstances._capacity = count;
+    mesh.thinInstances._version++;
+    mesh.thinInstances._dirtyMin = 0;
+    mesh.thinInstances._dirtyMax = count;
+  }
+}
+function setThinInstanceCount(mesh, count) {
+  const ti = mesh.thinInstances;
+  if (!ti) {
+    return;
+  }
+  ti.count = count;
+  ti._version++;
+  ti._dirtyMin = 0;
+  ti._dirtyMax = count;
+}
+function addThinInstance(mesh, matrix) {
+  const ti = mesh.thinInstances;
+  if (!ti) {
+    const capacity = 16;
+    const matrices = new F32(capacity * 16);
+    matrices.set(matrix, 0);
+    mesh.thinInstances = {
+      matrices,
+      count: 1,
+      _capacity: capacity,
+      _version: 1,
+      _gpuBuffer: null,
+      _gpuBufferStorage: false,
+      _gpuVersion: 0,
+      _dirtyMin: 0,
+      _dirtyMax: 1,
+      _colorVersion: 0,
+      _colorDirtyMin: 0,
+      _colorDirtyMax: 0,
+      _colorGpuBuffer: null,
+      _colorGpuBufferStorage: false,
+      _colorGpuVersion: 0,
+      _gpuCullingEnabled: false
+    };
+    return 0;
+  }
+  const index = ti.count;
+  if (index >= ti._capacity) {
+    const newCap = ti._capacity * 2;
+    const newData = new F32(newCap * 16);
+    newData.set(ti.matrices);
+    ti.matrices = newData;
+    ti._capacity = newCap;
+  }
+  ti.matrices.set(matrix, index * 16);
+  ti.count++;
+  ti._version++;
+  ti._dirtyMin = 0;
+  ti._dirtyMax = ti.count;
+  return index;
+}
+function setThinInstanceMatrix(mesh, index, matrix) {
+  const ti = mesh.thinInstances;
+  ti.matrices.set(matrix, index * 16);
+  ti._version++;
+  ti._dirtyMin = Math.min(ti._dirtyMin, index);
+  ti._dirtyMax = Math.max(ti._dirtyMax, index + 1);
+}
+function removeThinInstance(mesh, index) {
+  const ti = mesh.thinInstances;
+  const last = ti.count - 1;
+  if (index !== last) {
+    ti.matrices.copyWithin(index * 16, last * 16, last * 16 + 16);
+  }
+  ti.count--;
+  ti._version++;
+  ti._dirtyMin = 0;
+  ti._dirtyMax = ti.count;
+}
+function flushThinInstances(mesh) {
+  const ti = mesh.thinInstances;
+  ti._version++;
+  ti._dirtyMin = 0;
+  ti._dirtyMax = ti.count;
+}
+function setThinInstanceColors(mesh, colors) {
+  const ti = mesh.thinInstances;
+  ti.colors = colors;
+  ti._colorVersion++;
+  ti._colorDirtyMin = 0;
+  ti._colorDirtyMax = ti.count;
+}
+function setThinInstanceColor(mesh, index, r, g, b, a) {
+  const ti = mesh.thinInstances;
+  const c = ti.colors;
+  const o = index * 4;
+  c[o] = r;
+  c[o + 1] = g;
+  c[o + 2] = b;
+  c[o + 3] = a;
+  ti._colorVersion++;
+  ti._colorDirtyMin = Math.min(ti._colorDirtyMin, index);
+  ti._colorDirtyMax = Math.max(ti._colorDirtyMax, index + 1);
+}
+function enableThinInstanceGpuCulling(mesh, enabled = true) {
+  const ti = mesh.thinInstances;
+  if (!ti) {
+    throw new Error("enableThinInstanceGpuCulling requires mesh.thinInstances");
+  }
+  if (ti._gpuCullingEnabled === enabled) {
+    return;
+  }
+  ti._gpuCullingEnabled = enabled;
+  ti._gpuVersion = -1;
+  ti._colorGpuVersion = -1;
+}
+
+export { addThinInstance, enableThinInstanceGpuCulling, flushThinInstances, removeThinInstance, setThinInstanceColor, setThinInstanceColors, setThinInstanceCount, setThinInstanceMatrix, setThinInstances };
+//# sourceMappingURL=thin-instance.js.map

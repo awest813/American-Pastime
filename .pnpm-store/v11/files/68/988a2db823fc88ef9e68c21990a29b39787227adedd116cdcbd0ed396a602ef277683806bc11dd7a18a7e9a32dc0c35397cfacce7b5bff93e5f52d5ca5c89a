@@ -1,0 +1,75 @@
+import { needsOrmComposite, anyPrimitive } from './gltf-parser.js';
+
+const M = "KHR_materials_";
+const _features = [
+  // Pre-parse features (buffer-level): order matters — meshopt decompresses
+  // bufferViews first, then quantization dequantizes the resulting accessors.
+  ["EXT_meshopt_compression", () => import('./gltf-feature-meshopt.js')],
+  ["KHR_mesh_quantization", () => import('./gltf-ext-quantization.js')],
+  // Pre-mesh features (geometry decompression)
+  ["KHR_draco_mesh_compression", () => import('./gltf-feature-draco.js')],
+  // Material extensions
+  [M + "clearcoat", () => import('./gltf-ext-clearcoat.js')],
+  [M + "iridescence", () => import('./gltf-ext-iridescence.js')],
+  [M + "emissive_strength", () => import('./gltf-ext-emissive-strength.js')],
+  [M + "sheen", () => import('./gltf-ext-sheen.js')],
+  [M + "anisotropy", () => import('./gltf-ext-anisotropy.js')],
+  [M + "diffuse_transmission", () => import('./gltf-ext-diffuse-transmission.js')],
+  [M + "unlit", () => import('./gltf-ext-unlit.js')],
+  [M + "pbrSpecularGlossiness", () => import('./gltf-ext-spec-gloss.js')],
+  // Dielectric cluster (ior/specular/transmission/volume/dispersion) — any of the five triggers the
+  // loader; transmission refraction is wired dynamically by the PBR material path when needed.
+  [(j) => ["transmission", "volume", "ior", "specular", "dispersion"].some((e) => j.extensionsUsed?.includes(M + e)), () => import('./gltf-ext-dielectric.js')],
+  ["KHR_texture_transform", () => import('./gltf-ext-uv-transform.js')],
+  ["KHR_texture_basisu", () => import('./gltf-ext-basisu.js')],
+  [needsOrmComposite, () => import('./gltf-ext-orm.js')],
+  // Per-mesh features (predicates inlined to avoid eager imports)
+  [(j) => !!j.skins?.length && anyPrimitive(j, (p) => p.attributes?.JOINTS_0 !== void 0), () => import('./gltf-feature-skeleton.js')],
+  [(j) => anyPrimitive(j, (p) => !!p.targets?.length), () => import('./gltf-feature-morph.js')],
+  // Non-triangle primitive topology (POINTS/LINES/LINE_STRIP/TRIANGLE_STRIP) or a
+  // negative-determinant node (negative scale / mirrored matrix): both need the lazy primitive
+  // feature (topology threading + winding reversal). Triangle-list positive-winding never triggers.
+  [(j) => hasNegDetNode(j) || anyPrimitive(j, (p) => p.mode !== void 0 && p.mode !== 4), () => import('./gltf-feature-primitive.js')],
+  // Per-asset features
+  [hasGltfExtras, () => import('./gltf-feature-extras.js')],
+  ["KHR_lights_punctual", () => import('./gltf-feature-lights-punctual.js')],
+  [(j) => !!j.animations?.length, () => import('./gltf-feature-animations.js')],
+  // Non-Float32 / normalized animation sampler accessors (e.g. Animation_SamplerType normalized
+  // BYTE/SHORT rotation) need the lazy denorm converter; plain float samplers never load it.
+  [hasNonFloatAnimSampler, () => import('./gltf-sampler-denorm.js')],
+  [M + "variants", () => import('./gltf-feature-variants.js')],
+  ["KHR_node_visibility", () => import('./gltf-ext-node-visibility.js')],
+  ["KHR_animation_pointer", () => import('./gltf-feature-animation-pointer.js')],
+  ["EXT_mesh_gpu_instancing", () => import('./gltf-feature-gpu-instancing.js')],
+  ["KHR_xmp_json_ld", () => import('./gltf-feature-xmp.js')]
+];
+async function loadGltfFeatures(json) {
+  const used = json.extensionsUsed ?? [];
+  const mods = await Promise.all(_features.flatMap(([t, load]) => (typeof t === "string" ? used.includes(t) : t(json)) ? [load()] : []));
+  return mods.map((m) => m.default);
+}
+function hasGltfExtras(json) {
+  const hasExtras = (item) => item?.extras !== void 0;
+  return hasExtras(json.asset) || !!json.nodes?.some(hasExtras) || !!json.materials?.some(hasExtras) || !!json.animations?.some(hasExtras) || !!json.meshes?.some(hasExtras) || anyPrimitive(json, hasExtras);
+}
+function hasNonFloatAnimSampler(json) {
+  const accessors = json.accessors;
+  return !!json.animations?.some(
+    (a) => a.samplers?.some((s) => accessors[s.input]?.componentType !== 5126 || accessors[s.output]?.componentType !== 5126)
+  );
+}
+function hasNegDetNode(json) {
+  return !!json.nodes?.some((n) => {
+    if (n.scale) {
+      return n.scale[0] * n.scale[1] * n.scale[2] < 0;
+    }
+    if (n.matrix) {
+      const m = n.matrix;
+      return m[0] * (m[5] * m[10] - m[6] * m[9]) + m[1] * (m[6] * m[8] - m[4] * m[10]) + m[2] * (m[4] * m[9] - m[5] * m[8]) < 0;
+    }
+    return false;
+  });
+}
+
+export { loadGltfFeatures };
+//# sourceMappingURL=gltf-feature-registry.js.map

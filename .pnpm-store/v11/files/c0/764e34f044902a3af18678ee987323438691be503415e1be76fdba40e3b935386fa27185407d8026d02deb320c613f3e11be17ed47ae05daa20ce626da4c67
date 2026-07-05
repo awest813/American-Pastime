@@ -1,0 +1,12 @@
+import { type FunctionComponent } from "react";
+import { type AbstractSoundSource } from "@babylonjs/core/AudioV2/abstractAudio/abstractSoundSource.js";
+import { type ISelectionService } from "../../../services/selectionService";
+/**
+ * Spatial-audio property line that shows the scene node a v2 sound or sound source is attached to,
+ * with a clickable link to navigate to that node in the inspector.
+ * @returns The rendered property line.
+ */
+export declare const AudioV2SpatialAttachmentProperties: FunctionComponent<{
+    source: AbstractSoundSource;
+    selectionService: ISelectionService;
+}>;

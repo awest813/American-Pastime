@@ -1,0 +1,16 @@
+import { C as COMPAT_SOURCE_FILTER, r as resolveCompatSpecifier } from "./bundler-resolve-0pEkTP9X.js";
+class LiteCompatPlugin {
+  apply(compiler) {
+    const { NormalModuleReplacementPlugin } = compiler.webpack;
+    new NormalModuleReplacementPlugin(COMPAT_SOURCE_FILTER, (resource) => {
+      const specifier = resolveCompatSpecifier(resource.request);
+      if (specifier) {
+        resource.request = specifier;
+      }
+    }).apply(compiler);
+  }
+}
+export {
+  LiteCompatPlugin
+};
+//# sourceMappingURL=webpack.js.map

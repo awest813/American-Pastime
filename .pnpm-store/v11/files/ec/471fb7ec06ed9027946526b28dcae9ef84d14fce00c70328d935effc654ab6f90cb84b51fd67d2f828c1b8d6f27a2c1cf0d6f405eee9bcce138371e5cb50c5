@@ -1,0 +1,7 @@
+import { type FunctionComponent } from "react";
+import { type IGizmoService } from "../services/gizmoService";
+import { type ISceneContext } from "../services/sceneContext";
+export declare const GizmoToolbar: FunctionComponent<{
+    gizmoService: IGizmoService;
+    sceneContext: ISceneContext;
+}>;

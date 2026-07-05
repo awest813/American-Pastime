@@ -1,0 +1,3 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IPropertiesService } from "./propertiesService";
+export declare const TransformPropertiesServiceDefinition: ServiceDefinition<[], [IPropertiesService]>;

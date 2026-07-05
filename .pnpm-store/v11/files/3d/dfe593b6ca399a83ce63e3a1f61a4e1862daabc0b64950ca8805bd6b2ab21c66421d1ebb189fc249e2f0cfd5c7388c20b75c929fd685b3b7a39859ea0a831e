@@ -1,0 +1,13 @@
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../../services/selectionService";
+import { GPUParticleSystem } from "@babylonjs/core/Particles/gpuParticleSystem.js";
+import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem.js";
+/**
+ * Display commands that can be applied to a particle system inside Inspector.
+ * @param props Component props.
+ * @returns Render property lines.
+ */
+export declare const ParticleSystemCommandProperties: FunctionComponent<{
+    particleSystem: ParticleSystem | GPUParticleSystem;
+    selectionService: ISelectionService;
+}>;

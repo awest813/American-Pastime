@@ -1,0 +1,25 @@
+import { type FunctionComponent } from "react";
+/**
+ * Represents a color channel in the texture editor
+ */
+export type Channel = {
+    /** Whether the channel is visible */
+    visible: boolean;
+    /** Whether the channel is editable */
+    editable: boolean;
+    /** Display name for the channel */
+    name: string;
+    /** Channel identifier */
+    id: "R" | "G" | "B" | "A";
+};
+type ChannelsBarProps = {
+    channels: Channel[];
+    setChannels: (channels: Channel[]) => void;
+};
+/**
+ * Displays channel visibility and editability controls
+ * @param props - The channels bar properties
+ * @returns The channels bar component
+ */
+export declare const ChannelsBar: FunctionComponent<ChannelsBarProps>;
+export {};

@@ -1,0 +1,30 @@
+function getVariantNames(container) {
+  return container.materialVariants?.names ?? [];
+}
+function selectVariant(container, variantName) {
+  const data = container.materialVariants;
+  if (!data) {
+    return;
+  }
+  for (const entry of data.originals) {
+    entry.mesh.material = entry.material;
+  }
+  const entries = data.variants[variantName];
+  if (entries) {
+    for (const entry of entries) {
+      entry.mesh.material = entry.material;
+    }
+  }
+}
+function resetVariant(container) {
+  const data = container.materialVariants;
+  if (!data) {
+    return;
+  }
+  for (const entry of data.originals) {
+    entry.mesh.material = entry.material;
+  }
+}
+
+export { getVariantNames, resetVariant, selectVariant };
+//# sourceMappingURL=material-variants.js.map

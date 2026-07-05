@@ -1,0 +1,23 @@
+import { type FunctionComponent } from "react";
+import { type DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline.js";
+export declare const DefaultRenderingPipelineBloomProperties: FunctionComponent<{
+    pipeline: DefaultRenderingPipeline;
+}>;
+export declare const DefaultRenderingPipelineChromaticAberrationProperties: FunctionComponent<{
+    pipeline: DefaultRenderingPipeline;
+}>;
+export declare const DefaultRenderingPipelineDepthOfFieldProperties: FunctionComponent<{
+    pipeline: DefaultRenderingPipeline;
+}>;
+export declare const DefaultRenderingPipelineFxaaGlowProperties: FunctionComponent<{
+    pipeline: DefaultRenderingPipeline;
+}>;
+export declare const DefaultRenderingPipelineGrainProperties: FunctionComponent<{
+    pipeline: DefaultRenderingPipeline;
+}>;
+export declare const DefaultRenderingPipelineImageProcessingProperties: FunctionComponent<{
+    pipeline: DefaultRenderingPipeline;
+}>;
+export declare const DefaultRenderingPipelineSharpenProperties: FunctionComponent<{
+    pipeline: DefaultRenderingPipeline;
+}>;

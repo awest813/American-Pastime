@@ -1,0 +1,220 @@
+import { _setHpmAllocator } from '../math/_matrix-allocator.js';
+import { isDomCanvas, _buildSurface, resizeSurface, _refreshScRT, setSurfaceSize } from './surface.js';
+
+const VERSION = /* @__PURE__ */ (() => "1.7.0" )();
+let _vis = 0;
+function bumpVisibilityEpoch() {
+  _vis = _vis + 1 | 0;
+}
+function isRenderingContextRegistered(surface, context) {
+  return surface._renderingContexts.indexOf(context) !== -1;
+}
+function registerRenderingContext(surface, context) {
+  if (surface._renderingContexts.indexOf(context) !== -1) {
+    return false;
+  }
+  surface._renderingContexts.push(context);
+  return true;
+}
+function unregisterRenderingContext(surface, context) {
+  const list = surface._renderingContexts;
+  const i = list.indexOf(context);
+  if (i === -1) {
+    return false;
+  }
+  list.splice(i, 1);
+  return true;
+}
+async function createEngine(canvas, options) {
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+  if (!adapter) {
+    throw new Error("WebGPU adapter not available");
+  }
+  const features = [];
+  if (adapter.features.has("float32-filterable")) {
+    features.push("float32-filterable");
+  }
+  for (const f of ["texture-compression-astc", "texture-compression-bc", "texture-compression-etc2", "timestamp-query"]) {
+    if (adapter.features.has(f)) {
+      features.push(f);
+    }
+  }
+  const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
+  const versionToLog = `Babylon Lite v${VERSION}`;
+  console.log(`${versionToLog} - WebGPU engine`);
+  if (isDomCanvas(canvas)) {
+    canvas.setAttribute("data-engine", versionToLog);
+  }
+  const useHpm = options?.useHighPrecisionMatrix === true;
+  const useFO = options?.useFloatingOrigin === true;
+  if (useFO && !useHpm) {
+    throw new Error("Babylon Lite: useFloatingOrigin requires useHighPrecisionMatrix on the engine.");
+  }
+  if (useHpm) {
+    const { allocateF64Mat4 } = await import('../math/_mat4-storage-f64.js');
+    _setHpmAllocator(allocateF64Mat4);
+  }
+  let _wrapRenderableForFO;
+  let _makePackMeshWorld;
+  let _lightFoVersion;
+  let _applyLightFoOffset;
+  if (useFO) {
+    const [{ wrapRenderableForFO, lightFoVersion, applyLightFoOffset }, { makePackMeshWorld }] = await Promise.all([
+      import('../large-world/floating-origin.js'),
+      import('../large-world/pack-mat4-with-offset.js')
+    ]);
+    _wrapRenderableForFO = wrapRenderableForFO;
+    _makePackMeshWorld = makePackMeshWorld;
+    _lightFoVersion = lightFoVersion;
+    _applyLightFoOffset = applyLightFoOffset;
+  }
+  const engine = { _device: device };
+  const surfaces = [engine];
+  Object.assign(
+    engine,
+    {
+      engine,
+      // self-reference: the engine IS its primary surface
+      surfaces,
+      // public readonly view of `_surfaces` (same underlying array)
+      _surfaces: surfaces,
+      _device: device,
+      drawCallCount: 0,
+      gpuFrameTimeMs: 0,
+      useHighPrecisionMatrix: useHpm,
+      useFloatingOrigin: useFO,
+      _animFrameId: 0,
+      _renderFn: null,
+      _currentEncoder: void 0,
+      _currentDelta: 0,
+      _cbs: [],
+      _wrapRenderableForFO,
+      _makePackMeshWorld,
+      _lightFoVersion,
+      _applyLightFoOffset
+    },
+    _buildSurface(engine, canvas, options)
+  );
+  resizeSurface(engine);
+  _refreshScRT(engine);
+  return engine;
+}
+function resizeEngine(engine) {
+  for (const surface of engine.surfaces) {
+    resizeSurface(surface);
+  }
+}
+function setEngineSize(engine, widthPx, heightPx) {
+  setSurfaceSize(engine, widthPx, heightPx);
+}
+function getRenderTargetSize(surface) {
+  const c = surface.canvas;
+  return { width: c.width, height: c.height };
+}
+function startEngine(engine) {
+  return new Promise((resolve) => {
+    let firstRafFrame = true;
+    let lastTime = 0;
+    engine._renderFn = (now) => {
+      const delta = firstRafFrame ? 0 : lastTime > 0 ? now - lastTime : 16.667;
+      lastTime = now;
+      resizeEngine(engine);
+      renderFrame(engine, delta);
+      if (firstRafFrame) {
+        firstRafFrame = false;
+        resolve();
+      }
+      engine._animFrameId = requestAnimationFrame(engine._renderFn);
+    };
+    engine._animFrameId = requestAnimationFrame(engine._renderFn);
+  });
+}
+function stopEngine(engine) {
+  if (engine._animFrameId) {
+    cancelAnimationFrame(engine._animFrameId);
+  }
+  engine._animFrameId = 0;
+  engine._renderFn = null;
+}
+function disposeEngine(engine) {
+  stopEngine(engine);
+  const surfaces = engine._surfaces;
+  for (const s of surfaces) {
+    s._renderingContexts.length = 0;
+    s._context.unconfigure();
+  }
+  surfaces.length = 0;
+  engine._device.destroy();
+}
+function renderFrame(engine, delta) {
+  const surfaces = engine.surfaces;
+  let total = 0;
+  for (let i = 0; i < surfaces.length; i++) {
+    total += surfaces[i]._renderingContexts.length;
+  }
+  if (total === 0) {
+    return;
+  }
+  const encoder = engine._device.createCommandEncoder({ label: "frame" });
+  engine._currentEncoder = encoder;
+  engine._currentDelta = delta;
+  engine._gpuTimerBegin?.(encoder);
+  let drawCalls = 0;
+  for (let i = 0; i < surfaces.length; i++) {
+    const surface = surfaces[i];
+    surface._capturePreFrame?.(surface);
+    _refreshScRT(surface);
+    const ctxs = surface._renderingContexts;
+    for (let j = 0; j < ctxs.length; j++) {
+      const s = ctxs[j];
+      s._update();
+      drawCalls += s._drawCallsPre;
+      drawCalls += s._record();
+    }
+  }
+  const finalEncoder = engine._currentEncoder;
+  for (let i = 0; i < surfaces.length; i++) {
+    const surface = surfaces[i];
+    surface._captureService?.(surface, finalEncoder);
+  }
+  engine._gpuTimerEnd?.(finalEncoder);
+  engine._cbs[0] = finalEncoder.finish();
+  engine._device.queue.submit(engine._cbs);
+  engine.drawCallCount = drawCalls;
+  engine._gpuTimerResolve?.();
+}
+function isGpuTimingSupported(engine) {
+  return engine._device.features.has("timestamp-query");
+}
+function setGpuTimingEnabled(engine, enabled) {
+  if (!enabled) {
+    engine._gpuTimerWanted = false;
+    engine.gpuFrameTimeMs = 0;
+    engine._gpuTimerBegin = void 0;
+    engine._gpuTimerEnd = void 0;
+    engine._gpuTimerResolve = engine._gpuTaskTimerResolve;
+    return;
+  }
+  if (!isGpuTimingSupported(engine)) {
+    return;
+  }
+  engine._gpuTimerWanted = true;
+  void import('./gpu-timer.js').then(({ createGpuFrameTimer, gpuFrameTimerBegin, gpuFrameTimerEnd, gpuFrameTimerResolve }) => {
+    if (engine._gpuTimer === void 0) {
+      engine._gpuTimer = createGpuFrameTimer(engine._device);
+    }
+    const timer = engine._gpuTimer;
+    if (timer && engine._gpuTimerWanted) {
+      engine._gpuTimerBegin = (encoder) => gpuFrameTimerBegin(timer, encoder);
+      engine._gpuTimerEnd = (encoder) => gpuFrameTimerEnd(timer, encoder);
+      engine._gpuTimerResolve = () => {
+        gpuFrameTimerResolve(timer);
+        engine.gpuFrameTimeMs = timer.lastMs;
+        engine._gpuTaskTimerResolve?.();
+      };
+    }
+  });
+}
+
+export { VERSION, _vis, bumpVisibilityEpoch, createEngine, disposeEngine, getRenderTargetSize, isGpuTimingSupported, isRenderingContextRegistered, registerRenderingContext, renderFrame, resizeEngine, setEngineSize, setGpuTimingEnabled, startEngine, stopEngine, unregisterRenderingContext };
+//# sourceMappingURL=engine.js.map

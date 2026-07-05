@@ -1,0 +1,7 @@
+import { type FunctionComponent } from "react";
+import { type Light } from "@babylonjs/core/index.js";
+import { type ISelectionService } from "../../../services/selectionService";
+export declare const LightGeneralProperties: FunctionComponent<{
+    light: Light;
+    selectionService: ISelectionService;
+}>;

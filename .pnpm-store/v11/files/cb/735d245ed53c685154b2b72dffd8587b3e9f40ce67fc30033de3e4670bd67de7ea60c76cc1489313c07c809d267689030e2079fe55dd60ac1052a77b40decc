@@ -1,0 +1,192 @@
+import { U8 } from '../engine/typed-arrays.js';
+import { TU } from '../engine/gpu-flags.js';
+import { getOrCreateSampler, acquireTexture } from '../resource/gpu-pool.js';
+
+const cTFETC1 = 0;
+const cTFETC2 = 1;
+const cTFBC1 = 2;
+const cTFBC3 = 3;
+const cTFBC7 = 6;
+const cTFASTC_4x4 = 10;
+const cTFRGBA32 = 13;
+const CDN_BASE = "https://cdn.babylonjs.com/basisTranscoder/1";
+let _modulePromise = null;
+function loadBasisModule() {
+  if (_modulePromise) {
+    return _modulePromise;
+  }
+  _modulePromise = new Promise((resolve, reject) => {
+    const w = globalThis;
+    const init = () => {
+      const BASIS = w.BASIS;
+      if (!BASIS) {
+        reject(new Error("Basis: transcoder global BASIS not found after script load"));
+        return;
+      }
+      BASIS({ locateFile: (p) => `${CDN_BASE}/${p}` }).then((mod) => {
+        mod.initializeBasis();
+        resolve(mod);
+      }).catch(reject);
+    };
+    if (w.BASIS) {
+      init();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = `${CDN_BASE}/basis_transcoder.js`;
+    script.async = true;
+    script.onload = init;
+    script.onerror = () => reject(new Error(`Basis: failed to load ${script.src}`));
+    document.head.appendChild(script);
+  });
+  _modulePromise.catch(() => {
+    _modulePromise = null;
+  });
+  return _modulePromise;
+}
+const BASIS_TARGETS = [
+  {
+    basisFormat: cTFBC7,
+    gpuFormat: "bc7-rgba-unorm",
+    gpuFormatSrgb: "bc7-rgba-unorm-srgb",
+    feature: "texture-compression-bc",
+    blockW: 4,
+    blockH: 4,
+    blockBytes: 16,
+    hasAlpha: true
+  },
+  {
+    basisFormat: cTFASTC_4x4,
+    gpuFormat: "astc-4x4-unorm",
+    gpuFormatSrgb: "astc-4x4-unorm-srgb",
+    feature: "texture-compression-astc",
+    blockW: 4,
+    blockH: 4,
+    blockBytes: 16,
+    hasAlpha: true
+  },
+  {
+    basisFormat: cTFETC2,
+    gpuFormat: "etc2-rgba8unorm",
+    gpuFormatSrgb: "etc2-rgba8unorm-srgb",
+    feature: "texture-compression-etc2",
+    blockW: 4,
+    blockH: 4,
+    blockBytes: 16,
+    hasAlpha: true
+  },
+  {
+    basisFormat: cTFBC3,
+    gpuFormat: "bc3-rgba-unorm",
+    gpuFormatSrgb: "bc3-rgba-unorm-srgb",
+    feature: "texture-compression-bc",
+    blockW: 4,
+    blockH: 4,
+    blockBytes: 16,
+    hasAlpha: true
+  },
+  {
+    basisFormat: cTFBC1,
+    gpuFormat: "bc1-rgba-unorm",
+    gpuFormatSrgb: "bc1-rgba-unorm-srgb",
+    feature: "texture-compression-bc",
+    blockW: 4,
+    blockH: 4,
+    blockBytes: 8,
+    hasAlpha: false
+  },
+  // Uncompressed fallback — always supported, no device feature needed.
+  { basisFormat: cTFRGBA32, gpuFormat: "rgba8unorm", gpuFormatSrgb: "rgba8unorm-srgb", blockW: 1, blockH: 1, blockBytes: 4, hasAlpha: true },
+  // ETC1 fallback kept last (rare on WebGPU; mapped via ETC2 feature on GPUs that expose it).
+  {
+    basisFormat: cTFETC1,
+    gpuFormat: "etc2-rgb8unorm",
+    gpuFormatSrgb: "etc2-rgb8unorm-srgb",
+    feature: "texture-compression-etc2",
+    blockW: 4,
+    blockH: 4,
+    blockBytes: 8,
+    hasAlpha: false
+  }
+];
+function pickTarget(device, sourceHasAlpha) {
+  for (const t of BASIS_TARGETS) {
+    if (!t.hasAlpha && sourceHasAlpha) {
+      continue;
+    }
+    if (t.feature && !device.features.has(t.feature)) {
+      continue;
+    }
+    return t;
+  }
+  return BASIS_TARGETS[BASIS_TARGETS.length - 2];
+}
+async function loadBasisTexture2D(engine, url, opts = {}) {
+  const device = engine._device;
+  const [mod, buffer] = await Promise.all([loadBasisModule(), fetch(url).then((r) => r.arrayBuffer())]);
+  const bytes = new U8(buffer);
+  const file = new mod.BasisFile(bytes);
+  try {
+    if (file.getNumImages() === 0) {
+      throw new Error("Basis: no images in file");
+    }
+    if (file.startTranscoding() === 0) {
+      throw new Error("Basis: startTranscoding failed");
+    }
+    const hasAlpha = file.getHasAlpha() !== 0;
+    const target = pickTarget(device, hasAlpha);
+    const width = file.getImageWidth(0, 0);
+    const height = file.getImageHeight(0, 0);
+    const levels = file.getNumLevels(0);
+    const srgb = opts.srgb ?? false;
+    const gpuFormat = srgb && target.gpuFormatSrgb ? target.gpuFormatSrgb : target.gpuFormat;
+    const mips = [];
+    for (let level = 0; level < levels; level++) {
+      const mipW = file.getImageWidth(0, level);
+      const mipH = file.getImageHeight(0, level);
+      const size = file.getImageTranscodedSizeInBytes(0, level, target.basisFormat);
+      if (size === 0) {
+        throw new Error(`Basis: transcoded size is 0 for mip ${level}`);
+      }
+      const dst = new U8(size);
+      const ok = file.transcodeImage(dst, 0, level, target.basisFormat, 0, hasAlpha ? 1 : 0);
+      if (ok === 0) {
+        throw new Error(`Basis: transcodeImage failed for mip ${level}`);
+      }
+      mips.push({ data: dst, width: mipW, height: mipH });
+    }
+    const texture = device.createTexture({
+      size: { width, height },
+      format: gpuFormat,
+      mipLevelCount: mips.length,
+      usage: TU.TEXTURE_BINDING | TU.COPY_DST
+    });
+    for (let level = 0; level < mips.length; level++) {
+      const mip = mips[level];
+      const blocksPerRow = Math.ceil(mip.width / target.blockW);
+      const rowBytes = target.blockW === 1 ? mip.width * target.blockBytes : blocksPerRow * target.blockBytes;
+      device.queue.writeTexture({ texture, mipLevel: level }, mip.data, { bytesPerRow: rowBytes }, { width: mip.width, height: mip.height });
+    }
+    const minF = opts.minFilter ?? "linear";
+    const magF = opts.magFilter ?? "linear";
+    const mipF = mips.length > 1 ? "linear" : "nearest";
+    const allLinear = minF === "linear" && magF === "linear" && mipF === "linear";
+    const sampler = getOrCreateSampler(engine, {
+      addressModeU: opts.addressModeU ?? "repeat",
+      addressModeV: opts.addressModeV ?? "repeat",
+      minFilter: minF,
+      magFilter: magF,
+      mipmapFilter: mipF,
+      maxAnisotropy: allLinear ? 4 : 1
+    });
+    const tex2d = { texture, view: texture.createView(), sampler, width, height, invertY: true };
+    acquireTexture(tex2d);
+    return tex2d;
+  } finally {
+    file.close();
+    file.delete();
+  }
+}
+
+export { loadBasisTexture2D };
+//# sourceMappingURL=basis-loader.js.map

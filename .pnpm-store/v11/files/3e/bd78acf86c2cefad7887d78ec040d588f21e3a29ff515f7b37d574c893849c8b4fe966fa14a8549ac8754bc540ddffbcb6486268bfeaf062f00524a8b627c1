@@ -1,0 +1,8 @@
+import { type Skeleton } from "@babylonjs/core/index.js";
+import { type FunctionComponent } from "react";
+export declare const SkeletonGeneralProperties: FunctionComponent<{
+    skeleton: Skeleton;
+}>;
+export declare const SkeletonViewerProperties: FunctionComponent<{
+    skeleton: Skeleton;
+}>;

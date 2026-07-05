@@ -1,0 +1,77 @@
+function addVec3ToRef(a, b, out) {
+  out.x = a.x + b.x;
+  out.y = a.y + b.y;
+  out.z = a.z + b.z;
+  return out;
+}
+function addVec3InPlace(target, b) {
+  return addVec3ToRef(target, b, target);
+}
+function subVec3ToRef(a, b, out) {
+  out.x = a.x - b.x;
+  out.y = a.y - b.y;
+  out.z = a.z - b.z;
+  return out;
+}
+function subVec3InPlace(target, b) {
+  return subVec3ToRef(target, b, target);
+}
+function scaleVec3ToRef(v, s, out) {
+  out.x = v.x * s;
+  out.y = v.y * s;
+  out.z = v.z * s;
+  return out;
+}
+function scaleVec3InPlace(target, s) {
+  return scaleVec3ToRef(target, s, target);
+}
+function crossVec3ToRef(a, b, out) {
+  const x = a.y * b.z - a.z * b.y;
+  const y = a.z * b.x - a.x * b.z;
+  const z = a.x * b.y - a.y * b.x;
+  out.x = x;
+  out.y = y;
+  out.z = z;
+  return out;
+}
+function crossVec3InPlace(target, b) {
+  return crossVec3ToRef(target, b, target);
+}
+function normalizeVec3ToRef(v, out, epsilon = 1e-10) {
+  const len = Math.hypot(v.x, v.y, v.z);
+  if (len <= epsilon) {
+    out.x = 0;
+    out.y = 0;
+    out.z = 0;
+    return out;
+  }
+  const inv = 1 / len;
+  out.x = v.x * inv;
+  out.y = v.y * inv;
+  out.z = v.z * inv;
+  return out;
+}
+function normalizeVec3InPlace(target, epsilon = 1e-10) {
+  return normalizeVec3ToRef(target, target, epsilon);
+}
+function negateVec3ToRef(v, out) {
+  out.x = -v.x;
+  out.y = -v.y;
+  out.z = -v.z;
+  return out;
+}
+function negateVec3InPlace(target) {
+  return negateVec3ToRef(target, target);
+}
+function lerpVec3ToRef(a, b, t, out) {
+  out.x = a.x + (b.x - a.x) * t;
+  out.y = a.y + (b.y - a.y) * t;
+  out.z = a.z + (b.z - a.z) * t;
+  return out;
+}
+function lerpVec3InPlace(target, b, t) {
+  return lerpVec3ToRef(target, b, t, target);
+}
+
+export { addVec3InPlace, addVec3ToRef, crossVec3InPlace, crossVec3ToRef, lerpVec3InPlace, lerpVec3ToRef, negateVec3InPlace, negateVec3ToRef, normalizeVec3InPlace, normalizeVec3ToRef, scaleVec3InPlace, scaleVec3ToRef, subVec3InPlace, subVec3ToRef };
+//# sourceMappingURL=vec3-ref.js.map

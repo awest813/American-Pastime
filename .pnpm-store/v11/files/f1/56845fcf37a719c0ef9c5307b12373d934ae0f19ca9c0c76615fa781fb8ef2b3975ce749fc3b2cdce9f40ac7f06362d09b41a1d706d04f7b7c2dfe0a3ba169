@@ -1,0 +1,44 @@
+import { type FunctionComponent, type ReactNode } from "react";
+import { type ISelectionService } from "../../services/selectionService";
+type CreatedEntity = {
+    name: string;
+};
+type QuickCreateSectionProps = {
+    children: ReactNode;
+};
+/**
+ * Container component for quick create sections that provides consistent column layout with spacing
+ * @param props - Component props
+ * @returns React component
+ */
+export declare const QuickCreateSection: FunctionComponent<QuickCreateSectionProps>;
+type QuickCreateRowProps = {
+    children: ReactNode;
+};
+/**
+ * Container component for quick create rows that provides consistent row layout for button + settings popover
+ * @param props - Component props
+ * @returns React component
+ */
+export declare const QuickCreateRow: FunctionComponent<QuickCreateRowProps>;
+type QuickCreateItemProps = {
+    /** The selection service used by the go-to-entity button */
+    selectionService: ISelectionService;
+    /** Label for the quick-create button */
+    label: string;
+    /** Called when the quick-create button is clicked. Return the created entity (or a Promise that resolves to it) for toast + go-to. */
+    onCreate: () => CreatedEntity | Promise<CreatedEntity>;
+    /** Optional override for the settings popover's Create button. If omitted, the popover's Create button calls `onCreate`. */
+    onSettingsCreate?: () => CreatedEntity | Promise<CreatedEntity>;
+    /** Optional settings popover content (form fields). When provided, a settings popover with a Create button is rendered next to the quick-create button. */
+    children?: ReactNode;
+};
+/**
+ * Reusable row component for entity creation. Renders a quick-create button, an optional settings popover
+ * (with a baked-in Create button), and a "go to entity" button. Manages its own state for the last created entity
+ * and shows a toast on creation.
+ * @param props - The label, creation handler, selection service, and optional settings content
+ * @returns A row with a button, optional settings popover, and go-to-entity button
+ */
+export declare const QuickCreateItem: FunctionComponent<QuickCreateItemProps>;
+export {};

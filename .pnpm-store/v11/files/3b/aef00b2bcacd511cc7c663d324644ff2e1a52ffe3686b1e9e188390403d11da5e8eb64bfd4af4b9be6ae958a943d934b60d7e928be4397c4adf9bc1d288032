@@ -1,0 +1,29 @@
+function getContainerMeshes(container) {
+  const meshes = [];
+  const seen = /* @__PURE__ */ new Set();
+  const visit = (node) => {
+    if (seen.has(node)) {
+      return;
+    }
+    seen.add(node);
+    if (node._gpu) {
+      meshes.push(node);
+    }
+    const children = node.children;
+    if (children) {
+      for (const child of children) {
+        visit(child);
+      }
+    }
+  };
+  for (const entity of container.entities) {
+    if ("lightType" in entity) {
+      continue;
+    }
+    visit(entity);
+  }
+  return meshes;
+}
+
+export { getContainerMeshes };
+//# sourceMappingURL=asset-container.js.map

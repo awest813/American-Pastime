@@ -1,0 +1,13 @@
+const F32 = Float32Array;
+const F64 = Float64Array;
+const U32 = Uint32Array;
+const I32 = Int32Array;
+const U16 = Uint16Array;
+const I16 = Int16Array;
+const U8 = Uint8Array;
+const I8 = Int8Array;
+const U8C = Uint8ClampedArray;
+const DV = DataView;
+
+export { DV, F32, F64, I16, I32, I8, U16, U32, U8, U8C };
+//# sourceMappingURL=typed-arrays.js.map

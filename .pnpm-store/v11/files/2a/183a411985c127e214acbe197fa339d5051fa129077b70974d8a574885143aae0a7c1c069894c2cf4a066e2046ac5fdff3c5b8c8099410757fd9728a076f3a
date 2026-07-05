@@ -1,0 +1,107 @@
+import { PhysicsShapeType } from './havok.js';
+
+function createHeightFieldShape(world, options) {
+  const { _hknp: hknp } = world;
+  const resolved = options.groundMesh ? optionsFromGroundMesh(options.groundMesh) : resolveExplicit(options);
+  const { numX, numZ, sizeX, sizeZ, data } = resolved;
+  const totalNumHeights = numX * numZ;
+  const bufferBegin = hknp._malloc(totalNumHeights * 4);
+  const heightBuffer = new Float32Array(hknp.HEAPU8.buffer, bufferBegin, totalNumHeights);
+  for (let x = 0; x < numX; x++) {
+    for (let z = 0; z < numZ; z++) {
+      const hkIndex = z * numX + x;
+      const bjsIndex = (numX - 1 - x) * numZ + z;
+      heightBuffer[hkIndex] = data[bjsIndex];
+    }
+  }
+  const scaleX = sizeX / (numX - 1);
+  const scaleZ = sizeZ / (numZ - 1);
+  const hkShape = hknp.HP_Shape_CreateHeightField(numX, numZ, [scaleX, 1, scaleZ], bufferBegin)[1];
+  hknp._free(bufferBegin);
+  return { _hkShape: hkShape, _type: PhysicsShapeType.HEIGHTFIELD };
+}
+function resolveExplicit(options) {
+  if (options.numHeightFieldSamplesX === void 0 || options.numHeightFieldSamplesZ === void 0 || options.heightFieldSizeX === void 0 || options.heightFieldSizeZ === void 0 || options.heightFieldData === void 0) {
+    throw new Error("createHeightFieldShape requires either a groundMesh or full explicit heightfield parameters.");
+  }
+  return {
+    numX: options.numHeightFieldSamplesX,
+    numZ: options.numHeightFieldSamplesZ,
+    sizeX: options.heightFieldSizeX,
+    sizeZ: options.heightFieldSizeZ,
+    data: options.heightFieldData
+  };
+}
+function optionsFromGroundMesh(mesh) {
+  const localPositions = mesh._cpuPositions;
+  if (!localPositions || localPositions.length === 0) {
+    throw new Error("createHeightFieldShape ground mesh has no vertex positions.");
+  }
+  const world = mesh.worldMatrix;
+  const vertexCount = localPositions.length / 3;
+  const pos = new Float32Array(localPositions.length);
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < localPositions.length; i += 3) {
+    const lx = localPositions[i];
+    const ly = localPositions[i + 1];
+    const lz = localPositions[i + 2];
+    const wx = world[0] * lx + world[4] * ly + world[8] * lz + world[12];
+    const wy = world[1] * lx + world[5] * ly + world[9] * lz + world[13];
+    const wz = world[2] * lx + world[6] * ly + world[10] * lz + world[14];
+    pos[i] = wx;
+    pos[i + 1] = wy;
+    pos[i + 2] = wz;
+    if (wx < minX) {
+      minX = wx;
+    }
+    if (wy < minY) {
+      minY = wy;
+    }
+    if (wz < minZ) {
+      minZ = wz;
+    }
+    if (wx > maxX) {
+      maxX = wx;
+    }
+    if (wz > maxZ) {
+      maxZ = wz;
+    }
+  }
+  const sideSamples = Math.sqrt(vertexCount);
+  if (!Number.isInteger(sideSamples) || sideSamples < 2) {
+    throw new Error(
+      `createHeightFieldShape requires a regular (N+1)×(N+1) grid mesh (e.g. from createGroundFromHeightMap); got ${vertexCount} vertices, which is not the square of an integer ≥ 2.`
+    );
+  }
+  const arraySize = sideSamples - 1;
+  const extendX = (maxX - minX) / 2;
+  const extendZ = (maxZ - minZ) / 2;
+  const dim = Math.min(extendX, extendZ);
+  if (dim <= 0) {
+    throw new Error("createHeightFieldShape ground mesh has zero extent in X or Z; cannot build a heightfield.");
+  }
+  const elementSize = dim * 2 / arraySize;
+  const samples = arraySize + 1;
+  const matrix = new Float32Array(samples * samples);
+  matrix.fill(minY);
+  for (let i = 0; i < pos.length; i += 3) {
+    const x = Math.round((pos[i] - minX) / elementSize);
+    const z = arraySize - Math.round((pos[i + 2] - minZ) / elementSize);
+    const y = pos[i + 1] - minY;
+    matrix[z * samples + x] = y;
+  }
+  return {
+    numX: samples,
+    numZ: samples,
+    sizeX: extendX * 2,
+    sizeZ: extendZ * 2,
+    data: matrix
+  };
+}
+
+export { createHeightFieldShape };
+//# sourceMappingURL=havok-heightfield.js.map

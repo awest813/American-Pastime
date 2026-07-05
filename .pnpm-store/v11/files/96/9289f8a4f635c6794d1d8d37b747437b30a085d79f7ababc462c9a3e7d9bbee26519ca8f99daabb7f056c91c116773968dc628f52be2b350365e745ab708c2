@@ -1,0 +1,277 @@
+import { createRenderTarget, disposeRenderTarget } from '../engine/render-target.js';
+import { createCircleOfConfusionPostProcessTask } from './circle-of-confusion.js';
+import { createDepthOfFieldBlurPostProcessTask } from './depth-of-field-blur.js';
+import { createDepthOfFieldMergePostProcessTask } from './depth-of-field-merge.js';
+
+var DepthOfFieldBlurLevel = /* @__PURE__ */ ((DepthOfFieldBlurLevel2) => {
+  DepthOfFieldBlurLevel2[DepthOfFieldBlurLevel2["Low"] = 0] = "Low";
+  DepthOfFieldBlurLevel2[DepthOfFieldBlurLevel2["Medium"] = 1] = "Medium";
+  DepthOfFieldBlurLevel2[DepthOfFieldBlurLevel2["High"] = 2] = "High";
+  return DepthOfFieldBlurLevel2;
+})(DepthOfFieldBlurLevel || {});
+function blurLevelConfig(level) {
+  switch (level) {
+    case 2 /* High */:
+      return { blurCount: 3, kernel: 51 };
+    case 1 /* Medium */:
+      return { blurCount: 2, kernel: 31 };
+    default:
+      return { blurCount: 1, kernel: 15 };
+  }
+}
+function resolveSourceSize(source) {
+  if (source._width > 0 && source._height > 0) {
+    return { width: source._width, height: source._height };
+  }
+  if ("canvas" in source._descriptor.size) {
+    const canvas = source._descriptor.size.canvas;
+    return { width: canvas.width, height: canvas.height };
+  }
+  return source._descriptor.size;
+}
+function blurTargetSize(source, ratio) {
+  const size = resolveSourceSize(source);
+  return { width: Math.max(1, Math.floor(size.width * ratio)), height: Math.max(1, Math.floor(size.height * ratio)) };
+}
+function createDepthOfFieldPostProcessTask(config, engine, scene) {
+  const eng = engine;
+  const params = {
+    sourceTexture: config.sourceTexture,
+    targetTexture: config.targetTexture ?? null,
+    sourceSamplingMode: config.sourceSamplingMode ?? "linear",
+    alphaMode: config.alphaMode ?? 0,
+    viewport: config.viewport ?? null,
+    clear: config.clear ?? true,
+    lensSize: config.lensSize ?? 50,
+    fStop: config.fStop ?? 1.4,
+    focusDistance: config.focusDistance ?? 2e3,
+    focalLength: config.focalLength ?? 50
+  };
+  const name = config.name ?? "depth-of-field";
+  const { blurCount, kernel } = blurLevelConfig(config.blurLevel ?? 0 /* Low */);
+  const adjustedKernel = kernel / Math.pow(2, blurCount - 1);
+  const blurRatios = [];
+  for (let i = 0; i < blurCount; i++) {
+    blurRatios.push(0.75 / Math.pow(2, i));
+  }
+  const sourceFormat = params.sourceTexture._descriptor.format;
+  if (!sourceFormat) {
+    throw new Error(`DepthOfFieldPostProcessTask "${name}": sourceTexture must have a format.`);
+  }
+  const cocTarget = createRenderTarget({ lbl: `${name}-coc`, format: "r16float", samples: 1, size: params.sourceTexture._descriptor.size });
+  const coc = createCircleOfConfusionPostProcessTask(
+    {
+      name: `${name}-coc`,
+      sourceTexture: params.sourceTexture,
+      // not used by the CoC shader
+      sourceSamplingMode: "linear",
+      depthTexture: config.depthTexture,
+      camera: config.camera,
+      lensSize: params.lensSize,
+      fStop: params.fStop,
+      focusDistance: params.focusDistance,
+      focalLength: params.focalLength,
+      depthNotNormalized: config.depthNotNormalized,
+      targetTexture: cocTarget
+    },
+    engine,
+    scene
+  );
+  const blurY = [];
+  const blurX = [];
+  const blurYTargets = [];
+  const blurXTargets = [];
+  const blurSteps = [];
+  for (let i = 0; i < blurCount; i++) {
+    const size = blurTargetSize(params.sourceTexture, blurRatios[i]);
+    const yTarget = createRenderTarget({ lbl: `${name}-blur-y-${i}`, format: sourceFormat, samples: 1, size });
+    const xTarget = createRenderTarget({ lbl: `${name}-blur-x-${i}`, format: sourceFormat, samples: 1, size });
+    const yTask = createDepthOfFieldBlurPostProcessTask(
+      {
+        name: `${name}-blur-y-${i}`,
+        sourceTexture: i === 0 ? params.sourceTexture : blurXTargets[i - 1],
+        sourceSamplingMode: "linear",
+        circleOfConfusionTexture: cocTarget,
+        direction: { x: 0, y: 1 },
+        kernel: adjustedKernel,
+        targetTexture: yTarget
+      },
+      engine,
+      scene
+    );
+    const xTask = createDepthOfFieldBlurPostProcessTask(
+      {
+        name: `${name}-blur-x-${i}`,
+        sourceTexture: yTarget,
+        sourceSamplingMode: "linear",
+        circleOfConfusionTexture: cocTarget,
+        direction: { x: 1, y: 0 },
+        kernel: adjustedKernel,
+        targetTexture: xTarget
+      },
+      engine,
+      scene
+    );
+    blurY.push(yTask);
+    blurX.push(xTask);
+    blurYTargets.push(yTarget);
+    blurXTargets.push(xTarget);
+    blurSteps.push(xTarget);
+  }
+  const merge = createDepthOfFieldMergePostProcessTask(
+    {
+      name: `${name}-merge`,
+      sourceTexture: params.sourceTexture,
+      sourceSamplingMode: params.sourceSamplingMode,
+      targetTexture: params.targetTexture,
+      alphaMode: params.alphaMode,
+      viewport: params.viewport,
+      clear: params.clear,
+      circleOfConfusionTexture: cocTarget,
+      blurSteps
+    },
+    engine,
+    scene
+  );
+  const task = {
+    name,
+    engine: eng,
+    scene,
+    _passes: [],
+    sourceTexture: params.sourceTexture,
+    sourceSamplingMode: params.sourceSamplingMode,
+    targetTexture: params.targetTexture,
+    alphaMode: params.alphaMode,
+    viewport: params.viewport,
+    clear: params.clear,
+    outputTexture: merge.outputTexture,
+    _coc: coc,
+    _blurX: blurX,
+    _blurY: blurY,
+    _merge: merge,
+    _cocTarget: cocTarget,
+    _blurXTargets: blurXTargets,
+    _blurYTargets: blurYTargets,
+    record() {
+      for (let i = 0; i < blurCount; i++) {
+        const size = blurTargetSize(params.sourceTexture, blurRatios[i]);
+        blurYTargets[i]._descriptor.size = size;
+        blurXTargets[i]._descriptor.size = size;
+      }
+      coc.record();
+      for (let i = 0; i < blurCount; i++) {
+        blurY[i].record();
+        blurX[i].record();
+      }
+      merge.record();
+      task.outputTexture = merge.outputTexture;
+    },
+    execute() {
+      let n = coc.execute?.() ?? 0;
+      for (let i = 0; i < blurCount; i++) {
+        n += blurY[i].execute?.() ?? 0;
+        n += blurX[i].execute?.() ?? 0;
+      }
+      n += merge.execute?.() ?? 0;
+      return n;
+    },
+    updateUniforms() {
+      coc.updateUniforms();
+      for (let i = 0; i < blurCount; i++) {
+        blurY[i].updateUniforms();
+        blurX[i].updateUniforms();
+      }
+      merge.updateUniforms();
+    },
+    dispose() {
+      coc.dispose();
+      for (let i = 0; i < blurCount; i++) {
+        blurY[i].dispose();
+        blurX[i].dispose();
+      }
+      merge.dispose();
+      disposeRenderTarget(cocTarget);
+      for (const t of blurYTargets) {
+        disposeRenderTarget(t);
+      }
+      for (const t of blurXTargets) {
+        disposeRenderTarget(t);
+      }
+    },
+    get lensSize() {
+      return coc.lensSize;
+    },
+    set lensSize(value) {
+      coc.lensSize = value;
+    },
+    get fStop() {
+      return coc.fStop;
+    },
+    set fStop(value) {
+      coc.fStop = value;
+    },
+    get focusDistance() {
+      return coc.focusDistance;
+    },
+    set focusDistance(value) {
+      coc.focusDistance = value;
+    },
+    get focalLength() {
+      return coc.focalLength;
+    },
+    set focalLength(value) {
+      coc.focalLength = value;
+    }
+  };
+  Object.defineProperties(task, {
+    sourceTexture: {
+      get: () => params.sourceTexture,
+      set: (value) => {
+        params.sourceTexture = value;
+        coc.sourceTexture = value;
+        merge.sourceTexture = value;
+        blurY[0].sourceTexture = value;
+      }
+    },
+    sourceSamplingMode: {
+      get: () => params.sourceSamplingMode,
+      set: (value) => {
+        params.sourceSamplingMode = value;
+        merge.sourceSamplingMode = value;
+      }
+    },
+    targetTexture: {
+      get: () => params.targetTexture,
+      set: (value) => {
+        params.targetTexture = value;
+        merge.targetTexture = value;
+        task.outputTexture = merge.outputTexture;
+      }
+    },
+    alphaMode: {
+      get: () => params.alphaMode,
+      set: (value) => {
+        params.alphaMode = value;
+        merge.alphaMode = value;
+      }
+    },
+    viewport: {
+      get: () => params.viewport,
+      set: (value) => {
+        params.viewport = value;
+        merge.viewport = value;
+      }
+    },
+    clear: {
+      get: () => params.clear,
+      set: (value) => {
+        params.clear = value;
+        merge.clear = value;
+      }
+    }
+  });
+  return task;
+}
+
+export { DepthOfFieldBlurLevel, createDepthOfFieldPostProcessTask };
+//# sourceMappingURL=depth-of-field.js.map

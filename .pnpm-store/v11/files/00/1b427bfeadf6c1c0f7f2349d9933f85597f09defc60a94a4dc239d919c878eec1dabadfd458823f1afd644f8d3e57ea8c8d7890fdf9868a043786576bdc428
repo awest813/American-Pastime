@@ -1,0 +1,416 @@
+import { F32, U32 } from '../engine/typed-arrays.js';
+
+let _coreModule = null;
+let _generatorsModule = null;
+let _initPromise = null;
+async function _ensureRecast(locateFile) {
+  if (!_coreModule || !_generatorsModule) {
+    if (!_initPromise) {
+      _initPromise = (async () => {
+        const core = await import('../_chunks/vendor/recast-navigation-CYBQI-zY.js').then(n => n.i);
+        const gens = await import('../_chunks/vendor/recast-navigation-CYBQI-zY.js').then(n => n.a);
+        if (locateFile) {
+          const wasmFactory = (await import('../_chunks/vendor/recast-navigation-CYBQI-zY.js').then(n => n.r)).default;
+          await core.init(wasmFactory.bind(null, { locateFile }));
+        } else {
+          await core.init();
+        }
+        _coreModule = core;
+        _generatorsModule = gens;
+      })();
+    }
+    await _initPromise;
+  }
+  return { core: _coreModule, gens: _generatorsModule };
+}
+async function createNavigationPluginAsync(options) {
+  const { core, gens } = await _ensureRecast(options?.locateFile);
+  return {
+    _recast: core,
+    _generators: gens
+  };
+}
+function disposeNavigationPlugin(plugin) {
+  const internal = plugin;
+  internal._navMeshQuery?.destroy?.();
+  internal._tileCache?.destroy?.();
+  internal._navMesh?.destroy?.();
+  internal._navMeshQuery = void 0;
+  internal._tileCache = void 0;
+  internal._navMesh = void 0;
+}
+function createNavMesh(plugin, meshes, params) {
+  const { positions, indices } = _mergeMeshes(meshes, params.doNotReverseIndices === true);
+  _createNavMeshFromMerged(plugin, positions, indices, params);
+}
+function createNavMeshFromSources(plugin, sources, params) {
+  const { positions, indices } = _mergeSources(sources, params.doNotReverseIndices === true);
+  _createNavMeshFromMerged(plugin, positions, indices, params);
+}
+function _createNavMeshFromMerged(plugin, positions, indices, params) {
+  const cfg = {};
+  if (params.cs !== void 0) {
+    cfg.cs = params.cs;
+  }
+  if (params.ch !== void 0) {
+    cfg.ch = params.ch;
+  }
+  if (params.walkableSlopeAngle !== void 0) {
+    cfg.walkableSlopeAngle = params.walkableSlopeAngle;
+  }
+  if (params.walkableHeight !== void 0) {
+    cfg.walkableHeight = params.walkableHeight;
+  }
+  if (params.walkableClimb !== void 0) {
+    cfg.walkableClimb = params.walkableClimb;
+  }
+  if (params.walkableRadius !== void 0) {
+    cfg.walkableRadius = params.walkableRadius;
+  }
+  if (params.maxEdgeLen !== void 0) {
+    cfg.maxEdgeLen = params.maxEdgeLen;
+  }
+  if (params.maxSimplificationError !== void 0) {
+    cfg.maxSimplificationError = params.maxSimplificationError;
+  }
+  if (params.minRegionArea !== void 0) {
+    cfg.minRegionArea = params.minRegionArea;
+  }
+  if (params.mergeRegionArea !== void 0) {
+    cfg.mergeRegionArea = params.mergeRegionArea;
+  }
+  if (params.maxVertsPerPoly !== void 0) {
+    cfg.maxVertsPerPoly = params.maxVertsPerPoly;
+  }
+  if (params.detailSampleDist !== void 0) {
+    cfg.detailSampleDist = params.detailSampleDist;
+  }
+  if (params.detailSampleMaxError !== void 0) {
+    cfg.detailSampleMaxError = params.detailSampleMaxError;
+  }
+  if (params.offMeshConnections !== void 0 && params.offMeshConnections.length > 0) {
+    cfg.offMeshConnections = params.offMeshConnections;
+  }
+  const internal = plugin;
+  const needsTileCache = (params.maxObstacles ?? 0) > 0;
+  const needsTiled = (params.tileSize ?? 0) > 0;
+  if (needsTileCache) {
+    cfg.tileSize = params.tileSize ?? 32;
+    cfg.expectedLayersPerTile = params.expectedLayersPerTile ?? 1;
+    cfg.maxObstacles = params.maxObstacles;
+    if (params.offMeshConnections !== void 0 && params.offMeshConnections.length > 0) {
+      cfg.tileCacheMeshProcess = _createDefaultTileCacheMeshProcess(plugin._recast, params.offMeshConnections);
+    }
+    const result2 = plugin._generators.generateTileCache(positions, indices, cfg, params.keepIntermediates === true);
+    if (!result2.success) {
+      throw new Error(`createNavMesh (tile cache) failed: ${result2.error}`);
+    }
+    internal._navMesh = result2.navMesh;
+    internal._tileCache = result2.tileCache;
+    internal._navMeshQuery = new plugin._recast.NavMeshQuery(result2.navMesh);
+    return;
+  }
+  if (needsTiled) {
+    cfg.tileSize = params.tileSize;
+    const result2 = plugin._generators.generateTiledNavMesh(positions, indices, cfg, params.keepIntermediates === true);
+    if (!result2.success) {
+      throw new Error(`createNavMesh (tiled) failed: ${result2.error}`);
+    }
+    internal._navMesh = result2.navMesh;
+    internal._navMeshQuery = new plugin._recast.NavMeshQuery(result2.navMesh);
+    return;
+  }
+  const result = plugin._generators.generateSoloNavMesh(positions, indices, cfg, params.keepIntermediates === true);
+  if (!result.success) {
+    throw new Error(`createNavMesh failed: ${result.error}`);
+  }
+  internal._navMesh = result.navMesh;
+  internal._navMeshQuery = new plugin._recast.NavMeshQuery(result.navMesh);
+}
+function _createDefaultTileCacheMeshProcess(recast, offMeshConnections) {
+  const area = 0;
+  const flags = 1;
+  return new recast.TileCacheMeshProcess((navMeshCreateParams, polyAreas, polyFlags) => {
+    for (let i = 0; i < navMeshCreateParams.polyCount(); ++i) {
+      polyAreas.set(i, area);
+      polyFlags.set(i, flags);
+    }
+    if (offMeshConnections.length > 0) {
+      navMeshCreateParams.setOffMeshConnections(offMeshConnections);
+    }
+  });
+}
+function _mergeMeshes(meshes, doNotReverseIndices) {
+  let totalVerts = 0;
+  let totalIdx = 0;
+  for (const mesh of meshes) {
+    if (!mesh._cpuPositions || !mesh._cpuIndices) {
+      throw new Error(`Mesh "${mesh.name}" missing CPU geometry for navmesh`);
+    }
+    totalVerts += mesh._cpuPositions.length;
+    totalIdx += mesh._cpuIndices.length;
+  }
+  const positions = new F32(totalVerts);
+  const indices = new U32(totalIdx);
+  let pOff = 0;
+  let iOff = 0;
+  let vertBase = 0;
+  for (const mesh of meshes) {
+    const src = mesh._cpuPositions;
+    const wm = mesh.worldMatrix;
+    for (let i = 0; i < src.length; i += 3) {
+      const x = src[i], y = src[i + 1], z = src[i + 2];
+      positions[pOff++] = x * wm[0] + y * wm[4] + z * wm[8] + wm[12];
+      positions[pOff++] = x * wm[1] + y * wm[5] + z * wm[9] + wm[13];
+      positions[pOff++] = x * wm[2] + y * wm[6] + z * wm[10] + wm[14];
+    }
+    const meshIdx = mesh._cpuIndices;
+    const n = meshIdx.length;
+    if (doNotReverseIndices) {
+      for (let i = 0; i < n; i++) {
+        indices[iOff++] = meshIdx[i] + vertBase;
+      }
+    } else {
+      for (let i = 0; i < n; i += 3) {
+        indices[iOff++] = meshIdx[i] + vertBase;
+        indices[iOff++] = meshIdx[i + 2] + vertBase;
+        indices[iOff++] = meshIdx[i + 1] + vertBase;
+      }
+    }
+    vertBase += src.length / 3;
+  }
+  return { positions, indices };
+}
+function _mergeSources(sources, doNotReverseIndices) {
+  let totalVerts = 0;
+  let totalIdx = 0;
+  for (const source of sources) {
+    totalVerts += source.positions.length;
+    totalIdx += source.indices.length;
+  }
+  const positions = new F32(totalVerts);
+  const indices = new U32(totalIdx);
+  let pOff = 0;
+  let iOff = 0;
+  let vertBase = 0;
+  for (const source of sources) {
+    for (let i = 0; i < source.positions.length; i++) {
+      positions[pOff++] = source.positions[i];
+    }
+    if (doNotReverseIndices) {
+      for (let i = 0; i < source.indices.length; i++) {
+        indices[iOff++] = source.indices[i] + vertBase;
+      }
+    } else {
+      for (let i = 0; i < source.indices.length; i += 3) {
+        indices[iOff++] = source.indices[i] + vertBase;
+        indices[iOff++] = source.indices[i + 2] + vertBase;
+        indices[iOff++] = source.indices[i + 1] + vertBase;
+      }
+    }
+    vertBase += source.positions.length / 3;
+  }
+  return { positions, indices };
+}
+function createDebugNavMeshGeometry(plugin) {
+  if (!plugin._navMesh) {
+    throw new Error("No navmesh generated. Call createNavMesh first.");
+  }
+  const [positionsArr, indicesArr] = plugin._recast.getNavMeshPositionsAndIndices(plugin._navMesh);
+  const triCount = indicesArr.length / 3 | 0;
+  const vertCount = triCount * 3;
+  const positions = new F32(vertCount * 3);
+  const normals = new F32(vertCount * 3);
+  const indices = new U32(vertCount);
+  for (let t = 0; t < triCount; t++) {
+    const i0 = indicesArr[t * 3] * 3;
+    const i1Orig = indicesArr[t * 3 + 1] * 3;
+    const i2Orig = indicesArr[t * 3 + 2] * 3;
+    const ax = positionsArr[i0], ay = positionsArr[i0 + 1], az = positionsArr[i0 + 2];
+    const b1x = positionsArr[i1Orig], b1y = positionsArr[i1Orig + 1], b1z = positionsArr[i1Orig + 2];
+    const c1x = positionsArr[i2Orig], c1y = positionsArr[i2Orig + 1], c1z = positionsArr[i2Orig + 2];
+    const e1x = b1x - ax, e1y = b1y - ay, e1z = b1z - az;
+    const e2x = c1x - ax, e2y = c1y - ay, e2z = c1z - az;
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const len = Math.hypot(nx, ny, nz);
+    if (len > 0) {
+      nx /= len;
+      ny /= len;
+      nz /= len;
+    }
+    const v = t * 9;
+    positions[v] = ax;
+    positions[v + 1] = ay;
+    positions[v + 2] = az;
+    positions[v + 3] = c1x;
+    positions[v + 4] = c1y;
+    positions[v + 5] = c1z;
+    positions[v + 6] = b1x;
+    positions[v + 7] = b1y;
+    positions[v + 8] = b1z;
+    normals[v] = nx;
+    normals[v + 1] = ny;
+    normals[v + 2] = nz;
+    normals[v + 3] = nx;
+    normals[v + 4] = ny;
+    normals[v + 5] = nz;
+    normals[v + 6] = nx;
+    normals[v + 7] = ny;
+    normals[v + 8] = nz;
+    const idx = t * 3;
+    indices[idx] = idx;
+    indices[idx + 1] = idx + 1;
+    indices[idx + 2] = idx + 2;
+  }
+  let hash = 2166136261;
+  for (let i = 0; i < positions.length; i++) {
+    hash ^= Math.round(positions[i] * 1e5);
+    hash = Math.imul(hash, 16777619);
+  }
+  return { positions, normals, indices, positionsHash: hash };
+}
+const _tmpHalfExtents = { x: 1, y: 1, z: 1 };
+function getClosestPoint(plugin, position) {
+  _assertReady(plugin);
+  const res = plugin._navMeshQuery.findClosestPoint(position, { halfExtents: _tmpHalfExtents });
+  return { x: res.point.x, y: res.point.y, z: res.point.z };
+}
+function computePath(plugin, start, end) {
+  _assertReady(plugin);
+  const q = plugin._navMeshQuery;
+  const startSnap = q.findClosestPoint(start, { halfExtents: _tmpHalfExtents });
+  const endSnap = q.findClosestPoint(end, { halfExtents: _tmpHalfExtents });
+  const res = q.computePath(startSnap.point, endSnap.point);
+  if (!res.success) {
+    return [];
+  }
+  const out = [];
+  for (const p of res.path) {
+    out.push({ x: p.x, y: p.y, z: p.z });
+  }
+  return out;
+}
+function _assertReady(plugin) {
+  if (!plugin._navMesh || !plugin._navMeshQuery) {
+    throw new Error("Navmesh not ready. Call createNavMesh first.");
+  }
+}
+function createNavCrowd(plugin, maxAgents, maxAgentRadius) {
+  _assertReady(plugin);
+  const Crowd = plugin._recast.Crowd;
+  const crowd = new Crowd(plugin._navMesh, { maxAgents, maxAgentRadius });
+  return { _plugin: plugin, _crowd: crowd };
+}
+function addAgent(crowd, position, params) {
+  const agentParams = {
+    radius: params.radius,
+    height: params.height,
+    maxAcceleration: params.maxAcceleration,
+    maxSpeed: params.maxSpeed,
+    collisionQueryRange: params.collisionQueryRange,
+    pathOptimizationRange: params.pathOptimizationRange,
+    separationWeight: params.separationWeight,
+    updateFlags: params.updateFlags ?? 7,
+    obstacleAvoidanceType: params.obstacleAvoidanceType ?? 0,
+    queryFilterType: params.queryFilterType ?? 0,
+    userData: 0
+  };
+  const agent = crowd._crowd.addAgent({ x: position.x, y: position.y, z: position.z }, agentParams);
+  return agent.agentIndex;
+}
+function getAgentPosition(crowd, index) {
+  const p = crowd._crowd.getAgent(index)?.position();
+  return p ? { x: p.x, y: p.y, z: p.z } : { x: 0, y: 0, z: 0 };
+}
+function getAgentVelocity(crowd, index) {
+  const v = crowd._crowd.getAgent(index)?.velocity();
+  return v ? { x: v.x, y: v.y, z: v.z } : { x: 0, y: 0, z: 0 };
+}
+function agentGoto(crowd, index, destination) {
+  crowd._crowd.getAgent(index)?.requestMoveTarget(destination);
+}
+function updateNavCrowd(crowd, dt) {
+  crowd._crowd.update(dt);
+}
+function findRandomPointAroundCircle(plugin, position, radius) {
+  _assertReady(plugin);
+  const res = plugin._navMeshQuery.findRandomPointAroundCircle(position, radius, { halfExtents: _tmpHalfExtents });
+  return { x: res.randomPoint.x, y: res.randomPoint.y, z: res.randomPoint.z };
+}
+function findRandomPoint(plugin) {
+  _assertReady(plugin);
+  const res = plugin._navMeshQuery.findRandomPoint();
+  return { x: res.randomPoint.x, y: res.randomPoint.y, z: res.randomPoint.z };
+}
+function setNavigationRandomSeed(plugin, seed) {
+  plugin._recast.setRandomSeed(seed);
+}
+function getNavigationRandomSeed(plugin) {
+  return plugin._recast.getRandomSeed();
+}
+function raycast(plugin, start, end) {
+  _assertReady(plugin);
+  const q = plugin._navMeshQuery;
+  const nearest = q.findNearestPoly(start, { halfExtents: _tmpHalfExtents });
+  if (!nearest.success || nearest.nearestRef === 0) {
+    return { hit: false };
+  }
+  const r = q.raycast(nearest.nearestRef, start, end);
+  const t = r?.t ?? 0;
+  if (!(t > 0 && t < 1)) {
+    return { hit: false };
+  }
+  return {
+    hit: true,
+    hitPoint: {
+      x: start.x + (end.x - start.x) * t,
+      y: start.y + (end.y - start.y) * t,
+      z: start.z + (end.z - start.z) * t
+    }
+  };
+}
+function addBoxObstacle(plugin, position, halfExtents, angle) {
+  _assertTileCache(plugin);
+  const r = plugin._tileCache.addBoxObstacle(position, halfExtents, angle);
+  if (!r.success) {
+    return null;
+  }
+  _waitForFullTileCacheUpdate(plugin);
+  return { _obstacle: r.obstacle };
+}
+function addCylinderObstacle(plugin, position, radius, height) {
+  _assertTileCache(plugin);
+  const r = plugin._tileCache.addCylinderObstacle(position, radius, height);
+  if (!r.success) {
+    return null;
+  }
+  _waitForFullTileCacheUpdate(plugin);
+  return { _obstacle: r.obstacle };
+}
+function removeObstacle(plugin, obstacle) {
+  _assertTileCache(plugin);
+  plugin._tileCache.removeObstacle(obstacle._obstacle);
+  _waitForFullTileCacheUpdate(plugin);
+}
+function updateNavMeshObstacles(plugin) {
+  _assertTileCache(plugin);
+  _waitForFullTileCacheUpdate(plugin);
+}
+function _waitForFullTileCacheUpdate(plugin) {
+  let upToDate = false;
+  while (!upToDate) {
+    const r = plugin._tileCache.update(plugin._navMesh);
+    upToDate = r.upToDate;
+  }
+}
+function _assertTileCache(plugin) {
+  _assertReady(plugin);
+  if (!plugin._tileCache) {
+    throw new Error("Navmesh has no tile cache. Build with `maxObstacles > 0` to enable obstacles.");
+  }
+}
+
+export { addAgent, addBoxObstacle, addCylinderObstacle, agentGoto, computePath, createDebugNavMeshGeometry, createNavCrowd, createNavMesh, createNavMeshFromSources, createNavigationPluginAsync, disposeNavigationPlugin, findRandomPoint, findRandomPointAroundCircle, getAgentPosition, getAgentVelocity, getClosestPoint, getNavigationRandomSeed, raycast, removeObstacle, setNavigationRandomSeed, updateNavCrowd, updateNavMeshObstacles };
+//# sourceMappingURL=navigation.js.map

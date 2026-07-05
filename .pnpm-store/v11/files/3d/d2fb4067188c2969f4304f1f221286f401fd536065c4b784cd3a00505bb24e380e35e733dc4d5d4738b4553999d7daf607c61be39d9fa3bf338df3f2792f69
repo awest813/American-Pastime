@@ -1,0 +1,16 @@
+import { type PerformanceViewerCollector } from "@babylonjs/core/Misc/PerformanceViewer/performanceViewerCollector.js";
+import { type Observable } from "@babylonjs/core/Misc/observable.js";
+import { type FunctionComponent } from "react";
+import { type PerfLayoutSize, type VisibleRangeChangedObservableProps } from "./graphSupportingTypes";
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type Vector2 } from "@babylonjs/core/Maths/math.vector.js";
+type CanvasGraphProps = {
+    scene: Scene;
+    collector: PerformanceViewerCollector;
+    layoutObservable?: Observable<PerfLayoutSize>;
+    returnToPlayheadObservable?: Observable<void>;
+    onVisibleRangeChangedObservable?: Observable<VisibleRangeChangedObservableProps>;
+    initialGraphSize?: Vector2;
+};
+export declare const CanvasGraph: FunctionComponent<CanvasGraphProps>;
+export {};

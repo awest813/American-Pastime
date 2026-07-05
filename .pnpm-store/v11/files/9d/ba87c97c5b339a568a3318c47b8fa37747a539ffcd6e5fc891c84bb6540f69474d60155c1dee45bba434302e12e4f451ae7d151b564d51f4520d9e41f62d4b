@@ -1,0 +1,27 @@
+/** Pure barrel — re-exports only side-effect-free modules */
+export * from "./EXT_mesh_gpu_instancing.pure.js";
+export * from "./KHR_draco_mesh_compression.pure.js";
+export * from "./KHR_lights_punctual.pure.js";
+export * from "./EXT_lights_area.pure.js";
+export * from "./KHR_materials_anisotropy.pure.js";
+export * from "./KHR_materials_clearcoat.pure.js";
+export * from "./KHR_materials_coat.pure.js";
+export * from "./KHR_materials_diffuse_transmission.pure.js";
+export * from "./KHR_materials_dispersion.pure.js";
+export * from "./KHR_materials_emissive_strength.pure.js";
+export * from "./KHR_materials_ior.pure.js";
+export * from "./KHR_materials_iridescence.pure.js";
+export * from "./KHR_materials_sheen.pure.js";
+export * from "./KHR_materials_fuzz.pure.js";
+export * from "./KHR_materials_specular.pure.js";
+export * from "./KHR_materials_transmission.pure.js";
+export * from "./KHR_materials_unlit.pure.js";
+export * from "./KHR_materials_volume.pure.js";
+export * from "./KHR_materials_volume_scatter.pure.js";
+export * from "./KHR_materials_diffuse_roughness.pure.js";
+export * from "./KHR_materials_openpbr.pure.js";
+export * from "./KHR_texture_transform.pure.js";
+export * from "./KHR_texture_basisu.pure.js";
+export * from "./EXT_texture_webp.pure.js";
+export * from "./EXT_texture_avif.pure.js";
+//# sourceMappingURL=pure.js.map

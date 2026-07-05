@@ -1,0 +1,1329 @@
+import { AnisotropyProps } from '@babylonjs/lite';
+import { ClearCoatProps } from '@babylonjs/lite';
+import { EngineOptions } from '@babylonjs/lite';
+import { IridescenceProps } from '@babylonjs/lite';
+import { Mesh } from '@babylonjs/lite';
+import { NavCrowd } from '@babylonjs/lite';
+import { NavigationPlugin } from '@babylonjs/lite';
+import { ObstacleHandle } from '@babylonjs/lite';
+import { RenderCanvas } from '@babylonjs/lite';
+import { SceneNode } from '@babylonjs/lite';
+import { SheenProps } from '@babylonjs/lite';
+import { Texture2D } from '@babylonjs/lite';
+
+declare abstract class AbstractEngine {    protected readonly _canvas: RenderCanvas;
+    private readonly _options;
+    protected readonly _scenes: Scene[];
+    protected readonly _loopCallbacks: Array<() => void>;
+    protected _initialized: boolean;
+    private _started;    /**
+     * Babylon.js `engine.useReverseDepthBuffer`. Babylon Lite owns its depth
+     * configuration internally, so this is a settable no-op kept for API shape.
+     */
+    useReverseDepthBuffer: boolean;
+    /** Babylon.js `engine.onResizeObservable` — fires after `resize()` / `setSize()`. */
+    readonly onResizeObservable: Observable<AbstractEngine>;    constructor(canvas: RenderCanvas, options?: ({
+        antialias?: boolean;
+        adaptToDeviceRatio?: boolean;
+        useLargeWorldRendering?: boolean;
+    } & EngineOptions) | boolean);
+    /** Acquire the GPU device and build the Lite engine context. */
+    initAsync(): Promise<void>;
+    getRenderingCanvas(): RenderCanvas;
+    /**
+     * Babylon.js `engine.getDeltaTime()` — milliseconds elapsed since the previous
+     * frame. Updated from each scene's Lite before-render hook (which receives the
+     * frame delta); defaults to ~16ms before the first frame.
+     */
+    getDeltaTime(): number;
+    /**
+     * Babylon.js `engine.isNDCHalfZRange`. WebGPU's clip space uses a `[0, 1]`
+     * depth range, so this is always `true` under Babylon Lite.
+     */
+    get isNDCHalfZRange(): boolean;
+    /** Babylon.js `engine.isWebGPU` — Babylon Lite is WebGPU-only, so always `true`. */
+    get isWebGPU(): boolean;
+    /**
+     * Babylon.js `engine.getCaps()` — engine capability flags. Only the
+     * compressed-texture-format flags ported scenes branch on are derived (from the
+     * Lite WebGPU device's enabled features); the rest report Babylon Lite's fixed
+     * WebGPU baseline. A headless `NullEngine` has no device, so all flags are off.
+     */
+    getCaps(): Record<string, unknown>;
+    /** Babylon.js `engine.scenes` — every scene created against this engine. */
+    get scenes(): Scene[];
+    /** Babylon.js `engine.getRenderWidth()` — backing render-target width in pixels. */
+    getRenderWidth(): number;
+    /** Babylon.js `engine.getRenderHeight()` — backing render-target height in pixels. */
+    getRenderHeight(): number;
+    /** Babylon.js `engine.getScreenAspectRatio()` — render-target width / height. */
+    getScreenAspectRatio(): number;
+    /**
+     * Babylon.js `engine.getAspectRatio(camera?, useScreen?)`. Babylon Lite renders
+     * each scene through a single full-canvas viewport, so the camera viewport does
+     * not subdivide the surface — this is the screen aspect ratio.
+     */
+    getAspectRatio(_camera?: unknown, _useScreen?: boolean): number;
+    /** Babylon.js `engine.getFps()` — frames-per-second estimate from the last frame delta. */
+    getFps(): number;
+    /**
+     * Babylon.js `engine.getHardwareScalingLevel()`. Babylon Lite manages its own
+     * device-pixel-ratio scaling, so this returns the stored parity value.
+     */
+    getHardwareScalingLevel(): number;
+    /** Babylon.js `engine.setHardwareScalingLevel(level)` — stored for parity (Lite self-manages DPR). */
+    setHardwareScalingLevel(level: number): void;
+    /** Babylon.js `engine.getRenderingCanvasClientRect()` — the canvas client rect, or `null` for offscreen canvases. */
+    getRenderingCanvasClientRect(): {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    } | null;
+    /**
+     * Babylon.js `engine.clear(color?, backBuffer?, depth?, stencil?)`. Babylon
+     * Lite owns clearing through its render contexts (scenes / sprite renderers),
+     * so this records the requested clear colour (used by the scene-less sprite
+     * renderer path) and is otherwise a no-op.
+     */
+    clear(color?: {
+        r: number;
+        g: number;
+        b: number;
+        a: number;
+    }, _backBuffer?: boolean, _depth?: boolean, _stencil?: boolean): void;    runRenderLoop(callback: () => void): void;
+    stopRenderLoop(): void;
+    resize(): void;
+    setSize(width: number, height: number): void;
+    dispose(): void;
+    /** Babylon.js manual frame-pump entry point — unsupported (Lite's frame graph owns the frame). */
+    beginFrame(): never;
+    /** Babylon.js manual frame-pump exit point — unsupported (Lite's frame graph owns the frame). */
+    endFrame(): never;
+    private _start;
+    private _ensureInitialized;
+}
+
+/**
+ * Babylon.js `AbstractMesh` — a renderable transform node with a material,
+ * visibility, and shadow-receipt. Concrete meshes derive from this.
+ */
+declare class AbstractMesh extends TransformNode {    private _material;
+    private _visible;
+    constructor(name: string, lite: Mesh, scene?: Scene);
+    getClassName(): string;    get material(): CompatMaterial | null;
+    set material(value: CompatMaterial | null);
+    get isVisible(): boolean;
+    set isVisible(value: boolean);
+    get receiveShadows(): boolean;
+    set receiveShadows(value: boolean);
+    setEnabled(enabled: boolean): void;
+    /** Bounding info accessor — needs a public Lite bounds accessor that does not yet exist. */
+    getBoundingInfo(): never;
+    /**
+     * Babylon.js `mesh.getVerticesData(kind)` — read back the CPU geometry buffer
+     * for `position` / `normal` / `uv`. Babylon Lite retains these on the mesh
+     * (for picking + device-loss recovery); other kinds are not stored.
+     */
+    getVerticesData(kind: string): Float32Array | null;
+    /**
+     * Babylon.js `mesh.setVerticesData(kind, data)` — replace a vertex attribute.
+     * `position` / `normal` / `uv` / `color` / `tangent` re-upload the geometry in
+     * place; the last-set `color`/`tangent` buffers are retained so successive calls
+     * (e.g. set tangent then set color) keep both. Skinning/morph attributes
+     * (`matricesIndices`, etc.) are accepted but not applied (Babylon Lite drives
+     * skinning through its own loaded-skeleton path).
+     */
+    setVerticesData(kind: string, data: number[] | Float32Array, _updatable?: boolean): void;    private _lastColors;
+    /** Babylon.js `mesh.getTotalVertices()` — vertex count from the position buffer. */
+    getTotalVertices(): number;
+    /**
+     * Babylon.js `mesh.refreshBoundingInfo()` — Babylon Lite recomputes a mesh's
+     * bounds from its CPU geometry on demand (and on geometry upload), so this is a
+     * no-op that returns the mesh for chaining. The deformed-pick options
+     * (`applySkeleton` / `applyMorph`) are accepted for parity but not used.
+     */
+    refreshBoundingInfo(_options?: unknown): this;
+    /**
+     * Babylon.js `mesh.bakeCurrentTransformIntoVertices()` — fold the node's local
+     * transform (position / rotation / scaling) into the CPU geometry and reset the
+     * transform to identity. Babylon Lite has no built-in mesh-transform bake, so we
+     * transform the retained CPU positions (full matrix) and normals (rotation only,
+     * renormalized), re-upload via `resizeMeshGeometry`, then clear the transform.
+     */
+    bakeCurrentTransformIntoVertices(): this;
+    dispose(): void;
+}
+
+declare abstract class AbstractScene {    /**
+     * Babylon.js `scene.meshes`. Babylon Lite does not expose a public scene-mesh
+     * registry, so this tracks the meshes the compat layer creates against a scene
+     * which need lookup (currently Gaussian-Splatting meshes surfaced through the
+     * loader). Other primitives register with the Lite scene directly.
+     */
+    get meshes(): TransformNode[];
+    /** Babylon.js `scene.cameras` — every camera constructed against this scene. */
+    get cameras(): Camera[];
+    /** Babylon.js `scene.lights` — every light constructed against this scene. */
+    get lights(): Light[];
+    /** Babylon.js `scene.materials` — every material constructed against this scene. */
+    get materials(): Material[];    /** Babylon.js `scene.getCameraByName(name)` — first camera with a matching name, else `null`. */
+    getCameraByName(name: string): Camera | null;
+    /** Babylon.js `scene.getCameraById(id)` — first camera whose `id` matches, else `null`. */
+    getCameraById(id: string): Camera | null;
+    /** Babylon.js `scene.getLightByName(name)` — first light with a matching name, else `null`. */
+    getLightByName(name: string): Light | null;
+    /** Babylon.js `scene.getLightById(id)` — first light whose `id` matches, else `null`. */
+    getLightById(id: string): Light | null;
+    /** Babylon.js `scene.getMaterialByName(name)` — first material with a matching name, else `null`. */
+    getMaterialByName(name: string): Material | null;
+    /** Babylon.js `scene.getMaterialById(id)` — first material whose `id` matches, else `null`. */
+    getMaterialById(id: string): Material | null;
+    /**
+     * Babylon.js `scene.getMeshByName(name)`. Babylon Lite has no public scene-mesh
+     * registry, so this searches the compat meshes tracked through `scene.meshes`
+     * (currently meshes the loader surfaces, e.g. Gaussian-Splatting). Returns `null`
+     * when not found, matching Babylon.js.
+     */
+    getMeshByName(name: string): TransformNode | null;
+    /** Babylon.js `scene.getMeshById(id)` — first tracked mesh whose `id` matches, else `null`. */
+    getMeshById(id: string): TransformNode | null;
+    /** Babylon.js legacy `scene.getMeshByID(id)` — alias of {@link getMeshById}. */
+    getMeshByID(id: string): TransformNode | null;
+    /** Babylon.js `scene.getNodeByName(name)` — searches tracked meshes, cameras, and lights. */
+    getNodeByName(name: string): Node_2 | null;
+    /** Babylon.js `scene.getNodeById(id)` — searches tracked meshes, cameras, and lights by `id`. */
+    getNodeById(id: string): Node_2 | null;
+}
+
+/** Babylon.js `IAgentParameters` subset accepted by `RecastJSCrowd.addAgent`. */
+declare interface AgentParameters {
+    radius: number;
+    height: number;
+    maxAcceleration: number;
+    maxSpeed: number;
+    collisionQueryRange: number;
+    pathOptimizationRange: number;
+    separationWeight: number;
+    reachRadius?: number;
+}
+
+declare interface AgentTransform {
+    position: {
+        set(x: number, y: number, z: number): unknown;
+    };
+}
+
+/**
+ * Babylon.js `Animatable` — a running animation on a target, driven per-frame on
+ * the CPU by evaluating each `Animation`'s keyframes and writing the result onto
+ * the target's (dotted) property path.
+ */
+declare class Animatable_2 {
+    private readonly _target;
+    private readonly _animations;
+    private readonly _from;
+    private readonly _to;
+    private readonly _loop;
+    masterFrame: number;
+    speedRatio: number;
+    private _paused;
+    private _stopped;
+    constructor(_target: unknown, _animations: Animation_2[], _from: number, _to: number, _loop: boolean, speedRatio: number);    goToFrame(frame: number): void;
+    pause(): void;
+    restart(): void;
+    stop(): void;
+    get animationStarted(): boolean;
+    private _apply;
+}
+
+declare class Animation_2 {
+    name: string;
+    targetProperty: string;
+    framePerSecond: number;
+    dataType: number;
+    loopMode: number;
+    static readonly ANIMATIONTYPE_FLOAT: 0;
+    static readonly ANIMATIONTYPE_VECTOR3: 1;
+    static readonly ANIMATIONTYPE_QUATERNION: 2;
+    static readonly ANIMATIONTYPE_MATRIX: 3;
+    static readonly ANIMATIONTYPE_COLOR3: 4;
+    static readonly ANIMATIONLOOPMODE_RELATIVE: 0;
+    static readonly ANIMATIONLOOPMODE_CYCLE: 1;
+    static readonly ANIMATIONLOOPMODE_CONSTANT: 2;
+    private _keys;
+    constructor(name: string, targetProperty: string, framePerSecond: number, dataType?: number, loopMode?: number);
+    setKeys(keys: IAnimationKey[]): void;
+    getKeys(): IAnimationKey[];
+    getHighestFrame(): number;
+    /** Linearly evaluate the animated value at `frame` (clamped to the key range). */
+    evaluate(frame: number): number | number[];
+    /** Babylon.js helper: build a one-shot float animation between two values. */
+    static CreateAndStartAnimation(name: string, _target: unknown, targetProperty: string, framePerSecond: number, totalFrame: number, from: number, to: number): Animation_2;
+}
+
+/**
+ * Babylon.js `AnimationGroup` — a named collection of targeted animations with
+ * playback state. This is the **single** `AnimationGroup` type, matching Babylon.js;
+ * there is no separate "loaded" subtype. Two construction paths map onto Lite:
+ *
+ *  - **Structural** (`new AnimationGroup(name, scene?)`): a CPU-side collection
+ *    built by ported code via `addTargetedAnimation`. When `start`ed it registers
+ *    with the scene and is stepped each frame on the CPU; multiple groups that
+ *    animate the same property are **weight-blended** (Babylon.js manual weighted
+ *    / cross-fade blending) before the result is written to the target.
+ *  - **Loaded** (`AnimationGroup._fromLite`, used to populate `scene.animationGroups`
+ *    from glTF / `.babylon` clips): a thin wrapper over a Babylon Lite loaded group.
+ *    The playback methods (`goToFrame`/`play`/`pause`/`stop`/`reset`) and the
+ *    `from`/`to`/`isPlaying`/`speedRatio`/`loopAnimation`/`weight`/`animatables`
+ *    accessors delegate to the Lite group so ported scenes can freeze/seek a
+ *    loaded animation at a deterministic frame.
+ */
+declare class AnimationGroup {
+    name: string;
+    readonly targetedAnimations: Array<{
+        animation: Animation_2;
+        target: unknown;
+    }>;
+    onAnimationGroupEndObservable?: () => void;    private _from;
+    private _to;
+    private _state;
+    private _speedRatio;
+    private _loopAnimation;    constructor(name: string, scene?: unknown);    /**
+     * Babylon.js `AnimationGroup.MakeAnimationAdditive(group)` — convert a loaded
+     * group into an additive layer (reference frame 0) and enable the scene's
+     * weighted-blend manager. Returns the same group (Babylon Lite mutates in
+     * place rather than cloning).
+     */
+    static MakeAnimationAdditive(group: AnimationGroup): AnimationGroup;
+    /** First frame of the clip. Always 0 for loaded clips. */
+    get from(): number;
+    /** Last frame of the clip. */
+    get to(): number;
+    get isPlaying(): boolean;
+    get state(): AnimationGroupState;
+    get speedRatio(): number;
+    set speedRatio(value: number);
+    get loopAnimation(): boolean;
+    set loopAnimation(value: boolean);
+    get weight(): number;
+    set weight(value: number);
+    /**
+     * Babylon.js `AnimationGroup.animatables`. For loaded groups Babylon Lite drives
+     * the whole group as one unit, so this surfaces a single animatable whose
+     * `masterFrame` reflects the group's current frame. Structural groups built
+     * without a running scene report no animatables.
+     */
+    get animatables(): Array<{
+        masterFrame: number;
+    }>;
+    addTargetedAnimation(animation: Animation_2, target: unknown): {
+        animation: Animation_2;
+        target: unknown;
+    };
+    /**
+     * Babylon.js `start(loop?, speedRatio?, from?, to?)`. On the structural path this
+     * registers the group with its host scene, captures the targets' rest-pose
+     * baselines, and begins CPU stepping + weight blending. On the loaded path it
+     * seeks to `from` and plays — except a zero-length range (`from === to`) is a
+     * **held single-frame pose** (e.g. an additive pose layer), which must hold
+     * rather than play: Babylon Lite's group advance ignores the BJS play range and
+     * would otherwise loop the (often ~2-frame) pose clip every frame, flickering.
+     */
+    start(loop?: boolean, speedRatio?: number, from?: number, to?: number): this;
+    /** Babylon.js `goToFrame(frame)` — seek to a frame (loaded groups seek + hold via Lite; structural groups re-blend). */
+    goToFrame(frame: number): this;
+    play(loop?: boolean): this;
+    pause(): this;
+    stop(): this;
+    reset(): this;}
+
+declare type AnimationGroupState = "init" | "playing" | "paused" | "stopped";
+
+declare abstract class BaseTexture {
+    name: string;    getClassName(): string;
+    abstract whenReadyAsync(): Promise<void>;
+    dispose(): void;
+}
+
+/** Babylon.js `Camera` — base class for all cameras (derives from `Node`). */
+declare abstract class Camera extends Node_2 {    private _detach;
+    protected constructor(name: string, scene?: Scene);
+    getClassName(): string;
+    get fov(): number;
+    set fov(value: number);
+    get minZ(): number;
+    set minZ(value: number);
+    get maxZ(): number;
+    set maxZ(value: number);
+    /** World-space position of the camera. */
+    get globalPosition(): Vector3;
+    /** Babylon.js `camera.getViewMatrix()` — the camera's view matrix. */
+    getViewMatrix(): Matrix;
+    /** Babylon.js `camera.getProjectionMatrix()` — the camera's projection matrix. */
+    getProjectionMatrix(): Matrix;
+    private _aspectRatio;
+    abstract attachControl(canvas: HTMLCanvasElement, noPreventDefault?: boolean): void;
+    detachControl(): void;    protected _makeActive(scene: Scene | undefined): void;
+}
+
+/**
+ * Babylon.js-compatible colour classes (`Color3`, `Color4`).
+ *
+ * Mutable, backed by `r`/`g`/`b`/`a` fields. `asArray()` yields the tuple shape
+ * (`[r, g, b]` / `[r, g, b, a]`) consumed by the Babylon Lite material and light
+ * APIs.
+ */
+declare class Color3 {
+    r: number;
+    g: number;
+    b: number;
+    constructor(r?: number, g?: number, b?: number);
+    set(r: number, g: number, b: number): this;
+    copyFrom(source: Color3): this;
+    scale(scale: number): Color3;
+    scaleInPlace(scale: number): this;
+    multiply(other: Color3): Color3;
+    add(other: Color3): Color3;
+    clone(): Color3;
+    equals(other: Color3): boolean;
+    asArray(): [number, number, number];
+    toColor4(alpha?: number): Color4;
+    toHexString(): string;
+    static Black(): Color3;
+    static White(): Color3;
+    static Red(): Color3;
+    static Green(): Color3;
+    static Blue(): Color3;
+    static FromArray(array: ArrayLike<number>, offset?: number): Color3;
+    static FromInts(r: number, g: number, b: number): Color3;
+    static FromHexString(hex: string): Color3;
+    static Lerp(start: Color3, end: Color3, amount: number): Color3;
+}
+
+declare class Color4 {
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+    constructor(r?: number, g?: number, b?: number, a?: number);
+    set(r: number, g: number, b: number, a: number): this;
+    copyFrom(source: Color4): this;
+    scale(scale: number): Color4;
+    add(other: Color4): Color4;
+    clone(): Color4;
+    equals(other: Color4): boolean;
+    asArray(): [number, number, number, number];
+    static FromArray(array: ArrayLike<number>, offset?: number): Color4;
+    static FromInts(r: number, g: number, b: number, a: number): Color4;
+}
+
+declare type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial | GridMaterial;
+
+/**
+ * Babylon.js `@babylonjs/addons/navigation` `CreateNavigationPluginAsync`. The
+ * injected Recast `instance` (if any) is ignored — Babylon Lite loads its own
+ * Recast wasm from `/recast-navigation.wasm`.
+ */
+export declare function CreateNavigationPluginAsync(_options?: {
+    version?: string;
+    instance?: unknown;
+}): Promise<RecastNavigationJSPluginV2>;
+
+/**
+ * Babylon.js `CubeTexture` — environment/skybox cube map. Babylon Lite loads
+ * environments through `loadEnvironment` (IBL + skybox registered on the scene)
+ * rather than as a standalone GPU texture object. This compat `CubeTexture`
+ * therefore acts as a lightweight handle that records the environment URL; the
+ * actual GPU work happens when it is assigned to `scene.environmentTexture` and
+ * the engine starts (see `Scene` env handling).
+ */
+declare class CubeTexture {
+    /** Source URL of the (prefiltered) environment. */
+    readonly url: string;
+    /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
+    coordinatesMode: number;
+    name: string;
+    gammaSpace: boolean;
+    level: number;
+    /** Fires when the cube map is "ready" (resolved on a microtask in this compat layer). */
+    readonly onLoadObservable: Observable<CubeTexture>;
+    private _ready;
+    constructor(url: string, _scene?: unknown, _extensions?: unknown, _noMipmap?: boolean, _files?: unknown, onLoad?: (() => void) | null, _onError?: unknown, _format?: unknown, _prefiltered?: boolean);
+    /** Babylon.js `BaseTexture.isReady()`. */
+    isReady(): boolean;
+    /** Babylon.js `CubeTexture.CreateFromPrefilteredData(url, scene)`. */
+    static CreateFromPrefilteredData(url: string, scene?: unknown): CubeTexture;
+    dispose(): void;
+}
+
+declare interface DefaultEnvironmentOptions {
+    createSkybox?: boolean;
+    createGround?: boolean;
+    skyboxSize?: number;
+    /** Babylon.js EnvironmentHelper: set up tone mapping / exposure / contrast (default true). */
+    setupImageProcessing?: boolean;
+    /** Babylon.js EnvironmentHelper camera exposure (default 0.8). */
+    cameraExposure?: number;
+    /** Babylon.js EnvironmentHelper camera contrast (default 1.2). */
+    cameraContrast?: number;
+    /** Babylon.js EnvironmentHelper tone-mapping toggle (default true). */
+    toneMappingEnabled?: boolean;}
+
+declare class GridMaterial {
+    name: string;
+    /** Background color between the lines (Babylon.js default black). */
+    mainColor: Color3;
+    /** Color of the grid lines (Babylon.js default teal). */
+    lineColor: Color3;
+    /** Spacing of the grid in object-space units. */
+    gridRatio: number;
+    /** Object-space offset added before computing the grid. */
+    gridOffset: Vector3;
+    /** Every Nth line is a major line. */
+    majorUnitFrequency: number;
+    /** Visibility of the minor (non-major) lines, `0..1`. */
+    minorUnitVisibility: number;
+    /** Opacity of the grid outside the lines; `<1` enables the transparent path. */
+    opacity: number;
+    /** Cosine-based antialiasing of the lines. */
+    antialias: boolean;
+    /** Combine axes with `max` instead of additive sum. */
+    useMaxLine: boolean;
+    /**
+     * Babylon.js `@babylonjs/materials` 9.x `linesOnly` — show only the lines with
+     * transparency between them. Babylon Lite expresses this via the opacity (`<1`)
+     * transparent path, so enabling it forces that path.
+     */
+    linesOnly: boolean;
+    /** Back-face culling toggle. */
+    backFaceCulling: boolean;
+    /** Babylon.js `Material.transparencyMode` (accepted for parity). */
+    transparencyMode: number | null;
+    /** Wireframe toggle (not honoured by the grid material). */
+    wireframe: boolean;    constructor(name: string, _scene?: Scene);
+    getClassName(): string;    dispose(): void;
+}
+
+declare interface IAnimationKey {
+    frame: number;
+    value: number | number[];
+    /** Babylon.js per-key interpolation hint (`AnimationKeyInterpolation`). */
+    interpolation?: number;
+}
+
+/** Babylon.js `Light` — base class for all lights (derives from `Node`). */
+declare abstract class Light extends Node_2 {    protected constructor(name: string, scene?: Scene);
+    getClassName(): string;
+    abstract get intensity(): number;
+    abstract set intensity(value: number);
+    /** Detach this light's shadow generator (compat for `light.shadowEnabled = false`). */
+    set shadowEnabled(enabled: boolean);
+    dispose(): void;
+}
+
+/** Babylon.js `Material` — base class for all materials. */
+declare abstract class Material {
+    name: string;
+    /** Common transparency mode flag (Babylon.js `Material.transparencyMode`). */
+    transparencyMode: number | null;
+    /** Back-face culling toggle (Babylon.js `Material.backFaceCulling`). */
+    private _backFaceCulling;
+    get backFaceCulling(): boolean;
+    set backFaceCulling(value: boolean);    /** Wireframe rendering toggle (not honoured by all Lite materials). */
+    wireframe: boolean;    protected constructor(name: string, scene?: Scene);
+    getClassName(): string;
+    protected _markDirty(): void;    dispose(): void;
+}
+
+declare class Matrix {
+    readonly m: Float32Array;
+    constructor();
+    set(index: number, value: number): this;
+    copyFrom(source: Matrix): this;
+    clone(): Matrix;
+    asArray(): Float32Array;
+    toArray(): number[];
+    /** Babylon.js `Matrix.copyToArray` — copy the 16 elements into `array` at `offset`. */
+    copyToArray(array: Float32Array | number[], offset?: number): this;
+    equals(other: Matrix): boolean;
+    multiply(other: Matrix): Matrix;
+    multiplyToRef(other: Matrix, result: Matrix): Matrix;
+    transpose(): Matrix;
+    determinant(): number;
+    invert(): Matrix;
+    invertToRef(result: Matrix): Matrix;
+    getTranslation(): Vector3;
+    /**
+     * Babylon.js `Matrix.decompose(scale?, rotation?, translation?)` — split this
+     * TRS matrix into its scale, rotation (quaternion), and translation parts,
+     * writing into any provided out-params. Returns `false` (matching BJS) when a
+     * scale axis is zero. The rotation extraction is backed by Lite's
+     * `quatFromRotationMatrix` (via `Quaternion.FromRotationMatrixToRef`); the
+     * negative-determinant `scale.y` flip matches Babylon.js exactly.
+     */
+    decompose(scale?: Vector3, rotation?: Quaternion, translation?: Vector3): boolean;
+    static FromValues(m0: number, m1: number, m2: number, m3: number, m4: number, m5: number, m6: number, m7: number, m8: number, m9: number, m10: number, m11: number, m12: number, m13: number, m14: number, m15: number): Matrix;
+    static FromArray(array: ArrayLike<number>, offset?: number): Matrix;
+    static Identity(): Matrix;
+    static Zero(): Matrix;
+    static Translation(x: number, y: number, z: number): Matrix;
+    static Scaling(x: number, y: number, z: number): Matrix;
+    static RotationX(angle: number): Matrix;
+    static RotationY(angle: number): Matrix;
+    static RotationZ(angle: number): Matrix;
+    /** Babylon.js `Matrix.LookAtLH(eye, target, up)` — left-handed view matrix. */
+    static LookAtLH(eye: Vector3, target: Vector3, up: Vector3): Matrix;
+    /** Babylon.js `Matrix.OrthoOffCenterLH(left, right, bottom, top, znear, zfar, halfZRange?)` — LH ortho projection. */
+    static OrthoOffCenterLH(left: number, right: number, bottom: number, top: number, znear: number, zfar: number, _halfZRange?: boolean): Matrix;
+    /**
+     * Babylon.js `Matrix.Compose(scale, rotation, translation)` — build a TRS matrix
+     * from a scale vector, a rotation quaternion, and a translation vector (row-vector
+     * convention, translation in elements 12/13/14).
+     */
+    static Compose(scale: Vector3, rotation: {
+        x: number;
+        y: number;
+        z: number;
+        w: number;
+    }, translation: Vector3): Matrix;
+    /** Babylon.js `Matrix.markAsUpdated()` — Lite has no per-matrix dirty flag; no-op for parity. */
+    markAsUpdated(): this;
+}
+
+/** Babylon.js `Mesh` — a concrete renderable mesh with geometry. */
+declare class Mesh_2 extends AbstractMesh {
+    constructor(name: string, sceneOrLite?: Scene | Mesh, scene?: Scene);
+    getClassName(): string;
+    private _morphTargetManager;
+    /**
+     * Babylon.js `mesh.morphTargetManager`. Babylon Lite builds morph GPU data via
+     * `createMorphTargets` and stores it on the Lite mesh; the compat manager is
+     * registered with the scene so the engine builds it at start (once the base
+     * CPU geometry exists) and assigns it onto the Lite mesh before registration.
+     */
+    get morphTargetManager(): MorphTargetManager | null;
+    set morphTargetManager(value: MorphTargetManager | null);
+    /** Legacy `Mesh.CreateSphere(name, segments, diameter, scene)`. */
+    static CreateSphere(name: string, segments: number, diameter: number, scene: Scene): Mesh_2;
+    /** Legacy `Mesh.CreateBox(name, size, scene)`. */
+    static CreateBox(name: string, size: number, scene: Scene): Mesh_2;
+    /** Legacy `Mesh.CreateGround(name, width, height, subdivisions, scene)`. */
+    static CreateGround(name: string, width: number, height: number, subdivisions: number, scene: Scene): Mesh_2;
+    /** Legacy `Mesh.CreatePlane(name, size, scene)`. */
+    static CreatePlane(name: string, size: number, scene: Scene): Mesh_2;
+    /** Legacy `Mesh.CreateCylinder(name, height, diameterTop, diameterBottom, tessellation, _subdivisions, scene)`. */
+    static CreateCylinder(name: string, height: number, diameterTop: number, diameterBottom: number, tessellation: number, _subdivisions: number, scene: Scene): Mesh_2;
+    /** Legacy `Mesh.CreateTorus(name, diameter, thickness, tessellation, scene)`. */
+    static CreateTorus(name: string, diameter: number, thickness: number, tessellation: number, scene: Scene): Mesh_2;
+    /** Hardware-instanced copy — unsupported. Use native thin instances instead. */
+    createInstance(): never;
+    /**
+     * Babylon.js `mesh.thinInstanceSetBuffer(kind, buffer, stride)`. Maps the
+     * `"matrix"` and `"color"` instance buffers onto Babylon Lite's thin-instance
+     * API. Applied immediately to the Lite mesh (before the scene builds).
+     */
+    thinInstanceSetBuffer(kind: string, buffer: Float32Array | null, _stride?: number): void;
+    /** Deep mesh clone — not yet wrapped. */
+    clone(): never;
+    /** Level-of-detail — unsupported (no LOD system in Babylon Lite). */
+    addLODLevel(): never;
+}
+
+/** Babylon.js `MorphTarget` — a single named morph influence with absolute target geometry. */
+declare class MorphTarget {
+    name: string;    private _influence;
+    constructor(name: string, influence?: number, _scene?: Scene);
+    get influence(): number;
+    set influence(value: number);
+    /** Babylon.js `MorphTarget.setPositions(data)` — absolute target positions. */
+    setPositions(data: Float32Array | number[] | null): void;
+    /** Babylon.js `MorphTarget.getPositions()`. */
+    getPositions(): Float32Array | null;
+    /** Babylon.js `MorphTarget.setNormals(data)` — absolute target normals. */
+    setNormals(data: Float32Array | number[] | null): void;
+    /** Babylon.js `MorphTarget.getNormals()`. */
+    getNormals(): Float32Array | null;
+}
+
+/** Babylon.js `MorphTargetManager` — owns a mesh's morph targets (Babylon Lite supports up to 4). */
+declare class MorphTargetManager {    private readonly _targets;
+    constructor(_scene?: Scene);
+    get numTargets(): number;
+    getTarget(index: number): MorphTarget;
+    /** Babylon.js `MorphTargetManager.addTarget(target)`. */
+    addTarget(target: MorphTarget): void;}
+
+/**
+ * Result of {@link RecastNavigationJSPluginV2.createNavMesh}. Babylon.js's
+ * tile-cache navmesh build returns `{ navMesh, tileCache }`; here both reference
+ * the plugin so {@link WaitForFullTileCacheUpdate} can reach it.
+ */
+declare interface NavMeshResult {
+    navMesh: RecastNavigationJSPluginV2;
+    tileCache: RecastNavigationJSPluginV2;
+}
+
+declare abstract class Node_2 {
+    name: string;
+    /** String id. Defaults to the name (Babylon.js parity). */
+    id: string;
+    /** Process-unique numeric id, assigned at construction. */
+    readonly uniqueId: number;
+    /** Free-form user data slot (Babylon.js `Node.metadata`). */
+    metadata: unknown;    protected constructor(name: string, scene?: Scene);
+    /** The runtime class name (overridden by each subclass). */
+    getClassName(): string;
+    /** The scene this node belongs to, if any. */
+    getScene(): Scene | undefined;
+    /** The engine backing this node's scene, if any. */
+    getEngine(): WebGPUEngine | undefined;
+    get parent(): Node_2 | null;
+    set parent(value: Node_2 | null);    /**
+     * Babylon.js `node.getDescendants(directDescendantsOnly?, predicate?)` — the
+     * nodes parented (directly or transitively) under this one, optionally filtered.
+     */
+    getDescendants(directDescendantsOnly?: boolean, predicate?: (node: Node_2) => boolean): Node_2[];
+    /**
+     * Babylon.js `node.getChildren(predicate?, directDescendantsOnly?)` — descendant
+     * nodes (direct children by default), optionally filtered by a predicate.
+     */
+    getChildren(predicate?: (node: Node_2) => boolean, directDescendantsOnly?: boolean): Node_2[];
+    /**
+     * Babylon.js `node.getChildMeshes(directDescendantsOnly?, predicate?)` — the
+     * descendant nodes that are meshes (all descendants by default).
+     */
+    getChildMeshes(directDescendantsOnly?: boolean, predicate?: (node: Node_2) => boolean): Node_2[];
+    isEnabled(): boolean;
+    setEnabled(value: boolean): void;
+    isDisposed(): boolean;
+    dispose(): void;}
+
+declare class NodeMaterial {
+    name: string;
+    backFaceCulling: boolean;    private readonly _json;
+    private readonly _textureOverrides;
+    constructor(name: string, _scene: Scene, json?: object | string);
+    getClassName(): string;
+    /** Babylon.js `getBlockByName(name)` — returns a proxy that captures texture overrides. */
+    getBlockByName(name: string): NodeMaterialBlockProxy;    /** Babylon.js `NodeMaterial.build()` — Lite builds during parse, so this is a no-op. */
+    build(_verbose?: boolean): void;    dispose(): void;    /**
+     * Babylon.js `NodeMaterial.Parse(source, scene, rootUrl?)` — parse an NME graph
+     * from inline JSON. Returns synchronously; the actual GPU compile runs async and
+     * is driven by the engine (after shadow generators are built) before the scene
+     * builds, so NME shadow-receiver blocks can sample the scene's shadow generators.
+     */
+    static Parse(source: object | string, scene: Scene, _rootUrl?: string): NodeMaterial;
+}
+
+/** A thin proxy for a Babylon.js NME block, capturing texture assignments. */
+declare class NodeMaterialBlockProxy {
+    private readonly _owner;
+    private readonly _name;
+    constructor(_owner: NodeMaterial, _name: string);
+    set texture(value: TextureLike | null);
+    get texture(): TextureLike | null;
+}
+
+declare class Observable<T> {
+    private _observers;
+    add(callback: ObserverCallback<T>): ObserverCallback<T>;
+    addOnce(callback: ObserverCallback<T>): ObserverCallback<T>;
+    remove(callback: ObserverCallback<T> | null | undefined): boolean;
+    removeCallback(callback: ObserverCallback<T>): boolean;
+    notifyObservers(eventData?: T): void;
+    hasObservers(): boolean;
+    clear(): void;
+}
+
+/**
+ * Minimal Babylon.js-compatible `Observable`.
+ *
+ * Supports the common surface used by ported scenes: `add`, `addOnce`, `remove`,
+ * `removeCallback`, `notifyObservers`, `hasObservers`, and `clear`. This is pure
+ * JS with no Babylon Lite dependency and is fully unit-testable.
+ */
+declare type ObserverCallback<T> = (eventData: T) => void;
+
+/** Babylon.js `PBRAnisotropicConfiguration` — the `pbr.anisotropy` sub-object over Lite `AnisotropyProps`. */
+declare class PBRAnisotropicConfiguration {
+    private readonly _props;
+    private readonly _markDirty;
+    constructor(_props: AnisotropyProps, _markDirty: () => void);
+    get isEnabled(): boolean;
+    set isEnabled(value: boolean);
+    get intensity(): number;
+    set intensity(value: number);
+    get direction(): {
+        x: number;
+        y: number;
+    };
+    set direction(value: {
+        x: number;
+        y: number;
+    });
+}
+
+/**
+ * Babylon.js `PBRClearCoatConfiguration` — the `pbr.clearCoat` sub-object.
+ * Proxies the common clearcoat fields onto a Babylon Lite `ClearCoatProps`.
+ */
+declare class PBRClearCoatConfiguration {
+    private readonly _props;
+    private readonly _markDirty;
+    constructor(_props: ClearCoatProps, _markDirty: () => void);
+    get isEnabled(): boolean;
+    set isEnabled(value: boolean);
+    get intensity(): number;
+    set intensity(value: number);
+    get roughness(): number;
+    set roughness(value: number);
+    get indexOfRefraction(): number;
+    set indexOfRefraction(value: number);
+}
+
+/** Babylon.js `PBRIridescenceConfiguration` — the `pbr.iridescence` sub-object over Lite `IridescenceProps`. */
+declare class PBRIridescenceConfiguration {
+    private readonly _props;
+    private readonly _markDirty;
+    constructor(_props: IridescenceProps, _markDirty: () => void);
+    get isEnabled(): boolean;
+    set isEnabled(value: boolean);
+    get intensity(): number;
+    set intensity(value: number);
+    get indexOfRefraction(): number;
+    set indexOfRefraction(value: number);
+    get minimumThickness(): number;
+    set minimumThickness(value: number);
+    get maximumThickness(): number;
+    set maximumThickness(value: number);
+}
+
+declare class PBRMaterial extends PushMaterial {    constructor(name: string, scene?: Scene);
+    getClassName(): string;
+    get albedoColor(): Color3;
+    set albedoColor(value: Color3);
+    /**
+     * Babylon.js `pbr.albedoTexture` (glTF base-color map). The texture loads
+     * asynchronously, so the resolved Lite handle (+ sRGB flag) is bound in
+     * {@link _ensureRenderable} at engine start rather than here.
+     */
+    get albedoTexture(): BaseTexture | null;
+    set albedoTexture(texture: BaseTexture | null);
+    private _albedoTexture;
+    get metallic(): number;
+    set metallic(value: number);
+    get roughness(): number;
+    set roughness(value: number);
+    get emissiveColor(): Color3;
+    set emissiveColor(value: Color3);
+    /**
+     * Babylon.js `pbr.usePhysicalLightFalloff`. When false, point/spot lights use
+     * Standard-style linear range falloff instead of physical inverse-square.
+     * Default true (matches Babylon.js PBRMaterial).
+     */
+    get usePhysicalLightFalloff(): boolean;
+    set usePhysicalLightFalloff(value: boolean);
+    get alpha(): number;
+    set alpha(value: number);
+    /**
+     * Babylon.js `material.forceIrradianceInFragment`. Babylon Lite computes
+     * irradiance in the fragment stage already, so this is accepted for parity.
+     */
+    forceIrradianceInFragment: boolean;
+    protected _applyBackFaceCulling(value: boolean): void;
+    /**
+     * Babylon.js `pbr.clearCoat` sub-configuration. Lazily allocates the Lite
+     * `clearCoat` props on first access and proxies the common fields
+     * (`isEnabled`, `intensity`, `roughness`, `indexOfRefraction`) onto them.
+     */
+    get clearCoat(): PBRClearCoatConfiguration;
+    private _clearCoat?;
+    /** Babylon.js `pbr.sheen` sub-configuration (Lite `SheenProps`). */
+    get sheen(): PBRSheenConfiguration;
+    private _sheen?;
+    /** Babylon.js `pbr.anisotropy` sub-configuration (Lite `AnisotropyProps`). */
+    get anisotropy(): PBRAnisotropicConfiguration;
+    private _anisotropy?;
+    /** Babylon.js `pbr.iridescence` sub-configuration (Lite `IridescenceProps`). */
+    get iridescence(): PBRIridescenceConfiguration;
+    private _iridescence?;
+    /**
+     * Babylon.js `material.environmentTexture` / `reflectionTexture`. Babylon Lite
+     * applies image-based lighting scene-wide rather than per-material, so a cube
+     * environment assigned to a material is routed to the owning scene's
+     * environment (the dominant single-IBL case Babylon.js scenes use).
+     */
+    get environmentTexture(): CubeTexture | null;
+    set environmentTexture(value: CubeTexture | null);
+    get reflectionTexture(): CubeTexture | null;
+    set reflectionTexture(value: CubeTexture | null);}
+
+/** Babylon.js `PBRSheenConfiguration` — the `pbr.sheen` sub-object over Lite `SheenProps`. */
+declare class PBRSheenConfiguration {
+    private readonly _props;
+    private readonly _markDirty;
+    constructor(_props: SheenProps, _markDirty: () => void);
+    get isEnabled(): boolean;
+    set isEnabled(value: boolean);
+    get intensity(): number;
+    set intensity(value: number);
+    get roughness(): number;
+    set roughness(value: number);
+    get color(): Color3;
+    set color(value: Color3);
+    /** Babylon.js `sheen.texture`. Binds the Lite handle if the texture has resolved. */
+    set texture(value: {
+        _lite?: Texture2D;
+    } | null);
+}
+
+declare class Plane {
+    /** Normal x/y/z and signed distance `d` from the origin (`normal · p + d = 0`). */
+    normal: Vector3;
+    d: number;
+    constructor(a: number, b: number, c: number, d: number);
+    asArray(): [number, number, number, number];
+    clone(): Plane;
+    normalize(): this;
+    /** Signed distance from `point` to this plane. */
+    signedDistanceTo(point: Vector3): number;
+    dotCoordinate(point: Vector3): number;
+    static FromArray(array: ArrayLike<number>): Plane;
+    static FromPositionAndNormal(origin: Vector3, normal: Vector3): Plane;
+    static FromPoints(point1: Vector3, point2: Vector3, point3: Vector3): Plane;
+    /** Transform a copy of this plane by the transpose of the inverse of `transformation`. */
+    transform(transformation: Matrix): Plane;
+}
+
+/** Babylon.js `PushMaterial` — intermediate base; behaves like {@link Material} here. */
+declare abstract class PushMaterial extends Material {
+    getClassName(): string;
+}
+
+declare class Quaternion {
+    x: number;
+    y: number;
+    z: number;
+    w: number;
+    constructor(x?: number, y?: number, z?: number, w?: number);
+    set(x: number, y: number, z: number, w: number): this;
+    copyFrom(source: Quaternion): this;
+    multiply(other: Quaternion): Quaternion;
+    length(): number;
+    normalize(): this;
+    conjugate(): Quaternion;
+    /**
+     * Babylon.js `Quaternion.fromRotationMatrix` — update this quaternion in place
+     * from the rotation part of `matrix`. Backed by Lite's `quatFromRotationMatrix`.
+     */
+    fromRotationMatrix(matrix: Matrix): this;
+    clone(): Quaternion;
+    equals(other: Quaternion): boolean;
+    asArray(): [number, number, number, number];
+    toEulerAngles(): Vector3;
+    static Identity(): Quaternion;
+    /**
+     * Babylon.js `Quaternion.FromRotationMatrix` — create a new quaternion from the
+     * rotation part of `matrix`. Backed by Lite's `quatFromRotationMatrix`.
+     */
+    static FromRotationMatrix(matrix: Matrix): Quaternion;
+    /**
+     * Babylon.js `Quaternion.FromRotationMatrixToRef` — write the rotation part of
+     * `matrix` into `result`. Backed by Lite's `quatFromRotationMatrix`.
+     */
+    static FromRotationMatrixToRef(matrix: Matrix, result: Quaternion): Quaternion;
+    static FromEulerAngles(x: number, y: number, z: number): Quaternion;
+    static RotationYawPitchRoll(yaw: number, pitch: number, roll: number): Quaternion;
+    static RotationAxis(axis: Vector3, angle: number): Quaternion;
+    static Slerp(left: Quaternion, right: Quaternion, amount: number): Quaternion;
+}
+
+/**
+ * Babylon.js `RecastJSCrowd` (subset) — owns crowd agents and syncs each agent's
+ * Babylon transform to the simulated position every frame, exactly like the addon.
+ */
+export declare class RecastJSCrowd {    private readonly _transforms;
+    private readonly _plugin;
+    constructor(lite: NavCrowd, plugin: RecastNavigationJSPluginV2, scene: Scene);
+    /** Babylon.js `crowd.addAgent(pos, parameters, transform)` — returns the agent index. */
+    addAgent(pos: Vec3Like, parameters: AgentParameters, transform: AgentTransform): number;
+    /** Babylon.js `crowd.getAgentPosition(index)`. */
+    getAgentPosition(index: number): Vector3;
+    /** Babylon.js `crowd.agentGoto(index, destination)` — request the agent to move toward a target. */
+    agentGoto(index: number, destination: Vec3Like): void;
+}
+
+/**
+ * Babylon.js `RecastNavigationJSPluginV2` (subset) over Babylon Lite navigation.
+ */
+export declare class RecastNavigationJSPluginV2 {    /**
+     * Babylon.js `plugin.timeFactor` — multiplier applied to each crowd update step.
+     * `0` pauses crowd movement (used by parity tests); default `1`.
+     */
+    timeFactor: number;
+    constructor(lite: NavigationPlugin);
+    /**
+     * Babylon.js `plugin.createNavMesh(meshes, parameters)`. Returns a
+     * `{ navMesh, tileCache }` handle (both reference this plugin) so scenes using
+     * the tile-cache obstacle API can pass them to {@link WaitForFullTileCacheUpdate}.
+     * Scenes that ignore the return (the non-obstacle navmesh scenes) are unaffected.
+     */
+    createNavMesh(meshes: Array<{
+        _lite: Mesh;
+    }>, parameters: Record<string, unknown>): NavMeshResult;
+    /** Babylon.js `plugin.addCylinderObstacle(position, radius, height)` — tile-cache obstacle. */
+    addCylinderObstacle(position: Vec3Like, radius: number, height: number): ObstacleHandle | null;
+    /** Babylon.js `plugin.addBoxObstacle(position, extent, angle)` — tile-cache obstacle (`extent` = half-extents). */
+    addBoxObstacle(position: Vec3Like, extent: Vec3Like, angle: number): ObstacleHandle | null;
+    /** Babylon.js `plugin.removeObstacle(obstacle)` — remove a previously-added tile-cache obstacle. */
+    removeObstacle(obstacle: ObstacleHandle): void;    /** Babylon.js `plugin.createDebugNavMesh(scene)` — builds a renderable debug mesh. */
+    createDebugNavMesh(scene: Scene): Mesh_2;
+    /** Babylon.js `plugin.getClosestPoint(position)` — snap to the navmesh. */
+    getClosestPoint(position: Vec3Like): Vector3;
+    /** Babylon.js `plugin.computePath(start, end)` — navmesh-snapped path as world points. */
+    computePath(start: Vec3Like, end: Vec3Like): Vector3[];
+    /** Babylon.js `plugin.computePathSmooth(start, end)` — alias of {@link computePath} (Lite smooths internally). */
+    computePathSmooth(start: Vec3Like, end: Vec3Like): Vector3[];
+    /**
+     * Babylon.js `plugin.raycast(start, end)` — walkability raycast on the navmesh.
+     * Returns `{ hit, hitPoint? }` (`hitPoint` is a `Vector3` when `hit`).
+     */
+    raycast(start: Vec3Like, end: Vec3Like): {
+        hit: boolean;
+        hitPoint?: Vector3;
+    };
+    /** Babylon.js `plugin.createCrowd(maxAgents, maxAgentRadius, scene)`. */
+    createCrowd(maxAgents: number, maxAgentRadius: number, scene: Scene): RecastJSCrowd;
+}
+
+declare class Scene extends AbstractScene {    /** Babylon.js fog-mode constants. */
+    static readonly FOGMODE_NONE = 0;
+    static readonly FOGMODE_EXP = 1;
+    static readonly FOGMODE_EXP2 = 2;
+    static readonly FOGMODE_LINEAR = 3;
+    /** Fires before each scene render (wired to Lite's before-render hook). */
+    readonly onBeforeRenderObservable: Observable<Scene>;
+    /** Fires before animations are evaluated each frame (used by ported cross-fade drivers). */
+    readonly onBeforeAnimationsObservable: Observable<Scene>;
+    /** Fires after each scene render. */
+    readonly onAfterRenderObservable: Observable<Scene>;
+    /** Fires once when the scene is disposed. */
+    readonly onDisposeObservable: Observable<Scene>;
+    /**
+     * Babylon.js `scene.animationGroups` / `scene.animatables`. Loaded glTF /
+     * `.babylon` animation clips live on the Lite scene; `animationGroups` returns
+     * BJS-shaped `AnimationGroup`s over them (so scenes can `goToFrame`/`pause`/`stop`
+     * to freeze a model at a deterministic frame). `animatables` surfaces the running
+     * CPU `Animatable`s started via `beginDirectAnimation`.
+     */
+    get animationGroups(): AnimationGroup[];
+    /** Babylon.js `scene.getAnimationGroupByName(name)` — first loaded animation group with a matching name, else `null`. */
+    getAnimationGroupByName(name: string): AnimationGroup | null;
+    get animatables(): Animatable_2[];
+    private readonly _engine;
+    private _activeCamera;
+    private _defaultMaterial;
+    private _fogMode;
+    private _fogStart;
+    private _fogEnd;
+    private _fogDensity;
+    private _fogColor;    private _started;
+    private _envTexture;
+    private _defaultEnvOptions;
+    private readonly _shadowGenerators;
+    private readonly _pendingTextures;
+    private readonly _pendingGroundBakes;
+    private readonly _pendingMorphBuilds;
+    private readonly _runningAnimatables;
+    private readonly _animationGroupCache;    private _ambientColor;
+    private _environmentIntensity;    /** Babylon.js `scene.uniqueId` — a process-unique numeric id. */
+    readonly uniqueId: number;
+    constructor(engine: WebGPUEngine);    getEngine(): WebGPUEngine;
+    /** Babylon.js `scene.getClassName()`. */
+    getClassName(): string;
+    /** Babylon.js `scene.getUniqueId()` — the process-unique scene id. */
+    getUniqueId(): number;    /**
+     * Babylon.js `scene.defaultMaterial` — a shared `StandardMaterial` applied to
+     * meshes that have no material assigned. Babylon Lite requires every mesh to
+     * carry a material to render, so the mesh wrappers assign this lazily-created
+     * default; reading it (or assigning a replacement) matches Babylon.js.
+     */
+    get defaultMaterial(): StandardMaterial;
+    set defaultMaterial(value: StandardMaterial);
+    get clearColor(): Color4;
+    set clearColor(value: Color4);
+    get activeCamera(): Camera | null;
+    set activeCamera(camera: Camera | null);    /** Image-processing exposure proxy (Babylon.js `imageProcessingConfiguration.exposure`). */
+    get imageProcessingConfiguration(): {
+        exposure: number;
+        contrast: number;
+        toneMappingEnabled: boolean;
+    };
+    /** Babylon.js `scene.performancePriority` — accepted for parity; Babylon Lite tunes its own pipeline. */
+    performancePriority: number;
+    /**
+     * Babylon.js `scene.ambientColor` — the scene-wide ambient term multiplied into
+     * each material's ambient contribution. Babylon Lite bakes ambient at the
+     * material level (the `.babylon` loader folds `scene.ambientColor` into each
+     * material), so this is stored for parity; the BJS default `(0,0,0)` is a no-op.
+     */
+    get ambientColor(): Color3;
+    set ambientColor(value: Color3);
+    /**
+     * Babylon.js `scene.environmentIntensity` — a global multiplier on IBL
+     * contribution. Babylon Lite applies environment intensity per PBR material;
+     * this is stored for parity (the BJS default `1` is a no-op).
+     */
+    get environmentIntensity(): number;
+    set environmentIntensity(value: number);
+    /**
+     * Babylon.js `scene.useRightHandedSystem`. Babylon Lite's coordinate system is
+     * fixed; this is stored for parity (the BJS WebGPU default is left-handed —
+     * `false` — so the common case is a no-op).
+     */
+    useRightHandedSystem: boolean;
+    /** Babylon.js `scene.registerBeforeRender(cb)` — convenience over `onBeforeRenderObservable`. */
+    registerBeforeRender(callback: () => void): void;
+    /** Babylon.js `scene.unregisterBeforeRender(cb)`. */
+    unregisterBeforeRender(callback: () => void): void;
+    /** Babylon.js `scene.registerAfterRender(cb)` — convenience over `onAfterRenderObservable`. */
+    registerAfterRender(callback: () => void): void;
+    /** Babylon.js `scene.unregisterAfterRender(cb)`. */
+    unregisterAfterRender(callback: () => void): void;
+    /** Babylon.js `scene.attachControl` — camera input is attached per-camera in the compat layer; no-op. */
+    attachControl(_attachUp?: boolean, _attachDown?: boolean, _attachMove?: boolean): void;
+    /** Babylon.js `scene.detachControl` — no-op (see {@link attachControl}). */
+    detachControl(): void;
+    get fogMode(): number;
+    set fogMode(value: number);
+    get fogStart(): number;
+    set fogStart(value: number);
+    get fogEnd(): number;
+    set fogEnd(value: number);
+    get fogDensity(): number;
+    set fogDensity(value: number);
+    get fogColor(): Color3;
+    set fogColor(value: Color3);    private _clipPlane;
+    /**
+     * Babylon.js `scene.clipPlane` — a single world-space clip plane
+     * (`normal · p + d = 0`); fragments on the negative side are discarded.
+     * Routed to Babylon Lite's opt-in `setClipPlane`.
+     */
+    get clipPlane(): Plane | null;
+    set clipPlane(value: Plane | null);
+    get environmentTexture(): CubeTexture | null;
+    set environmentTexture(value: CubeTexture | null);
+    /**
+     * Babylon.js `scene.createDefaultEnvironment` — adds an IBL skybox and ground.
+     * Babylon Lite performs this through `loadEnvironment` (deferred to engine start),
+     * combining the environment URL recorded via `scene.environmentTexture` with
+     * Babylon.js's default skybox/ground assets.
+     */
+    createDefaultEnvironment(options?: DefaultEnvironmentOptions): {
+        dispose(): void;
+    };
+    /**
+     * Babylon.js `scene.createDefaultSkybox(texture, pbr?, scale?, blur?, setGlobalEnv?)` —
+     * adds a skybox built from the given environment texture. Babylon Lite reuses the
+     * loaded `.env` specular cubemap as an HDR skybox, so this records the env URL (if
+     * not already set) and flags a skybox-from-environment load at engine start.
+     */
+    createDefaultSkybox(texture?: CubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): {
+        dispose(): void;
+    };    /** Create and activate a default arc-rotate camera framing the scene. */
+    createDefaultCamera(_createArcRotateCamera?: boolean, _replace?: boolean, _attachControl?: boolean): Camera;
+    /** Babylon.js `createDefaultCameraOrLight` — default framing camera plus a default hemispheric light. */
+    createDefaultCameraOrLight(createArcRotateCamera?: boolean, replace?: boolean, attachControl?: boolean): void;
+    /** Babylon.js render hook. No-op under Babylon Lite's engine-driven loop. */
+    render(): void;
+    /**
+     * Babylon.js readiness gate. Babylon Lite builds its scene synchronously and
+     * defers GPU work into `registerScene`/`startEngine` (driven by the engine's
+     * render loop), so there is nothing to await here — resolve immediately.
+     */
+    whenReadyAsync(): Promise<void>;
+    /** Babylon.js synchronous readiness check — always ready in the compat layer. */
+    isReady(): boolean;
+    /** Synchronous CPU picking — unsupported. Babylon Lite uses async GPU picking. */
+    pick(): never;
+    /** Synchronous ray picking — unsupported. */
+    pickWithRay(): never;
+    /**
+     * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?)`.
+     * Drives the given `Animation`s on the CPU each frame, writing onto the target's
+     * (dotted) property path. Returns an `Animatable` with `goToFrame`/`pause`/`stop`.
+     */
+    beginDirectAnimation(target: unknown, animations: Animation_2[], from: number, to: number, loop?: boolean, speedRatio?: number): Animatable_2;    /**
+     * Babylon.js `scene.beginAnimation(target, from, to, loop, speedRatio?)`. Runs
+     * the animations already attached to `target.animations`.
+     */
+    beginAnimation(target: {
+        animations?: Animation_2[];
+    }, from: number, to: number, loop?: boolean, speedRatio?: number): Animatable_2;
+    dispose(): void;
+}
+
+declare class StandardMaterial extends PushMaterial {    constructor(name: string, scene?: Scene);
+    getClassName(): string;
+    get diffuseColor(): Color3;
+    set diffuseColor(value: Color3);
+    get specularColor(): Color3;
+    set specularColor(value: Color3);
+    get emissiveColor(): Color3;
+    set emissiveColor(value: Color3);
+    get ambientColor(): Color3;
+    set ambientColor(value: Color3);
+    get disableLighting(): boolean;
+    set disableLighting(value: boolean);
+    protected _applyBackFaceCulling(value: boolean): void;
+    get alpha(): number;
+    set alpha(value: number);
+    get diffuseTexture(): BaseTexture | null;
+    set diffuseTexture(texture: BaseTexture | null);
+    /**
+     * Babylon.js `StandardMaterial.alphaCutOff` — alpha-test threshold. Fragments
+     * whose diffuse-texture alpha is below this value are discarded. Babylon Lite's
+     * Standard pipeline alpha-tests against the diffuse texture's alpha when
+     * `alphaCutOff > 0`, so this is wired directly.
+     */
+    get alphaCutOff(): number;
+    set alphaCutOff(value: number);
+    /**
+     * Babylon.js `StandardMaterial.useAlphaFromDiffuseTexture`. Babylon Lite's
+     * alpha test already samples the diffuse texture's alpha (enabled via
+     * `alphaCutOff`), so this is accepted for parity.
+     */
+    useAlphaFromDiffuseTexture: boolean;
+    get bumpTexture(): BaseTexture | null;
+    set bumpTexture(texture: BaseTexture | null);
+    get emissiveTexture(): BaseTexture | null;
+    set emissiveTexture(texture: BaseTexture | null);
+    private _diffuseTexture;
+    private _bumpTexture;
+    private _emissiveTexture;}
+
+declare interface TextureLike {
+    _lite?: Texture2D;
+    whenReadyAsync?(): Promise<void>;
+}
+
+/**
+ * Babylon.js `TransformNode` — a positioned, rotated, scaled scene-graph node.
+ * Wraps a Lite scene node (`_node`): either a standalone Lite transform node, or
+ * (for meshes) the Lite mesh itself, which also carries the transform.
+ */
+declare class TransformNode extends Node_2 {    constructor(name: string, scene?: Scene, liteNode?: SceneNode);
+    getClassName(): string;
+    get position(): Vector3;
+    set position(value: Vector3);
+    get rotation(): Vector3;
+    set rotation(value: Vector3);
+    get scaling(): Vector3;
+    set scaling(value: Vector3);    /**
+     * Babylon.js `rotationQuaternion`. Babylon Lite always drives a node's world
+     * matrix from a quaternion (its euler `rotation` is a proxy over the same
+     * quaternion), so this reads/writes that quaternion. Returns `null` until
+     * explicitly assigned, matching Babylon.js's euler-by-default convention.
+     */
+    get rotationQuaternion(): Quaternion | null;
+    set rotationQuaternion(value: Quaternion | null);
+    /**
+     * Babylon.js `setParent(node)` — reparent while **preserving world position**
+     * (the child's local transform is recomputed). Distinct from the `parent`
+     * setter, which keeps the local transform and lets the world move.
+     */
+    setParent(parent: Node_2 | null): TransformNode;
+    protected _applyParent(parent: Node_2 | null): void;
+}
+
+declare interface Vec3Like {
+    x: number;
+    y: number;
+    z: number;
+}
+
+declare class Vector3 {
+    x: number;
+    y: number;
+    z: number;
+    constructor(x?: number, y?: number, z?: number);
+    set(x: number, y: number, z: number): this;
+    setAll(value: number): this;
+    copyFrom(source: Vector3): this;
+    copyFromFloats(x: number, y: number, z: number): this;
+    add(other: Vector3): Vector3;
+    addInPlace(other: Vector3): this;
+    addInPlaceFromFloats(x: number, y: number, z: number): this;
+    subtract(other: Vector3): Vector3;
+    subtractInPlace(other: Vector3): this;
+    multiply(other: Vector3): Vector3;
+    scale(scale: number): Vector3;
+    scaleInPlace(scale: number): this;
+    negate(): Vector3;
+    minimizeInPlace(other: Vector3): this;
+    maximizeInPlace(other: Vector3): this;
+    minimizeInPlaceFromFloats(x: number, y: number, z: number): this;
+    maximizeInPlaceFromFloats(x: number, y: number, z: number): this;
+    length(): number;
+    lengthSquared(): number;
+    normalize(): this;
+    clone(): Vector3;
+    equals(other: Vector3): boolean;
+    equalsWithEpsilon(other: Vector3, epsilon?: number): boolean;
+    asArray(): [number, number, number];
+    toArray(array: number[], index?: number): this;
+    static Zero(): Vector3;
+    static One(): Vector3;
+    static Up(): Vector3;
+    static Down(): Vector3;
+    static Forward(): Vector3;
+    static Backward(): Vector3;
+    static Right(): Vector3;
+    static Left(): Vector3;
+    static FromArray(array: ArrayLike<number>, offset?: number): Vector3;
+    static FromArrayToRef<T extends Vector3>(array: ArrayLike<number>, offset: number, result: T): T;
+    static FromFloatsToRef<T extends Vector3>(x: number, y: number, z: number, result: T): T;
+    static Dot(a: Vector3, b: Vector3): number;
+    static Cross(a: Vector3, b: Vector3): Vector3;
+    static CrossToRef<T extends Vector3>(a: Vector3, b: Vector3, result: T): T;
+    static Distance(a: Vector3, b: Vector3): number;
+    static DistanceSquared(a: Vector3, b: Vector3): number;
+    static Lerp(start: Vector3, end: Vector3, amount: number): Vector3;
+    static LerpToRef<T extends Vector3>(start: Vector3, end: Vector3, amount: number, result: T): T;
+    /** Midpoint between two vectors. */
+    static Center(a: Vector3, b: Vector3): Vector3;
+    /** Midpoint between two vectors, written into `ref`. */
+    static CenterToRef(a: Vector3, b: Vector3, ref: Vector3): Vector3;
+    static Normalize(vector: Vector3): Vector3;
+    static NormalizeToRef<T extends Vector3>(vector: Vector3, result: T): T;
+    static Minimize(a: Vector3, b: Vector3): Vector3;
+    static Maximize(a: Vector3, b: Vector3): Vector3;
+    /** Transform a coordinate (point) by a matrix using the row-vector convention. */
+    static TransformCoordinates(vector: Vector3, transformation: Matrix): Vector3;
+    /** Transform a coordinate (point) by a matrix using the row-vector convention. */
+    static TransformCoordinatesToRef<T extends Vector3>(vector: Vector3, transformation: Matrix, result: T): T;
+    /** Transform a direction (normal) by a matrix, ignoring translation. */
+    static TransformNormal(vector: Vector3, transformation: Matrix): Vector3;
+    /** Transform a direction (normal) by a matrix, ignoring translation. */
+    static TransformNormalToRef<T extends Vector3>(vector: Vector3, transformation: Matrix, result: T): T;
+}
+
+/**
+ * Babylon.js `@babylonjs/addons/navigation/common/tile-cache`
+ * `WaitForFullTileCacheUpdate(navMesh, tileCache)` — block until pending
+ * tile-cache obstacle updates are applied. The addon takes the raw navMesh /
+ * tileCache; here `navMesh` is the compat plugin (returned from `createNavMesh`),
+ * so this delegates to Babylon Lite's `updateNavMeshObstacles`.
+ */
+export declare function WaitForFullTileCacheUpdate(navMesh: unknown, _tileCache?: unknown): void;
+
+/**
+ * Babylon.js's WebGPU engine. In Babylon.js `WebGPUEngine extends AbstractEngine`
+ * (sibling to {@link Engine}). This is the natural engine for the compat layer
+ * since Babylon Lite is WebGPU-only.
+ */
+declare class WebGPUEngine extends AbstractEngine {
+}
+
+export { }

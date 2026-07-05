@@ -1,0 +1,28 @@
+const jsContent = "(()=>{const x=Float32Array,M=Uint32Array;let e=null,a=0;self.onmessage=i=>{const s=i.data;if(s.p){e=s.p,a=s.n??0;return}if(!e||!s.m||!s.f||!s.c||!s.d)return;const n=s.m,t=s.f,f=s.c,c=s.d,r=new M(c.buffer),l=new x(c.buffer),d=t[0]*f[0]+t[1]*f[1]+t[2]*f[2],u=t[0]*n[0]+t[1]*n[1]+t[2]*n[2],p=t[0]*n[4]+t[1]*n[5]+t[2]*n[6],m=t[0]*n[8]+t[1]*n[9]+t[2]*n[10],b=t[0]*n[12]+t[1]*n[13]+t[2]*n[14]-d;for(let o=0;o<a;o++)r[2*o]=o,l[2*o+1]=u*e[3*o]+p*e[3*o+1]+m*e[3*o+2]+b,r[2*o+1]=~r[2*o+1];c.sort(),self.postMessage({d:c},[c.buffer])};})();";
+            const blob = typeof self !== "undefined" && self.Blob && new Blob(['URL.revokeObjectURL(import.meta.url);',jsContent], { type: "text/javascript;charset=utf-8" });
+            function WorkerWrapper(options) {
+              let objURL;
+              try {
+                objURL = blob && (self.URL || self.webkitURL).createObjectURL(blob);
+                if (!objURL) throw ''
+                const worker = new Worker(objURL, {
+          type: "module",
+          name: options?.name
+        });
+                worker.addEventListener("error", () => {
+                  (self.URL || self.webkitURL).revokeObjectURL(objURL);
+                });
+                return worker;
+              } catch(e) {
+                return new Worker(
+                  'data:text/javascript;charset=utf-8,' + encodeURIComponent(jsContent),
+                  {
+          type: "module",
+          name: options?.name
+        }
+                );
+              }
+            }
+
+export { WorkerWrapper as W };
+//# sourceMappingURL=splat-sort-worker-zHmV60Ww.js.map

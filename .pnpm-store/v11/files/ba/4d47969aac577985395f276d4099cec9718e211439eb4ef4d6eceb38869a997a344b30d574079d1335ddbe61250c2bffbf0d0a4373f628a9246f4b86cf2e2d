@@ -1,0 +1,10 @@
+import { createMaterialView } from '../material-view.js';
+import { PBR2_NO_COLOR_OUTPUT, PBR_HAS_ALPHA_BLEND } from './pbr-flag-bits.js';
+
+function createPbrNoColorMaterialView(source) {
+  const features = source._renderFeatures ?? { features: 0, features2: 0 };
+  return createMaterialView(source, { features: features.features & ~PBR_HAS_ALPHA_BLEND, features2: (features.features2 ?? 0) | PBR2_NO_COLOR_OUTPUT });
+}
+
+export { createPbrNoColorMaterialView };
+//# sourceMappingURL=no-color-view.js.map

@@ -1,0 +1,136 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { mat4Invert } from '../math/mat4-invert.js';
+import { mat4MultiplyInto } from '../math/mat4-multiply-into.js';
+import { setThinInstances, setThinInstanceCount } from './thin-instance.js';
+
+function createHierarchyInstancePool(root, capacity) {
+  if (!Number.isInteger(capacity) || capacity < 0) {
+    throw new Error("createHierarchyInstancePool capacity must be a non-negative integer");
+  }
+  const meshes = [];
+  collectMeshes(root, meshes);
+  if (meshes.length === 0) {
+    throw new Error("createHierarchyInstancePool requires at least one mesh in the source hierarchy");
+  }
+  const rootWorld = copyMat4(root.worldMatrix);
+  const rootWorldInverse = mat4Invert(rootWorld);
+  if (!rootWorldInverse) {
+    throw new Error("createHierarchyInstancePool requires an invertible root world matrix");
+  }
+  const rootWorldInverseStorage = rootWorldInverse;
+  const bindings = [];
+  for (const mesh of meshes) {
+    if (mesh.thinInstances) {
+      throw new Error(`createHierarchyInstancePool mesh "${mesh.name}" already has thin instances`);
+    }
+    const meshWorld = copyMat4(mesh.worldMatrix);
+    const meshWorldInverse = mat4Invert(meshWorld);
+    if (!meshWorldInverse) {
+      throw new Error(`createHierarchyInstancePool requires an invertible world matrix for mesh "${mesh.name}"`);
+    }
+    const rootRelativeMeshWorld = new F32(16);
+    mat4MultiplyInto(rootRelativeMeshWorld, 0, rootWorldInverseStorage, 0, meshWorld, 0);
+    const matrices = new F32(capacity * 16);
+    setThinInstances(mesh, matrices, capacity);
+    setThinInstanceCount(mesh, 0);
+    bindings.push({
+      mesh,
+      matrices,
+      _meshWorldInverse: meshWorldInverse,
+      _rootRelativeMeshWorld: rootRelativeMeshWorld
+    });
+  }
+  return {
+    root,
+    capacity,
+    meshes,
+    count: 0,
+    _bindings: bindings,
+    _scratch: new F32(16)
+  };
+}
+function addHierarchyInstance(pool, matrix) {
+  const index = pool.count;
+  if (index >= pool.capacity) {
+    throw new Error("addHierarchyInstance exceeded pool capacity");
+  }
+  for (const binding of pool._bindings) {
+    writeBindingMatrix(pool, binding, index, matrix);
+  }
+  setHierarchyInstanceCount(pool, index + 1);
+  return index;
+}
+function setHierarchyInstanceMatrix(pool, index, matrix) {
+  assertActiveIndex(pool, index, "setHierarchyInstanceMatrix");
+  for (const binding of pool._bindings) {
+    writeBindingMatrix(pool, binding, index, matrix);
+    markMatrixDirty(binding, index);
+  }
+}
+function removeHierarchyInstance(pool, index) {
+  assertActiveIndex(pool, index, "removeHierarchyInstance");
+  const last = pool.count - 1;
+  if (index !== last) {
+    const dst = index * 16;
+    const src = last * 16;
+    for (const binding of pool._bindings) {
+      binding.matrices.copyWithin(dst, src, src + 16);
+    }
+  }
+  setHierarchyInstanceCount(pool, last);
+}
+function setHierarchyInstanceCount(pool, count) {
+  if (!Number.isInteger(count) || count < 0 || count > pool.capacity) {
+    throw new Error("setHierarchyInstanceCount count must be an integer within pool capacity");
+  }
+  for (const binding of pool._bindings) {
+    if (!binding.mesh.thinInstances) {
+      throw new Error(`setHierarchyInstanceCount mesh "${binding.mesh.name}" is missing thin instance data`);
+    }
+    setThinInstanceCount(binding.mesh, count);
+  }
+  pool.count = count;
+}
+function collectMeshes(node, meshes) {
+  if (isMesh(node)) {
+    meshes.push(node);
+  }
+  const kids = node.children;
+  for (let i = 0; i < kids.length; i++) {
+    const child = kids[i];
+    if (child.parent !== node) {
+      child.parent = node;
+    }
+    collectMeshes(child, meshes);
+  }
+}
+function isMesh(node) {
+  return "_gpu" in node && "material" in node;
+}
+function copyMat4(src) {
+  const dst = new F32(16);
+  dst.set(src);
+  return dst;
+}
+function writeBindingMatrix(pool, binding, index, rootMatrix) {
+  const rootStorage = rootMatrix;
+  mat4MultiplyInto(pool._scratch, 0, rootStorage, 0, binding._rootRelativeMeshWorld, 0);
+  mat4MultiplyInto(binding.matrices, index * 16, binding._meshWorldInverse, 0, pool._scratch, 0);
+}
+function markMatrixDirty(binding, index) {
+  const ti = binding.mesh.thinInstances;
+  if (!ti) {
+    throw new Error(`HierarchyInstancePool mesh "${binding.mesh.name}" is missing thin instance data`);
+  }
+  ti._version++;
+  ti._dirtyMin = Math.min(ti._dirtyMin, index);
+  ti._dirtyMax = Math.max(ti._dirtyMax, index + 1);
+}
+function assertActiveIndex(pool, index, caller) {
+  if (!Number.isInteger(index) || index < 0 || index >= pool.count) {
+    throw new Error(`${caller} index must reference an active hierarchy instance`);
+  }
+}
+
+export { addHierarchyInstance, createHierarchyInstancePool, removeHierarchyInstance, setHierarchyInstanceCount, setHierarchyInstanceMatrix };
+//# sourceMappingURL=hierarchy-instance-pool.js.map

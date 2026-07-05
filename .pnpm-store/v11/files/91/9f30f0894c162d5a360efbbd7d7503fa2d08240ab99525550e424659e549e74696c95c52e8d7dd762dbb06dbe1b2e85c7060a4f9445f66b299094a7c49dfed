@@ -1,0 +1,41 @@
+const GEO_EPSILON = 1e-3;
+function createGeospatialLimits(planetRadius) {
+  return {
+    planetRadius,
+    radiusMin: 10,
+    radiusMax: planetRadius * 4,
+    pitchMin: GEO_EPSILON,
+    pitchMax: Math.PI / 2 - 0.01,
+    pitchDisabledRadiusScale: { x: 2, y: 4 },
+    yawMin: -Infinity,
+    yawMax: Infinity
+  };
+}
+function getEffectivePitchMax(limits, currentRadius) {
+  const scale = limits.pitchDisabledRadiusScale;
+  if (!scale) {
+    return limits.pitchMax;
+  }
+  const fullPitchRadius = scale.x * limits.planetRadius;
+  const noPitchRadius = scale.y * limits.planetRadius;
+  if (currentRadius <= fullPitchRadius) {
+    return limits.pitchMax;
+  }
+  if (currentRadius >= noPitchRadius) {
+    return limits.pitchMin;
+  }
+  const t = (currentRadius - fullPitchRadius) / (noPitchRadius - fullPitchRadius);
+  const clampedT = t < 0 ? 0 : t > 1 ? 1 : t;
+  return limits.pitchMax * (1 - clampedT) + limits.pitchMin * clampedT;
+}
+function clampZoomDistance(limits, zoomDistance, currentRadius, distanceToTarget) {
+  if (zoomDistance > 0) {
+    const maxZoomIn = (distanceToTarget ?? currentRadius) - limits.radiusMin;
+    return Math.min(zoomDistance, Math.max(0, maxZoomIn));
+  }
+  const maxZoomOut = limits.radiusMax - currentRadius;
+  return Math.max(zoomDistance, -Math.max(0, maxZoomOut));
+}
+
+export { GEO_EPSILON, clampZoomDistance, createGeospatialLimits, getEffectivePitchMax };
+//# sourceMappingURL=geospatial-limits.js.map

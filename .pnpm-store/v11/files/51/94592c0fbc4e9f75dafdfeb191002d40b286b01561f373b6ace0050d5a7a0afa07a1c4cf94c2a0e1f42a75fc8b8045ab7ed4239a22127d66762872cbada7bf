@@ -1,0 +1,39 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { _markSprite2DDirty, DEPTH_INSTANCE_FLOATS_PER_SPRITE, PURE_2D_INSTANCE_FLOATS_PER_SPRITE } from './sprite-2d.js';
+
+const UVSCROLL_EXTRA_FLOATS_PER_SPRITE = 2;
+function baseFloats(hasDepth) {
+  return hasDepth ? DEPTH_INSTANCE_FLOATS_PER_SPRITE : PURE_2D_INSTANCE_FLOATS_PER_SPRITE;
+}
+function ensureWide(layer) {
+  if (layer._uvScrollAttr) {
+    return;
+  }
+  const oldStride = layer._instanceFloatsPerSprite;
+  const newStride = oldStride + UVSCROLL_EXTRA_FLOATS_PER_SPRITE;
+  const next = new F32(layer._capacity * newStride);
+  for (let i = 0; i < layer.count; i++) {
+    next.set(layer._instanceData.subarray(i * oldStride, i * oldStride + oldStride), i * newStride);
+  }
+  layer._instanceData = next;
+  layer._instanceFloatsPerSprite = newStride;
+  layer._instanceStrideBytes = newStride * 4;
+  layer._uvScrollAttr = { shaderLocation: 7, offset: oldStride * 4, format: "float32x2" };
+  layer._dirtyMin = 0;
+  layer._dirtyMax = layer.count;
+  layer._version = layer._version + 1 | 0;
+}
+function setSprite2DUvOffset(layer, index, uvOffset) {
+  if (index < 0 || index >= layer.count) {
+    throw new Error(`setSprite2DUvOffset: index ${index} out of range [0, ${layer.count})`);
+  }
+  ensureWide(layer);
+  const base = index * layer._instanceFloatsPerSprite;
+  const uvSlot = base + baseFloats(layer.depth !== "none");
+  layer._instanceData[uvSlot] = uvOffset[0];
+  layer._instanceData[uvSlot + 1] = uvOffset[1];
+  _markSprite2DDirty(layer, index, index + 1);
+}
+
+export { setSprite2DUvOffset };
+//# sourceMappingURL=sprite-2d-uvscroll.js.map

@@ -1,0 +1,66 @@
+import { mat4MultiplyInto } from '../math/mat4-multiply-into.js';
+import { mat4PerspectiveLHToRef } from '../math/mat4-perspective-lh-to-ref.js';
+
+function getViewMatrix(camera) {
+  const ver = camera.worldMatrixVersion;
+  if (camera._viewVer === ver) {
+    return camera._viewCache;
+  }
+  const v = camera._viewCache;
+  const w = camera.worldMatrix;
+  const useFO = camera._useFloatingOrigin;
+  const cx = useFO ? 0 : w[12];
+  const cy = useFO ? 0 : w[13];
+  const cz = useFO ? 0 : w[14];
+  v[0] = w[0];
+  v[1] = w[4];
+  v[2] = w[8];
+  v[3] = 0;
+  v[4] = w[1];
+  v[5] = w[5];
+  v[6] = w[9];
+  v[7] = 0;
+  v[8] = w[2];
+  v[9] = w[6];
+  v[10] = w[10];
+  v[11] = 0;
+  v[12] = -(w[0] * cx + w[1] * cy + w[2] * cz);
+  v[13] = -(w[4] * cx + w[5] * cy + w[6] * cz);
+  v[14] = -(w[8] * cx + w[9] * cy + w[10] * cz);
+  v[15] = 1;
+  camera._viewVer = ver;
+  return v;
+}
+function getProjectionMatrix(camera, aspectRatio) {
+  const ver = camera.worldMatrixVersion;
+  if (camera._projVer === ver && camera._projAspect === aspectRatio) {
+    return camera._projCache;
+  }
+  const p = camera._projCache;
+  mat4PerspectiveLHToRef(p, camera.fov, aspectRatio, camera.nearPlane, camera.farPlane);
+  camera._projVer = ver;
+  camera._projAspect = aspectRatio;
+  return p;
+}
+function getViewProjectionMatrix(camera, aspectRatio) {
+  const ver = camera.worldMatrixVersion;
+  if (camera._vpVer === ver && camera._vpAspect === aspectRatio) {
+    return camera._vpCache;
+  }
+  const vp = camera._vpCache;
+  mat4MultiplyInto(vp, 0, getProjectionMatrix(camera, aspectRatio), 0, getViewMatrix(camera), 0);
+  camera._vpVer = ver;
+  camera._vpAspect = aspectRatio;
+  return vp;
+}
+function getCameraPosition(camera) {
+  const w = camera.worldMatrix;
+  return { x: w[12], y: w[13], z: w[14] };
+}
+function getEffectiveAspectRatio(camera, targetWidth, targetHeight) {
+  const v = camera?.viewport;
+  return targetWidth / targetHeight * (v ? v.width / v.height : 1);
+}
+
+export { getCameraPosition, getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix };
+//# sourceMappingURL=camera.js.map

@@ -1,0 +1,6 @@
+import { unaryEmitter } from './_math-factory.js';
+
+const emitter = unaryEmitter("NormalizeBlock", (v) => `normalize(${v})`);
+
+export { emitter };
+//# sourceMappingURL=normalize-block.js.map

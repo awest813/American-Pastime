@@ -1,0 +1,85 @@
+const TEX_WIDTH = 4096;
+const ROW_FLOATS = TEX_WIDTH * 4;
+const BYTES_PER_ROW = ROW_FLOATS * 4;
+function nextPow2Rows(rows) {
+  let r = 1;
+  while (r < rows) {
+    r <<= 1;
+  }
+  return r;
+}
+function rowsForTexels(texels) {
+  if (texels <= 0) {
+    return 1;
+  }
+  return Math.ceil(texels / TEX_WIDTH);
+}
+function createAtlasTexture(device, rows, label) {
+  return device.createTexture({
+    label,
+    format: "rgba32float",
+    size: { width: TEX_WIDTH, height: rows, depthOrArrayLayers: 1 },
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC
+  });
+}
+function uploadAll(device, tex, cpuData, texelsUsed) {
+  if (texelsUsed === 0) {
+    return;
+  }
+  const rows = rowsForTexels(texelsUsed);
+  device.queue.writeTexture(
+    { texture: tex },
+    cpuData.buffer,
+    { offset: cpuData.byteOffset, bytesPerRow: BYTES_PER_ROW, rowsPerImage: rows },
+    { width: TEX_WIDTH, height: rows, depthOrArrayLayers: 1 }
+  );
+}
+function ensureSharedAtlasGpu(device, atlas) {
+  let gpu = atlas.gpu;
+  const curveRowsNeeded = rowsForTexels(atlas.curveTexelsUsed);
+  const bandRowsNeeded = rowsForTexels(atlas.bandTexelsUsed);
+  if (gpu && gpu.device !== device) {
+    gpu.curveTex.destroy();
+    gpu.bandTex.destroy();
+    gpu = null;
+  }
+  let rebuilt = false;
+  if (!gpu) {
+    const curveRows = nextPow2Rows(Math.max(1, curveRowsNeeded));
+    const bandRows = nextPow2Rows(Math.max(1, bandRowsNeeded));
+    gpu = {
+      device,
+      curveTex: createAtlasTexture(device, curveRows, "text-slug-curves"),
+      bandTex: createAtlasTexture(device, bandRows, "text-slug-bands"),
+      curveTexRows: curveRows,
+      bandTexRows: bandRows,
+      uploadedVersion: -1
+    };
+    atlas.gpu = gpu;
+    rebuilt = true;
+  } else {
+    if (curveRowsNeeded > gpu.curveTexRows) {
+      gpu.curveTex.destroy();
+      gpu.curveTexRows = nextPow2Rows(curveRowsNeeded);
+      gpu.curveTex = createAtlasTexture(device, gpu.curveTexRows, "text-slug-curves");
+      gpu.uploadedVersion = -1;
+      rebuilt = true;
+    }
+    if (bandRowsNeeded > gpu.bandTexRows) {
+      gpu.bandTex.destroy();
+      gpu.bandTexRows = nextPow2Rows(bandRowsNeeded);
+      gpu.bandTex = createAtlasTexture(device, gpu.bandTexRows, "text-slug-bands");
+      gpu.uploadedVersion = -1;
+      rebuilt = true;
+    }
+  }
+  if (gpu.uploadedVersion !== atlas.version) {
+    uploadAll(device, gpu.curveTex, atlas.curveTexData, atlas.curveTexelsUsed);
+    uploadAll(device, gpu.bandTex, atlas.bandTexData, atlas.bandTexelsUsed);
+    gpu.uploadedVersion = atlas.version;
+  }
+  return { rebuilt, gpu };
+}
+
+export { ensureSharedAtlasGpu };
+//# sourceMappingURL=text-textures.js.map

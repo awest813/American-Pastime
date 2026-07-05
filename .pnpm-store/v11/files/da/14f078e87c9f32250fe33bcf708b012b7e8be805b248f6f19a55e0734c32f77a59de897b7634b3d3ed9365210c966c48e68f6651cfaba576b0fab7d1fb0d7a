@@ -1,0 +1,34 @@
+import { _installMeshFeatureExtra } from '../mesh-features.js';
+import { _installPbrPrimitiveResolver } from './pbr-pipeline.js';
+
+const MSH_REVERSE_WINDING = 1 << 11;
+const MSH_TOPOLOGY_SHIFT = 12;
+const MSH_INDEX_U32 = 1 << 15;
+_installMeshFeatureExtra((mesh) => {
+  let f = 0;
+  if (mesh._reverseWinding) {
+    f |= MSH_REVERSE_WINDING;
+  }
+  const topo = mesh._topology;
+  if (topo) {
+    f |= topo << MSH_TOPOLOGY_SHIFT;
+    if (topo >= 3 && mesh._gpu.indexFormat === "uint32") {
+      f |= MSH_INDEX_U32;
+    }
+  }
+  return f;
+});
+_installPbrPrimitiveResolver((meshFeatures, hasDoubleSided) => {
+  const reverseWinding = (meshFeatures & MSH_REVERSE_WINDING) !== 0;
+  const topoIdx = meshFeatures >> MSH_TOPOLOGY_SHIFT & 7;
+  const topology = topoIdx === 1 ? "point-list" : topoIdx === 2 ? "line-list" : topoIdx === 3 ? "line-strip" : topoIdx === 4 ? "triangle-strip" : "triangle-list";
+  const noCull = topoIdx >= 1 && topoIdx <= 3;
+  const stripIndexFormat = topoIdx >= 3 ? meshFeatures & MSH_INDEX_U32 ? "uint32" : "uint16" : void 0;
+  return {
+    topology,
+    ...stripIndexFormat ? { stripIndexFormat } : void 0,
+    cullMode: noCull || hasDoubleSided ? "none" : reverseWinding ? "front" : "back",
+    frontFace: "ccw"
+  };
+});
+//# sourceMappingURL=pbr-primitive-resolver.js.map

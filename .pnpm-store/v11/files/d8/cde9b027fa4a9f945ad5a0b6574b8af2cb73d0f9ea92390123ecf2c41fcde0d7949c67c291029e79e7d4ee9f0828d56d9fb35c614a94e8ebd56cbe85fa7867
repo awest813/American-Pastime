@@ -1,0 +1,6 @@
+/** Pure barrel — re-exports only side-effect-free modules */
+/* eslint-disable @typescript-eslint/no-restricted-imports */
+export * from "./core/pure.js";
+export * from "./3mfSerializer.js";
+export * from "./3mfSerializer.configuration.js";
+//# sourceMappingURL=pure.js.map

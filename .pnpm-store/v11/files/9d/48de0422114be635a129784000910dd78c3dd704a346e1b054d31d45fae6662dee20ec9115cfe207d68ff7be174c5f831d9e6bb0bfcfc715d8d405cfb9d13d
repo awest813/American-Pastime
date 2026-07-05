@@ -1,0 +1,13 @@
+import { F32 } from '../engine/typed-arrays.js';
+
+function mat4Identity() {
+  const m = new F32(16);
+  m[0] = 1;
+  m[5] = 1;
+  m[10] = 1;
+  m[15] = 1;
+  return m;
+}
+
+export { mat4Identity };
+//# sourceMappingURL=mat4-identity.js.map

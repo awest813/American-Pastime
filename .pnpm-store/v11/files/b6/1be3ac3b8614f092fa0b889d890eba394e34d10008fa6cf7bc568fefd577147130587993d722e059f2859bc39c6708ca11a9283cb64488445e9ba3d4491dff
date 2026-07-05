@@ -1,0 +1,14 @@
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../services/selectionService";
+type RenderingPipelinesContentProps = {
+    scene: Scene;
+    selectionService: ISelectionService;
+};
+/**
+ * Rendering Pipelines content component
+ * @param props - Component props
+ * @returns React component
+ */
+export declare const RenderingPipelinesContent: FunctionComponent<RenderingPipelinesContentProps>;
+export {};

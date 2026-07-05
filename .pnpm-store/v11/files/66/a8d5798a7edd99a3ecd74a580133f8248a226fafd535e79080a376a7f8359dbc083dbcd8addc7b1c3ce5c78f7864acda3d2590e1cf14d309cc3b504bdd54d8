@@ -1,0 +1,316 @@
+import { U16 } from '../engine/typed-arrays.js';
+import { BU, SS, CW } from '../engine/gpu-flags.js';
+import { _getSpriteFxHook } from './sprite-fx-hook.js';
+import { _getSpriteCoverageGammaHook } from './sprite-coverage-gamma-hook.js';
+import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from './sprite-2d.js';
+
+const SPRITE_POSITION_OFFSET_BYTES = 0;
+const SPRITE_SIZE_OFFSET_BYTES = 8;
+const SPRITE_UV_MIN_OFFSET_BYTES = 16;
+const SPRITE_UV_MAX_OFFSET_BYTES = 24;
+const SPRITE_ROTATION_OFFSET_BYTES = 32;
+const SPRITE_COLOR_OFFSET_BYTES = 36;
+const SPRITE_DEPTH_OFFSET_BYTES = 52;
+function makeSpriteWgsl(hasDepth, spriteGroupIndex, uvScroll) {
+  return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
+@fragment
+fn fs(in: O) -> @location(0) vec4f {
+let s = textureSample(atlasTex, atlasSamp, in.uv);
+return s * in.tint * L.opacityMul;
+}`;
+}
+function makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll = false) {
+  const group = `@group(${spriteGroupIndex})`;
+  const zAttribute = hasDepth ? `,
+@location(6) z: f32` : "";
+  const uvOffsetAttribute = uvScroll ? `,
+@location(7) o: vec2f` : "";
+  const zPosition = hasDepth ? "1 - in.z" : "0";
+  return `struct Lr {
+viewPos: vec2f,
+viewScale: f32,
+viewRot: f32,
+screenSize: vec2f,
+pivot: vec2f,
+opacityMul: vec4f,
+aa: vec4f,
+};
+${group} @binding(0) var<uniform> L: Lr;
+${group} @binding(1) var atlasTex: texture_2d<f32>;
+${group} @binding(2) var atlasSamp: sampler;
+struct I {
+@builtin(vertex_index) vid: u32,
+@location(0) p: vec2f,
+@location(1) s: vec2f,
+@location(2) a: vec2f,
+@location(3) b: vec2f,
+@location(4) r: f32,
+@location(5) c: vec4f${zAttribute}${uvOffsetAttribute}
+};
+struct O {
+@builtin(position) p: vec4f,
+@location(0) uv: vec2f,
+@location(1) tint: vec4f,
+};
+@vertex
+fn vs(in: I) -> O {
+var q = array<vec2f, 4>(vec2f(0, 0), vec2f(1, 0), vec2f(1, 1), vec2f(0, 1));
+let c = q[in.vid];
+let l = (c - L.pivot) * in.s;
+let cr = cos(in.r);
+let sr = sin(in.r);
+let r = vec2f(l.x * cr - l.y * sr, l.x * sr + l.y * cr);
+let p = in.p + r - L.viewPos;
+let lc = cos(L.viewRot);
+let ls = sin(L.viewRot);
+let v = vec2f(p.x * lc - p.y * ls, p.x * ls + p.y * lc) * L.viewScale;
+let n = vec2f(v.x / L.screenSize.x * 2 - 1, 1 - v.y / L.screenSize.y * 2);
+let uv = mix(in.a, in.b, c)${uvScroll ? " + in.o" : ""};
+var out: O;
+out.p = vec4f(n, ${zPosition}, 1);
+out.uv = uv;
+out.tint = in.c;
+return out;
+}`;
+}
+function createSpritePipelineCache() {
+  return {
+    _devices: /* @__PURE__ */ new WeakMap()
+  };
+}
+function resetSpritePipelineCache(cache) {
+  cache._devices = /* @__PURE__ */ new WeakMap();
+}
+function getSpritePipelineCacheSize(cache, device) {
+  return cache._devices.get(device)?._pipelines.size ?? 0;
+}
+function getOrCreateSpritePipeline(engine, cache, format, sampleCount, blendMode, hasDepth, depthWrite = false, depthStencilFormat, sceneBindGroupLayout, layer) {
+  const deviceCache = getSpritePipelineDeviceCache(engine, cache);
+  const resolvedDepthStencilFormat = normalizeDepthStencilFormat(hasDepth, depthStencilFormat);
+  const key = spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, layer);
+  const cached = deviceCache._pipelines.get(key);
+  if (cached) {
+    return cached;
+  }
+  const pipeline = buildSpritePipeline(engine, deviceCache, format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, sceneBindGroupLayout, layer);
+  deviceCache._pipelines.set(key, pipeline);
+  return pipeline;
+}
+function createSpriteLayerBindGroup(engine, pipeline, spriteBindGroupIndex, layer, uniformBuffer, fx) {
+  const tex = layer.atlas.texture;
+  const entries = [
+    { binding: 0, resource: { buffer: uniformBuffer } },
+    { binding: 1, resource: tex.view },
+    { binding: 2, resource: tex.sampler }
+  ];
+  if (fx) {
+    for (const entry of _getSpriteFxHook().bindEntries(fx, 3)) {
+      entries.push(entry);
+    }
+  }
+  return engine._device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(spriteBindGroupIndex),
+    entries
+  });
+}
+function getSpritePipelineDeviceCache(engine, cache) {
+  let deviceCache = cache._devices.get(engine._device);
+  if (!deviceCache) {
+    deviceCache = {
+      _shaderModules: /* @__PURE__ */ new Map(),
+      _pipelines: /* @__PURE__ */ new Map()
+    };
+    cache._devices.set(engine._device, deviceCache);
+  }
+  return deviceCache;
+}
+function normalizeDepthStencilFormat(hasDepth, depthStencilFormat) {
+  if (!hasDepth) {
+    return null;
+  }
+  if (!depthStencilFormat) {
+    throw new Error("Sprite pipeline: depth-enabled pipelines require a depth-stencil format.");
+  }
+  return depthStencilFormat;
+}
+function spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, depthStencilFormat, layer) {
+  const customKey = layer ? _getSpriteFxHook()?.pipelineKeyPart(layer) ?? "" : "";
+  const uvKey = layer?._uvScrollAttr ? "1" : "0";
+  const cgKey = layer ? _getSpriteCoverageGammaHook()?.pipelineKeyPart(layer) ?? "0" : "0";
+  return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
+}
+function getShaderModule(engine, cache, hasDepth, layer) {
+  const customModule = layer ? _getSpriteFxHook()?.shaderModule(engine, hasDepth, layer) : null;
+  if (customModule) {
+    return customModule;
+  }
+  const gammaModule = layer ? _getSpriteCoverageGammaHook()?.shaderModule(engine, hasDepth, layer) : null;
+  if (gammaModule) {
+    return gammaModule;
+  }
+  const uvScroll = layer?._uvScrollAttr != null;
+  const key = `${hasDepth ? 1 : 0}:${uvScroll ? 1 : 0}`;
+  let module = cache._shaderModules.get(key);
+  if (!module) {
+    module = engine._device.createShaderModule({
+      code: makeSpriteWgsl(hasDepth, hasDepth ? 1 : 0, uvScroll)
+    });
+    cache._shaderModules.set(key, module);
+  }
+  return module;
+}
+function buildSpritePipeline(engine, cache, format, sampleCount, blendMode, hasDepth, depthWrite, depthStencilFormat, sceneBindGroupLayout, layer) {
+  const device = engine._device;
+  const layoutEntries = [
+    { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+    { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: "float" } },
+    { binding: 2, visibility: SS.FRAGMENT, sampler: { type: "filtering" } }
+  ];
+  const extraLayoutEntries = layer ? _getSpriteFxHook()?.layoutEntries(layer, 3) : null;
+  if (extraLayoutEntries) {
+    for (const entry of extraLayoutEntries) {
+      layoutEntries.push(entry);
+    }
+  }
+  const bindGroupLayout = device.createBindGroupLayout({ entries: layoutEntries });
+  const module = getShaderModule(engine, cache, hasDepth, layer);
+  if (hasDepth && !sceneBindGroupLayout) {
+    throw new Error("Sprite pipeline: depth-enabled pipelines require a scene bind-group layout.");
+  }
+  const bindGroupLayouts = hasDepth ? [sceneBindGroupLayout, bindGroupLayout] : [bindGroupLayout];
+  const instanceAttributes = [
+    { shaderLocation: 0, offset: SPRITE_POSITION_OFFSET_BYTES, format: "float32x2" },
+    { shaderLocation: 1, offset: SPRITE_SIZE_OFFSET_BYTES, format: "float32x2" },
+    { shaderLocation: 2, offset: SPRITE_UV_MIN_OFFSET_BYTES, format: "float32x2" },
+    { shaderLocation: 3, offset: SPRITE_UV_MAX_OFFSET_BYTES, format: "float32x2" },
+    { shaderLocation: 4, offset: SPRITE_ROTATION_OFFSET_BYTES, format: "float32" },
+    { shaderLocation: 5, offset: SPRITE_COLOR_OFFSET_BYTES, format: "float32x4" }
+  ];
+  if (hasDepth) {
+    instanceAttributes.push({ shaderLocation: 6, offset: SPRITE_DEPTH_OFFSET_BYTES, format: "float32" });
+  }
+  if (layer?._uvScrollAttr) {
+    instanceAttributes.push(layer._uvScrollAttr);
+  }
+  const arrayStride = layer?._instanceStrideBytes ?? (hasDepth ? DEPTH_INSTANCE_STRIDE_BYTES : PURE_2D_INSTANCE_STRIDE_BYTES);
+  const descriptor = {
+    layout: device.createPipelineLayout({ bindGroupLayouts }),
+    vertex: {
+      module,
+      entryPoint: "vs",
+      buffers: [
+        {
+          arrayStride,
+          stepMode: "instance",
+          attributes: instanceAttributes
+        }
+      ]
+    },
+    fragment: {
+      module,
+      entryPoint: "fs",
+      targets: [{ format, blend: blendMode._descriptor, writeMask: CW.ALL }]
+    },
+    primitive: { topology: "triangle-list", cullMode: "none" },
+    multisample: { count: sampleCount }
+  };
+  if (hasDepth) {
+    descriptor.depthStencil = {
+      format: depthStencilFormat,
+      depthCompare: "greater-equal",
+      depthWriteEnabled: depthWrite
+    };
+  }
+  return device.createRenderPipeline(descriptor);
+}
+const LAYER_UBO_BYTES = 64;
+const LAYER_UBO_FLOATS = LAYER_UBO_BYTES / 4;
+const SHARED_SPRITE_INDEX_DATA = new U16([0, 1, 2, 0, 2, 3]);
+function createSpriteInstanceBuffer(device, layer, label) {
+  return device.createBuffer({
+    size: layer._capacity * layer._instanceStrideBytes,
+    usage: BU.VERTEX | BU.COPY_DST,
+    label
+  });
+}
+function ensureSpriteInstanceBuffer(device, layer, currentBuffer, currentCapacity, label) {
+  const neededBytes = layer._capacity * layer._instanceStrideBytes;
+  if (currentBuffer.size >= neededBytes) {
+    return { buffer: currentBuffer, capacity: currentCapacity, reallocated: false };
+  }
+  currentBuffer.destroy();
+  return {
+    buffer: createSpriteInstanceBuffer(device, layer, label),
+    capacity: layer._capacity,
+    reallocated: true
+  };
+}
+function uploadSpriteInstances(device, layer, instanceBuffer, uploadedVersion) {
+  if (uploadedVersion === layer._version) {
+    return uploadedVersion;
+  }
+  if (layer.count === 0) {
+    layer._dirtyMin = 0;
+    layer._dirtyMax = 0;
+    return layer._version;
+  }
+  let lo;
+  let hi;
+  if (uploadedVersion === -1) {
+    lo = 0;
+    hi = layer.count;
+  } else {
+    lo = layer._dirtyMin;
+    hi = Math.min(layer._dirtyMax, layer.count);
+  }
+  if (hi > lo) {
+    const offsetBytes = lo * layer._instanceStrideBytes;
+    const bytes = (hi - lo) * layer._instanceStrideBytes;
+    device.queue.writeBuffer(instanceBuffer, offsetBytes, layer._instanceData.buffer, layer._instanceData.byteOffset + offsetBytes, bytes);
+  }
+  layer._dirtyMin = 0;
+  layer._dirtyMax = 0;
+  return layer._version;
+}
+function buildSpriteLayerUbo(layer, screenWidth, screenHeight, ubo) {
+  ubo[0] = layer.view.positionPx[0];
+  ubo[1] = layer.view.positionPx[1];
+  ubo[2] = layer.view.zoom;
+  ubo[3] = layer.view.rotation;
+  ubo[4] = screenWidth;
+  ubo[5] = screenHeight;
+  ubo[6] = layer.pivot[0];
+  ubo[7] = layer.pivot[1];
+  const op = layer.opacity;
+  if (layer.blendMode._premultipliedOpacity) {
+    ubo[8] = op;
+    ubo[9] = op;
+    ubo[10] = op;
+    ubo[11] = op;
+  } else {
+    ubo[8] = 1;
+    ubo[9] = 1;
+    ubo[10] = 1;
+    ubo[11] = op;
+  }
+  _getSpriteCoverageGammaHook()?.writeUbo(layer, ubo);
+}
+function writeSpriteLayerUboIfDirty(device, uniformBuffer, scratchUbo, lastUbo, alreadyUploaded) {
+  let dirty = !alreadyUploaded;
+  if (!dirty) {
+    for (let i = 0; i < LAYER_UBO_FLOATS; i++) {
+      if (lastUbo[i] !== scratchUbo[i]) {
+        dirty = true;
+        break;
+      }
+    }
+  }
+  if (dirty) {
+    device.queue.writeBuffer(uniformBuffer, 0, scratchUbo.buffer, scratchUbo.byteOffset, LAYER_UBO_BYTES);
+    lastUbo.set(scratchUbo);
+  }
+  return true;
+}
+
+export { LAYER_UBO_BYTES, LAYER_UBO_FLOATS, SHARED_SPRITE_INDEX_DATA, buildSpriteLayerUbo, createSpriteInstanceBuffer, createSpriteLayerBindGroup, createSpritePipelineCache, ensureSpriteInstanceBuffer, getOrCreateSpritePipeline, getSpritePipelineCacheSize, makeSpritePrologueWgsl, resetSpritePipelineCache, uploadSpriteInstances, writeSpriteLayerUboIfDirty };
+//# sourceMappingURL=sprite-pipeline.js.map

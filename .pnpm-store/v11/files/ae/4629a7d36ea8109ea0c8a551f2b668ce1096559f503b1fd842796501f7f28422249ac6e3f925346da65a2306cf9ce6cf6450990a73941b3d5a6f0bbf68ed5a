@@ -1,0 +1,148 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { BU } from '../engine/gpu-flags.js';
+import { getSceneBindGroupLayout } from '../render/scene-helpers.js';
+import { createMappedBuffer, createEmptyUniformBuffer } from '../resource/gpu-buffers.js';
+import { _getSpriteFxHook } from './sprite-fx-hook.js';
+import { SHARED_SPRITE_INDEX_DATA, LAYER_UBO_BYTES, createSpriteInstanceBuffer, getOrCreateSpritePipeline, createSpriteLayerBindGroup, resetSpritePipelineCache, ensureSpriteInstanceBuffer, uploadSpriteInstances, buildSpriteLayerUbo, writeSpriteLayerUboIfDirty, createSpritePipelineCache } from './sprite-pipeline.js';
+
+let _sharedPipelineCache = null;
+let _sharedPipelineCacheRefs = 0;
+function acquireSharedPipelineCache() {
+  _sharedPipelineCache ??= createSpritePipelineCache();
+  _sharedPipelineCacheRefs++;
+  return _sharedPipelineCache;
+}
+function releaseSharedPipelineCache() {
+  if (_sharedPipelineCacheRefs === 0) {
+    return;
+  }
+  _sharedPipelineCacheRefs--;
+  if (_sharedPipelineCacheRefs === 0 && _sharedPipelineCache) {
+    resetSpritePipelineCache(_sharedPipelineCache);
+    _sharedPipelineCache = null;
+  }
+}
+function buildSpriteRenderable(engine, layer) {
+  if (layer.depth === "none") {
+    throw new Error('Depth-hosted sprites require depth != "none".');
+  }
+  const indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, BU.INDEX);
+  const uniformBuffer = createEmptyUniformBuffer(engine, LAYER_UBO_BYTES);
+  const cap = layer._capacity;
+  const instanceBuffer = createSpriteInstanceBuffer(engine._device, layer);
+  const fx = _getSpriteFxHook()?.createLayerFx(engine, "", layer) ?? null;
+  const isTransparent = layer.depth === "test";
+  const isDirect = layer.depth === "test-write";
+  const renderable = {
+    // Depth-write sprite layers are mutable instanced batches, so route them through
+    // the direct-draw phase after cached opaque meshes and before transparent draws.
+    order: isTransparent ? 200 : 100,
+    isTransparent,
+    _direct: isDirect,
+    _engine: engine,
+    _layer: layer,
+    _indexBuffer: indexBuffer,
+    _uniformBuffer: uniformBuffer,
+    _instanceBuffer: instanceBuffer,
+    _instanceBufferCapacity: cap,
+    _pipelineCache: acquireSharedPipelineCache(),
+    _bindGroups: /* @__PURE__ */ new Map(),
+    _uploadedVersion: -1,
+    _uboUploaded: false,
+    _lastUbo: new F32(LAYER_UBO_BYTES / 4),
+    _scratchUbo: new F32(LAYER_UBO_BYTES / 4),
+    _fx: fx,
+    _disposed: false,
+    bind(engine2, target) {
+      return bindLayer(renderable, engine2, target);
+    }
+  };
+  return {
+    renderable,
+    dispose() {
+      disposeRenderable(renderable);
+    }
+  };
+}
+function bindLayer(r, engine, target) {
+  if (!target._depthStencilFormat) {
+    throw new Error("Depth-hosted Sprite2DLayer requires a depth-stencil render target.");
+  }
+  const sampleCount = target._sampleCount === 1 ? 1 : 4;
+  const depthWrite = r._layer.depth === "test-write";
+  const pipeline = getOrCreateSpritePipeline(
+    engine,
+    r._pipelineCache,
+    target._colorFormat,
+    sampleCount,
+    r._layer.blendMode,
+    true,
+    depthWrite,
+    target._depthStencilFormat,
+    getSceneBindGroupLayout(engine),
+    r._layer
+  );
+  let bindGroup = r._bindGroups.get(pipeline);
+  if (!bindGroup) {
+    bindGroup = createSpriteLayerBindGroup(engine, pipeline, 1, r._layer, r._uniformBuffer, r._fx);
+    r._bindGroups.set(pipeline, bindGroup);
+  }
+  return {
+    renderable: r,
+    pipeline,
+    update(context) {
+      uploadLayer(r, context);
+    },
+    draw(pass) {
+      return drawLayer(r, bindGroup, pass);
+    }
+  };
+}
+function uploadLayer(r, target) {
+  if (r._disposed) {
+    return;
+  }
+  if (!r._layer.visible || r._layer.count === 0) {
+    return;
+  }
+  if (r._fx) {
+    _getSpriteFxHook().updateFx(r._fx, r._layer, r._engine._currentDelta);
+  }
+  const grown = ensureSpriteInstanceBuffer(r._engine._device, r._layer, r._instanceBuffer, r._instanceBufferCapacity);
+  if (grown.reallocated) {
+    r._instanceBuffer = grown.buffer;
+    r._instanceBufferCapacity = grown.capacity;
+    r._uploadedVersion = -1;
+  }
+  r._uploadedVersion = uploadSpriteInstances(r._engine._device, r._layer, r._instanceBuffer, r._uploadedVersion);
+  buildSpriteLayerUbo(r._layer, target.targetWidth, target.targetHeight, r._scratchUbo);
+  r._uboUploaded = writeSpriteLayerUboIfDirty(r._engine._device, r._uniformBuffer, r._scratchUbo, r._lastUbo, r._uboUploaded);
+}
+function drawLayer(r, bindGroup, pass) {
+  if (r._disposed || !r._layer.visible || r._layer.count === 0) {
+    return 0;
+  }
+  pass.setBindGroup(1, bindGroup);
+  pass.setIndexBuffer(r._indexBuffer, "uint16");
+  pass.setVertexBuffer(0, r._instanceBuffer);
+  pass.drawIndexed(6, r._layer.count, 0, 0, 0);
+  return 1;
+}
+function disposeRenderable(r) {
+  if (r._disposed) {
+    return;
+  }
+  r._disposed = true;
+  r._instanceBuffer.destroy();
+  r._uniformBuffer.destroy();
+  r._indexBuffer.destroy();
+  if (r._fx) {
+    _getSpriteFxHook().disposeFx(r._fx);
+  }
+  r._bindGroups.clear();
+  r._layer = null;
+  releaseSharedPipelineCache();
+}
+
+export { buildSpriteRenderable };
+//# sourceMappingURL=sprite-renderable.js.map

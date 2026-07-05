@@ -1,0 +1,134 @@
+import { SS } from '../engine/gpu-flags.js';
+import { pickingShaderSource, pickingThinInstanceShaderSource } from './picking-shader.js';
+import { createSingleUniformBGL } from '../shader/bgl-helpers.js';
+
+let _cachedDevice = null;
+let _sceneBGL = null;
+let _meshBGL = null;
+let _tiMeshBGL = null;
+let _pipelineSets = null;
+function invalidateIfNeeded(engine) {
+  const device = engine._device;
+  if (device !== _cachedDevice) {
+    _sceneBGL = null;
+    _meshBGL = null;
+    _tiMeshBGL = null;
+    _pipelineSets = null;
+    _cachedDevice = device;
+  }
+}
+function getPickingSceneBGL(engine) {
+  invalidateIfNeeded(engine);
+  if (!_sceneBGL) {
+    _sceneBGL = createSingleUniformBGL(engine, "picking-scene-bgl", SS.VERTEX);
+  }
+  return _sceneBGL;
+}
+function getPickingMeshBGL(engine) {
+  invalidateIfNeeded(engine);
+  if (!_meshBGL) {
+    _meshBGL = createSingleUniformBGL(engine, "picking-mesh-bgl", SS.VERTEX | SS.FRAGMENT);
+  }
+  return _meshBGL;
+}
+function getPickingTIMeshBGL(engine) {
+  const device = engine._device;
+  invalidateIfNeeded(engine);
+  if (!_tiMeshBGL) {
+    _tiMeshBGL = device.createBindGroupLayout({
+      label: "picking-ti-mesh-bgl",
+      entries: [
+        {
+          binding: 0,
+          visibility: SS.VERTEX | SS.FRAGMENT,
+          buffer: { type: "uniform" }
+        },
+        {
+          binding: 1,
+          visibility: SS.VERTEX,
+          buffer: { type: "read-only-storage" }
+        }
+      ]
+    });
+  }
+  return _tiMeshBGL;
+}
+function createDiscardBGL(engine, discard) {
+  return engine._device.createBindGroupLayout({
+    label: `picking-discard-${discard.key}-bgl`,
+    entries: (discard.storage ?? []).map((_, binding) => ({
+      binding,
+      visibility: SS.FRAGMENT,
+      buffer: { type: "read-only-storage" }
+    }))
+  });
+}
+const POSITION_VERTEX_LAYOUT = {
+  arrayStride: 12,
+  attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }]
+};
+function createPickingPipelineInternal(engine, opts) {
+  const device = engine._device;
+  const module = device.createShaderModule({ label: `${opts.label}-shader`, code: opts.shader });
+  const bindGroupLayouts = opts.discardBGL ? [getPickingSceneBGL(engine), opts.meshBGL, opts.discardBGL] : [getPickingSceneBGL(engine), opts.meshBGL];
+  const layout = device.createPipelineLayout({
+    label: `${opts.label}-pipeline-layout`,
+    bindGroupLayouts
+  });
+  return device.createRenderPipeline({
+    label: `${opts.label}-pipeline`,
+    layout,
+    vertex: {
+      module,
+      entryPoint: "vs",
+      buffers: [POSITION_VERTEX_LAYOUT]
+    },
+    fragment: {
+      module,
+      entryPoint: "fs",
+      targets: [{ format: "rgba8unorm" }, { format: "r32float" }]
+    },
+    depthStencil: {
+      format: "depth24plus",
+      depthCompare: "greater",
+      depthWriteEnabled: true
+    },
+    primitive: {
+      topology: "triangle-list",
+      // Pick the NEAREST surface regardless of facing (matches Babylon.js Scene.pick, which intersects
+      // both triangle sides). Culling back faces here would make any DOUBLE-SIDED mesh
+      // unpickable wherever the renderer shows its back face.
+      cullMode: "none"
+    },
+    multisample: { count: 1 }
+  });
+}
+function getPickingPipelineSet(engine, discard) {
+  invalidateIfNeeded(engine);
+  const key = discard ? `discard:${discard.key}` : "default";
+  const pipelineSets = _pipelineSets ?? (_pipelineSets = /* @__PURE__ */ new Map());
+  const cached = pipelineSets.get(key);
+  if (cached) {
+    return cached;
+  }
+  const discardBGL = discard?.storage?.length ? createDiscardBGL(engine, discard) : null;
+  const shaderOptions = discard ? { discardWgsl: discard.wgsl, storage: discard.storage } : void 0;
+  const regularPipeline = createPickingPipelineInternal(engine, {
+    shader: pickingShaderSource(shaderOptions),
+    meshBGL: getPickingMeshBGL(engine),
+    discardBGL,
+    label: discard ? `picking-${discard.key}` : "picking"
+  });
+  const thinInstancePipeline = createPickingPipelineInternal(engine, {
+    shader: pickingThinInstanceShaderSource(shaderOptions),
+    meshBGL: getPickingTIMeshBGL(engine),
+    discardBGL,
+    label: discard ? `picking-ti-${discard.key}` : "picking-ti"
+  });
+  const set = { regularPipeline, thinInstancePipeline, discardBGL };
+  pipelineSets.set(key, set);
+  return set;
+}
+
+export { getPickingPipelineSet, getPickingSceneBGL };
+//# sourceMappingURL=picking-pipeline.js.map

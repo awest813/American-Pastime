@@ -1,0 +1,120 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "TestArea", {
+    enumerable: true,
+    get: function() {
+        return TestArea;
+    }
+});
+const _interop_require_wildcard = require("@swc/helpers/_/_interop_require_wildcard");
+const _react = /*#__PURE__*/ _interop_require_wildcard._(require("react"));
+const _reactcomponents = require("@fluentui/react-components");
+const _useResizeHandle = require("./useResizeHandle");
+function TestArea(props) {
+    const { onDragEnd, onDragStart, onChange, onChangeRejected, minValue, maxValue, relative = false, variableTarget = 'wrapper', unit = 'px', useCSSClamp = false } = props;
+    const codeRef = _react.useRef(null);
+    const elementRef = _react.useRef(null);
+    const handleChange = _react.useCallback((ev, data)=>{
+        onChange == null ? void 0 : onChange(ev, data);
+        const codeEl = codeRef.current;
+        const elementEl = elementRef.current;
+        if (codeEl && elementEl) {
+            const elementWidth = elementEl.getBoundingClientRect().width;
+            codeEl.textContent = `width (from callback): ${data.value}${data.unit}; width (actual DOM): ${elementWidth}px; eventType: ${data.type}`;
+        }
+    }, [
+        onChange
+    ]);
+    const handle = (0, _useResizeHandle.useResizeHandle)({
+        growDirection: 'end',
+        relative,
+        variableName: '--width',
+        unit,
+        minValue,
+        maxValue,
+        onChange: handleChange,
+        onChangeRejected,
+        onDragEnd,
+        onDragStart
+    });
+    let elementWidth = relative ? `calc(50px + var(--width, 0px))` : `var(--width, 50px)`;
+    if (relative || useCSSClamp) {
+        elementWidth = `clamp(40px, ${elementWidth}, 400px)`;
+    }
+    return /*#__PURE__*/ _react.createElement("div", {
+        style: {
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            width: '600px'
+        }
+    }, /*#__PURE__*/ _react.createElement("style", null, `html, body { margin: 0; padding: 0; }`), /*#__PURE__*/ _react.createElement("div", {
+        ref: handle.wrapperRef,
+        "data-testid": "wrapper",
+        style: {
+            display: 'grid',
+            height: '400px',
+            ...variableTarget === 'wrapper' && {
+                gridTemplateColumns: `10px ${elementWidth} 10px 1fr 10px`
+            },
+            ...variableTarget === 'element' && {
+                gridTemplateColumns: '10px auto 10px 1fr 10px'
+            }
+        }
+    }, /*#__PURE__*/ _react.createElement("div", {
+        "data-testid": "spacer-before",
+        style: {
+            background: 'lightcyan'
+        }
+    }), /*#__PURE__*/ _react.createElement("div", {
+        "data-testid": "resizable",
+        ref: (0, _reactcomponents.useMergedRefs)(handle.elementRef, elementRef),
+        style: {
+            border: '2px dotted blue',
+            boxSizing: 'border-box',
+            height: '100%',
+            ...variableTarget === 'element' && {
+                width: elementWidth
+            }
+        }
+    }), /*#__PURE__*/ _react.createElement("div", {
+        tabIndex: 0,
+        ref: handle.handleRef,
+        role: "separator",
+        style: {
+            cursor: 'ew-resize',
+            backgroundColor: 'grey',
+            borderRadius: '4px',
+            boxSizing: 'border-box'
+        }
+    }), /*#__PURE__*/ _react.createElement("div", {
+        "data-testid": "static",
+        style: {
+            border: '2px dotted green',
+            boxSizing: 'border-box',
+            height: '100%'
+        }
+    }), /*#__PURE__*/ _react.createElement("div", {
+        "data-testid": "spacer-after",
+        style: {
+            background: 'lightcyan'
+        }
+    })), /*#__PURE__*/ _react.createElement("code", {
+        ref: codeRef,
+        style: {
+            padding: '4px',
+            border: '2px solid orange',
+            fontSize: 12
+        },
+        "data-testid": "value"
+    }, "Default value"), /*#__PURE__*/ _react.createElement("div", null, /*#__PURE__*/ _react.createElement("button", {
+        "data-testid": "reset",
+        onClick: ()=>{
+            handle.setValue(relative ? 0 : 50);
+        }
+    }, "reset")));
+}
+
+//# sourceMappingURL=useResizeHandleExample.component-browser-spec.js.map

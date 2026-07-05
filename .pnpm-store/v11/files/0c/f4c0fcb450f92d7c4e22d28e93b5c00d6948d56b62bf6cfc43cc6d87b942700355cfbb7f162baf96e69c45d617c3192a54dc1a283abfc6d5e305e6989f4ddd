@@ -1,0 +1,310 @@
+import { registerRenderingContext, unregisterRenderingContext } from '../engine/engine.js';
+import { createEmptyUniformBuffer } from '../resource/gpu-buffers.js';
+import { TEXT_INSTANCE_BYTES } from './text-data.js';
+import { ensureSharedAtlasGpu } from './_gpu/text-textures.js';
+import { getOrCreateTextPipeline } from './_gpu/text-pipeline.js';
+
+function createTextLayer(data, options) {
+  return {
+    _kind: "text-layer",
+    data,
+    positionPx: { x: options?.positionPx?.x ?? 0, y: options?.positionPx?.y ?? 0 },
+    rotationRad: options?.rotationRad ?? 0,
+    scale: options?.scale ?? 1,
+    order: options?.order ?? 0,
+    opacity: options?.opacity ?? 1,
+    coverageGamma: options?.coverageGamma ?? 1,
+    visible: options?.visible ?? true,
+    _version: 0
+  };
+}
+function setTextLayerPosition(layer, x, y) {
+  layer.positionPx.x = x;
+  layer.positionPx.y = y;
+  layer._version++;
+}
+const KIND = "text-renderer";
+const TEXT_UBO_BYTES = 96;
+const _mvpScratch = new Float32Array(16);
+function buildLayerMvp(layer, targetW, targetH, out) {
+  const s = layer.scale;
+  const r = layer.rotationRad;
+  const cr = Math.cos(r);
+  const sr = Math.sin(r);
+  const px = layer.positionPx.x;
+  const py = layer.positionPx.y;
+  const cx = 2 * s / targetW;
+  const cy = 2 * s / targetH;
+  out.fill(0);
+  out[0] = cx * cr;
+  out[1] = -cy * sr;
+  out[4] = cx * sr;
+  out[5] = cy * cr;
+  out[10] = 1;
+  out[12] = 2 * px / targetW - 1;
+  out[13] = 1 - 2 * py / targetH;
+  out[15] = 1;
+}
+function ensureLayerGpu(rr, layer) {
+  let lg = rr._layerGpu.get(layer);
+  if (lg) {
+    return lg;
+  }
+  const engine = rr._surface.engine;
+  const device = engine._device;
+  const cap = Math.max(layer.data._instanceCount, 8);
+  lg = {
+    layer,
+    textU: createEmptyUniformBuffer(engine, TEXT_UBO_BYTES, "text-layer-ubo"),
+    instanceBuf: device.createBuffer({
+      label: "text-layer-instances",
+      size: cap * TEXT_INSTANCE_BYTES,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    }),
+    instanceCap: cap,
+    pipeline: null,
+    bindGroups: [],
+    bindGroupAtlasVersions: [],
+    uploadedDataVersion: -1,
+    uploadedViewportW: 0,
+    uploadedViewportH: 0,
+    lastMvpInputs: new Float32Array(6),
+    mvpUploaded: false
+  };
+  rr._layerGpu.set(layer, lg);
+  return lg;
+}
+function ensureInstanceCapacity(device, lg, needed) {
+  if (needed <= lg.instanceCap) {
+    return;
+  }
+  let cap = lg.instanceCap;
+  while (cap < needed) {
+    cap *= 2;
+  }
+  lg.instanceBuf.destroy();
+  lg.instanceBuf = device.createBuffer({
+    label: "text-layer-instances",
+    size: cap * TEXT_INSTANCE_BYTES,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+  });
+  lg.instanceCap = cap;
+  lg.uploadedDataVersion = -1;
+}
+function uploadLayer(rr, lg, bindGroupLayout) {
+  const device = rr._surface.engine._device;
+  const layer = lg.layer;
+  const data = layer.data;
+  for (let i = 0; i < data._groups.length; i++) {
+    const g = data._groups[i];
+    const { rebuilt, gpu: atlasGpu } = ensureSharedAtlasGpu(device, g.curveSet.atlas);
+    const current = lg.bindGroups[i];
+    const currentVer = lg.bindGroupAtlasVersions[i] ?? -1;
+    if (!current || rebuilt || currentVer !== atlasGpu.uploadedVersion) {
+      lg.bindGroups[i] = device.createBindGroup({
+        label: "text-renderer-bg0-" + g.curveSetId,
+        layout: bindGroupLayout,
+        entries: [
+          { binding: 0, resource: { buffer: lg.textU } },
+          { binding: 1, resource: atlasGpu.curveTex.createView() },
+          { binding: 2, resource: atlasGpu.bandTex.createView() }
+        ]
+      });
+      lg.bindGroupAtlasVersions[i] = atlasGpu.uploadedVersion;
+    }
+  }
+  if (lg.bindGroups.length > data._groups.length) {
+    lg.bindGroups.length = data._groups.length;
+    lg.bindGroupAtlasVersions.length = data._groups.length;
+  }
+  ensureInstanceCapacity(device, lg, data._instanceCount);
+  if (lg.uploadedDataVersion !== data._version && data._instanceCount > 0) {
+    const dirtyValid = lg.uploadedDataVersion !== -1 && data._dirtyEnd > data._dirtyStart;
+    if (dirtyValid) {
+      const startFloats = data._dirtyStart * (TEXT_INSTANCE_BYTES / 4);
+      const endFloats = data._dirtyEnd * (TEXT_INSTANCE_BYTES / 4);
+      const view = data._instances.subarray(startFloats, endFloats);
+      device.queue.writeBuffer(lg.instanceBuf, data._dirtyStart * TEXT_INSTANCE_BYTES, view.buffer, view.byteOffset, view.byteLength);
+    } else {
+      const view = data._instances.subarray(0, data._instanceCount * (TEXT_INSTANCE_BYTES / 4));
+      device.queue.writeBuffer(lg.instanceBuf, 0, view.buffer, view.byteOffset, view.byteLength);
+    }
+    lg.uploadedDataVersion = data._version;
+    data._dirtyStart = 0;
+    data._dirtyEnd = 0;
+  }
+  const W = rr._targetWidth;
+  const H = rr._targetHeight;
+  const mi = lg.lastMvpInputs;
+  if (!lg.mvpUploaded || mi[0] !== layer.positionPx.x || mi[1] !== layer.positionPx.y || mi[2] !== layer.rotationRad || mi[3] !== layer.scale || mi[4] !== W || mi[5] !== H) {
+    buildLayerMvp(layer, W, H, _mvpScratch);
+    device.queue.writeBuffer(lg.textU, 0, _mvpScratch.buffer, _mvpScratch.byteOffset, 64);
+    mi[0] = layer.positionPx.x;
+    mi[1] = layer.positionPx.y;
+    mi[2] = layer.rotationRad;
+    mi[3] = layer.scale;
+    mi[4] = W;
+    mi[5] = H;
+    lg.mvpUploaded = true;
+  }
+  if (lg.uploadedViewportW !== W || lg.uploadedViewportH !== H) {
+    const vp = new Float32Array([W, H, 0, 0]);
+    device.queue.writeBuffer(lg.textU, 64, vp.buffer, vp.byteOffset, 16);
+    lg.uploadedViewportW = W;
+    lg.uploadedViewportH = H;
+  }
+  const gammaInv = layer.coverageGamma > 0 ? 1 / layer.coverageGamma : 1;
+  const col = new Float32Array([gammaInv, 1, 1, layer.opacity]);
+  device.queue.writeBuffer(lg.textU, 80, col.buffer, col.byteOffset, 16);
+}
+function disposeLayerGpu(lg) {
+  lg.textU.destroy();
+  lg.instanceBuf.destroy();
+}
+function compareLayers(a, b) {
+  return a.order - b.order;
+}
+function createTextRenderer(surface, opts) {
+  const canvas = surface.canvas;
+  const layers = opts.layers.slice();
+  const rr = {
+    _kind: KIND,
+    _surface: surface,
+    _layerGpu: /* @__PURE__ */ new Map(),
+    _targetWidth: canvas.width,
+    _targetHeight: canvas.height,
+    _disposed: false,
+    _clear: opts.clear ?? true,
+    layers,
+    _layers: layers,
+    clearColor: opts.clearValue ?? { r: 0, g: 0, b: 0, a: 1 },
+    _drawCallsPre: 0,
+    _update() {
+      textRendererUpdate(rr);
+    },
+    _record() {
+      return textRendererRecord(rr);
+    }
+  };
+  return rr;
+}
+function textRendererUpdate(rr) {
+  if (rr._disposed) {
+    return;
+  }
+  const size = rr._surface.canvas;
+  rr._targetWidth = size.width;
+  rr._targetHeight = size.height;
+  if (rr._layers.length > 1) {
+    rr._layers.sort(compareLayers);
+  }
+  const { pipeline, cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
+  for (const layer of rr._layers) {
+    if (!layer.visible) {
+      continue;
+    }
+    const lg = ensureLayerGpu(rr, layer);
+    if (lg.pipeline !== pipeline) {
+      lg.pipeline = pipeline;
+      lg.bindGroups.length = 0;
+      lg.bindGroupAtlasVersions.length = 0;
+    }
+    uploadLayer(rr, lg, cache.bindGroupLayout);
+  }
+}
+function textRendererRecord(rr) {
+  if (rr._disposed) {
+    return 0;
+  }
+  const eng = rr._surface.engine;
+  const encoder = eng._currentEncoder;
+  const swapView = rr._surface.scRT._colorView;
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: swapView,
+        clearValue: rr.clearColor,
+        loadOp: rr._clear ? "clear" : "load",
+        storeOp: "store"
+      }
+    ]
+  });
+  let drawCalls = 0;
+  let lastPipeline = null;
+  const { cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
+  const quadVertex = cache.quadVertexBuffer;
+  pass.setVertexBuffer(0, quadVertex);
+  for (const layer of rr._layers) {
+    if (!layer.visible) {
+      continue;
+    }
+    const lg = rr._layerGpu.get(layer);
+    if (!lg || !lg.pipeline) {
+      continue;
+    }
+    const data = layer.data;
+    if (data._instanceCount === 0) {
+      continue;
+    }
+    if (lastPipeline !== lg.pipeline) {
+      pass.setPipeline(lg.pipeline);
+      lastPipeline = lg.pipeline;
+    }
+    pass.setVertexBuffer(1, lg.instanceBuf);
+    for (let i = 0; i < data._groups.length; i++) {
+      const g = data._groups[i];
+      const bg = lg.bindGroups[i];
+      if (g.slotCount === 0 || !bg) {
+        continue;
+      }
+      pass.setBindGroup(0, bg);
+      pass.draw(6, g.slotCount, 0, g.slotStart);
+      drawCalls++;
+    }
+  }
+  pass.end();
+  return drawCalls;
+}
+function addTextRendererLayer(tr, layer) {
+  if (tr._disposed) {
+    throw new Error("TextRenderer has been disposed.");
+  }
+  if (tr._layers.includes(layer)) {
+    return;
+  }
+  tr._layers.push(layer);
+}
+function removeTextRendererLayer(tr, layer) {
+  const i = tr._layers.indexOf(layer);
+  if (i < 0) {
+    return false;
+  }
+  tr._layers.splice(i, 1);
+  const lg = tr._layerGpu.get(layer);
+  if (lg) {
+    disposeLayerGpu(lg);
+    tr._layerGpu.delete(layer);
+  }
+  return true;
+}
+function registerTextRenderer(tr) {
+  registerRenderingContext(tr._surface, tr);
+}
+function unregisterTextRenderer(tr) {
+  unregisterRenderingContext(tr._surface, tr);
+}
+function disposeTextRenderer(tr) {
+  if (tr._disposed) {
+    return;
+  }
+  unregisterTextRenderer(tr);
+  tr._disposed = true;
+  for (const lg of tr._layerGpu.values()) {
+    disposeLayerGpu(lg);
+  }
+  tr._layerGpu.clear();
+  tr._layers.length = 0;
+}
+
+export { addTextRendererLayer, createTextLayer, createTextRenderer, disposeTextRenderer, registerTextRenderer, removeTextRendererLayer, setTextLayerPosition, unregisterTextRenderer };
+//# sourceMappingURL=text-renderer.js.map

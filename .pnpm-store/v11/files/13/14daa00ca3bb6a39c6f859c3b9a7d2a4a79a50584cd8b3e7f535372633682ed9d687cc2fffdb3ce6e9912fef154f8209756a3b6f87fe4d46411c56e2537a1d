@@ -1,0 +1,9 @@
+let _boneBuilder = null;
+let _boneApplier = null;
+function _installBoneControl(builder, applier) {
+  _boneBuilder = builder;
+  _boneApplier = applier;
+}
+
+export { _boneApplier, _boneBuilder, _installBoneControl };
+//# sourceMappingURL=bone-control-hooks.js.map

@@ -1,0 +1,59 @@
+class ObservableVec3 {
+  _x;
+  _y;
+  _z;
+  _onDirty;
+  constructor(x, y, z, onDirty) {
+    this._x = x;
+    this._y = y;
+    this._z = z;
+    this._onDirty = onDirty;
+  }
+  get x() {
+    return this._x;
+  }
+  set x(v) {
+    if (this._x !== v) {
+      this._x = v;
+      this._onDirty();
+    }
+  }
+  get y() {
+    return this._y;
+  }
+  set y(v) {
+    if (this._y !== v) {
+      this._y = v;
+      this._onDirty();
+    }
+  }
+  get z() {
+    return this._z;
+  }
+  set z(v) {
+    if (this._z !== v) {
+      this._z = v;
+      this._onDirty();
+    }
+  }
+  /** Bulk set — one dirty notification instead of three. */
+  set(x, y, z) {
+    this._x = x;
+    this._y = y;
+    this._z = z;
+    this._onDirty();
+  }
+  /** Copy values from another vector. */
+  copyFrom(v) {
+    this.set(v.x, v.y, v.z);
+  }
+  /** Copy into a Float32Array at offset. */
+  toArray(out, offset = 0) {
+    out[offset] = this._x;
+    out[offset + 1] = this._y;
+    out[offset + 2] = this._z;
+  }
+}
+
+export { ObservableVec3 };
+//# sourceMappingURL=observable-vec3.js.map

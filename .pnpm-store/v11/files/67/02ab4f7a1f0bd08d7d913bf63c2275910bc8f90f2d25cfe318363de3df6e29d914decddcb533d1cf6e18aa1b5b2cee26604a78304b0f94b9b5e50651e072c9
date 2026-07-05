@@ -1,0 +1,8 @@
+import { type DirectionalLight } from "@babylonjs/core/index.js";
+import { type FunctionComponent } from "react";
+export declare const DirectionalLightSetupProperties: FunctionComponent<{
+    context: DirectionalLight;
+}>;
+export declare const DirectionalLightDebugProperties: FunctionComponent<{
+    context: DirectionalLight;
+}>;

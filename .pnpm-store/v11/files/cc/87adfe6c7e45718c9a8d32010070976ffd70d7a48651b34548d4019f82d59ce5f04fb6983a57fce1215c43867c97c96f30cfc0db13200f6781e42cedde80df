@@ -1,0 +1,38 @@
+import { setMainBusVolume } from './bus.js';
+import { createSoundSubGraph, connectSoundSubGraph, disposeSoundSubGraph, setSoundSubGraphVolume } from './sound-sub-graph.js';
+
+function _isAudioBus(bus) {
+  return "_graph" in bus;
+}
+function getBusInputNode(bus) {
+  return _isAudioBus(bus) ? bus._graph._in : bus._in;
+}
+async function createAudioBusAsync(engine, name, options = {}) {
+  await engine._isReady;
+  const graph = createSoundSubGraph(engine._ctx, engine, options.volume ?? 1);
+  const outBus = options.outBus ?? engine._mainBus;
+  connectSoundSubGraph(graph, getBusInputNode(outBus));
+  const bus = {
+    name,
+    _engine: engine,
+    _graph: graph,
+    _outBus: outBus,
+    _dispose: () => disposeAudioBus(bus)
+  };
+  engine._buses.add(bus);
+  return bus;
+}
+function setBusVolume(bus, value, options) {
+  if (_isAudioBus(bus)) {
+    setSoundSubGraphVolume(bus._graph, value, options);
+  } else {
+    setMainBusVolume(bus, value, options);
+  }
+}
+function disposeAudioBus(bus) {
+  disposeSoundSubGraph(bus._graph);
+  bus._engine._buses.delete(bus);
+}
+
+export { createAudioBusAsync, disposeAudioBus, getBusInputNode, setBusVolume };
+//# sourceMappingURL=audio-bus.js.map

@@ -1,0 +1,81 @@
+// Do not edit.
+import { ShaderStore } from "@babylonjs/core/Engines/shaderStore.js";
+import { atmosphereFragmentDeclaration } from "../Shaders/ShadersInclude/atmosphereFragmentDeclaration.js";
+import { atmosphereUboDeclaration } from "../Shaders/ShadersInclude/atmosphereUboDeclaration.js";
+import { helperFunctions } from "@babylonjs/core/Shaders/ShadersInclude/helperFunctions.js";
+import { intersectionFunctions } from "@babylonjs/core/Shaders/ShadersInclude/intersectionFunctions.js";
+import { atmosphereFunctions } from "../Shaders/ShadersInclude/atmosphereFunctions.js";
+const name = "compositeSkyPixelShader";
+const shader = `#define SAMPLE_SKY_VIEW_LUT
+#if USE_SKY_VIEW_LUT
+#define EXCLUDE_RAY_MARCHING_FUNCTIONS
+#endif
+precision highp float;precision highp sampler2D;
+#include<__decl__atmosphereFragment>
+#if USE_SKY_VIEW_LUT
+uniform sampler2D skyViewLut;
+#else
+uniform sampler2D transmittanceLut;uniform sampler2D multiScatteringLut;
+#endif
+#include<helperFunctions>
+#include<atmosphereFunctions>
+varying vec2 uv;varying vec3 positionOnNearPlane;void main() {gl_FragColor=vec4(0.);vec3 rayDirection=normalize(positionOnNearPlane);
+#if USE_SKY_VIEW_LUT
+float cosAngleBetweenViewAndZenith;bool isRayIntersectingGround;vec4 skyColor=sampleSkyViewLut(
+skyViewLut,
+clampedCameraRadius,
+cameraGeocentricNormal,
+rayDirection,
+directionToLight,
+cosCameraHorizonAngleFromZenith,
+cosAngleBetweenViewAndZenith,
+isRayIntersectingGround);
+#ifndef APPLY_TRANSMITTANCE_BLENDING
+skyColor.a=0.;
+#endif
+gl_FragColor=skyColor;gl_FragColor.a=isRayIntersectingGround ? 1. : gl_FragColor.a;
+#else
+bool intersectsAtmosphere=false;vec3 cameraPositionGlobalClampedToTopOfAtmosphere=vec3(0.);moveToTopAtmosphere(
+clampedCameraPositionGlobal,
+clampedCameraRadius,
+cameraGeocentricNormal,
+rayDirection,
+intersectsAtmosphere,
+cameraPositionGlobalClampedToTopOfAtmosphere);if (!intersectsAtmosphere) {return;}
+vec3 transmittance;vec3 radiance=integrateScatteredRadiance(
+false,
+atmosphereExposure*lightIntensity,
+transmittanceLut,
+multiScatteringLut,
+multiScatteringIntensity,
+cameraPositionGlobalClampedToTopOfAtmosphere,
+rayDirection,
+directionToLight,
+100000000.,
+skyViewLutSampleCount,
+-1.,
+transmittance);
+#if APPLY_TRANSMITTANCE_BLENDING
+float transparency=1.-avg(transmittance);
+#else
+float transparency=0.;
+#endif
+gl_FragColor=vec4(radiance,transparency);
+#endif
+#if OUTPUT_TO_SRGB
+gl_FragColor=toGammaSpace(gl_FragColor);
+#endif
+}`;
+// Sideeffect
+if (!ShaderStore.ShadersStore[name]) {
+    ShaderStore.ShadersStore[name] = shader;
+}
+const includes = [atmosphereFragmentDeclaration, atmosphereUboDeclaration, helperFunctions, intersectionFunctions, atmosphereFunctions];
+for (const inc of includes) {
+    if (!ShaderStore.IncludesShadersStore[inc.name]) {
+        ShaderStore.IncludesShadersStore[inc.name] = inc.shader;
+    }
+}
+/** @internal */
+export const compositeSkyPixelShader = { name, shader };
+//# sourceMappingURL=compositeSky.fragment.js.map

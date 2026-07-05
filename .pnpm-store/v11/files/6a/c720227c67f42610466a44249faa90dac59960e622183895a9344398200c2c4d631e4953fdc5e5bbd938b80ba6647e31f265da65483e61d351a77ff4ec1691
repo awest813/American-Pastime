@@ -1,0 +1,13 @@
+import type { EventHandler } from '@fluentui/react-utilities';
+import { GrowDirection, ResizeHandleUpdateEventData } from '../types';
+import type { UnitHandle } from './useUnitHandle';
+export type UseKeyboardHandlerOptions = {
+    onValueChange: EventHandler<ResizeHandleUpdateEventData>;
+    growDirection: GrowDirection;
+    getCurrentValue: () => number;
+    unitHandle: UnitHandle;
+};
+export declare const useKeyboardHandler: (options: UseKeyboardHandlerOptions) => {
+    attachHandlers: (node: HTMLElement) => void;
+    detachHandlers: (node: HTMLElement) => void;
+};

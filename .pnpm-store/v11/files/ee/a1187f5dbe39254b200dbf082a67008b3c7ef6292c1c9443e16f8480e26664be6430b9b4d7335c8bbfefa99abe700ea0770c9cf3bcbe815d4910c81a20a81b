@@ -1,0 +1,16 @@
+import { type ComponentType, type FunctionComponent } from "react";
+import { type BaseTexture } from "@babylonjs/core/index.js";
+import { type TextureEditorProps } from "../../textureEditor/textureEditor";
+export declare const BaseTexturePreviewProperties: FunctionComponent<{
+    texture: BaseTexture;
+    textureEditor: ComponentType<TextureEditorProps>;
+}>;
+export declare const BaseTextureGeneralProperties: FunctionComponent<{
+    texture: BaseTexture;
+}>;
+export declare const BaseTextureCharacteristicProperties: FunctionComponent<{
+    texture: BaseTexture;
+}>;
+export declare const BaseTextureTransformProperties: FunctionComponent<{
+    texture: BaseTexture;
+}>;

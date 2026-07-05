@@ -1,0 +1,244 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { resolveSpriteFrame } from './shared/sprite-atlas.js';
+import { _getSpriteFxHook } from './sprite-fx-hook.js';
+import { spriteBlendAlpha } from './sprite-blend.js';
+
+const PURE_2D_INSTANCE_FLOATS_PER_SPRITE = 13;
+const DEPTH_INSTANCE_FLOATS_PER_SPRITE = 14;
+const PURE_2D_INSTANCE_STRIDE_BYTES = PURE_2D_INSTANCE_FLOATS_PER_SPRITE * 4;
+const DEPTH_INSTANCE_STRIDE_BYTES = DEPTH_INSTANCE_FLOATS_PER_SPRITE * 4;
+const SAVED_SIZE_FLOATS_PER_SPRITE = 2;
+const DEFAULT_CAPACITY = 16;
+function createSprite2DLayer(atlas, opts = {}) {
+  const depth = opts.depth ?? "none";
+  const blendMode = opts.blendMode ?? spriteBlendAlpha;
+  const capacity = Math.max(1, opts.capacity ?? DEFAULT_CAPACITY);
+  const view = {
+    positionPx: [opts.view?.positionPx?.[0] ?? 0, opts.view?.positionPx?.[1] ?? 0],
+    zoom: opts.view?.zoom ?? 1,
+    rotation: opts.view?.rotation ?? 0
+  };
+  const instanceFloatsPerSprite = depth === "none" ? PURE_2D_INSTANCE_FLOATS_PER_SPRITE : DEPTH_INSTANCE_FLOATS_PER_SPRITE;
+  const instanceStrideBytes = instanceFloatsPerSprite * 4;
+  const instanceData = new F32(capacity * instanceFloatsPerSprite);
+  const layer = {
+    _entityType: "sprite-2d-layer",
+    atlas,
+    depth,
+    blendMode,
+    opacity: opts.opacity ?? 1,
+    visible: opts.visible ?? true,
+    order: opts.order ?? 0,
+    view,
+    pivot: [opts.pivot?.[0] ?? 0.5, opts.pivot?.[1] ?? 0.5],
+    layerZ: opts.layerZ ?? 0.5,
+    count: 0,
+    _capacity: capacity,
+    _instanceFloatsPerSprite: instanceFloatsPerSprite,
+    _instanceStrideBytes: instanceStrideBytes,
+    _instanceData: instanceData,
+    _savedSize: new F32(capacity * SAVED_SIZE_FLOATS_PER_SPRITE),
+    _version: 0,
+    _dirtyMin: 0,
+    _dirtyMax: 0
+  };
+  _getSpriteFxHook()?.initLayer(layer, opts);
+  return layer;
+}
+function setSprite2DShaderParams(layer, params) {
+  const target = layer.shaderParams ??= [0, 0, 0, 0];
+  target[0] = params[0];
+  target[1] = params[1];
+  target[2] = params[2];
+  target[3] = params[3];
+}
+function growCapacity(layer, minCapacity) {
+  let cap = layer._capacity;
+  while (cap < minCapacity) {
+    cap *= 2;
+  }
+  const next = new F32(cap * layer._instanceFloatsPerSprite);
+  next.set(layer._instanceData);
+  layer._instanceData = next;
+  const nextSaved = new F32(cap * SAVED_SIZE_FLOATS_PER_SPRITE);
+  nextSaved.set(layer._savedSize);
+  layer._savedSize = nextSaved;
+  layer._capacity = cap;
+}
+function setSprite2DCount(layer, count) {
+  layer.count = count;
+}
+function writeInstance(layer, slotIndex, props, prev) {
+  const data = layer._instanceData;
+  const base = slotIndex * layer._instanceFloatsPerSprite;
+  const savedBase = slotIndex * SAVED_SIZE_FLOATS_PER_SPRITE;
+  const isAdd = prev === null;
+  const frame = props.frame !== void 0 ? layer.atlas.frames[resolveSpriteFrame(layer.atlas, props.frame)] : null;
+  const posX = props.positionPx ? props.positionPx[0] : prev[0];
+  const posY = props.positionPx ? props.positionPx[1] : prev[1];
+  let trueW;
+  let trueH;
+  if (props.sizePx) {
+    trueW = props.sizePx[0];
+    trueH = props.sizePx[1];
+  } else if (frame) {
+    trueW = frame.sourceSizePx[0];
+    trueH = frame.sourceSizePx[1];
+  } else if (isAdd) {
+    trueW = 0;
+    trueH = 0;
+  } else {
+    trueW = layer._savedSize[savedBase];
+    trueH = layer._savedSize[savedBase + 1];
+  }
+  layer._savedSize[savedBase] = trueW;
+  layer._savedSize[savedBase + 1] = trueH;
+  let visible;
+  if (props.visible !== void 0) {
+    visible = props.visible;
+  } else if (isAdd) {
+    visible = true;
+  } else {
+    visible = prev[2] !== 0 || prev[3] !== 0;
+  }
+  let uMin;
+  let vMin;
+  let uMax;
+  let vMax;
+  if (frame) {
+    uMin = frame.uvMin[0];
+    vMin = frame.uvMin[1];
+    uMax = frame.uvMax[0];
+    vMax = frame.uvMax[1];
+  } else if (isAdd) {
+    uMin = 0;
+    vMin = 0;
+    uMax = 1;
+    vMax = 1;
+  } else {
+    uMin = prev[4];
+    vMin = prev[5];
+    uMax = prev[6];
+    vMax = prev[7];
+  }
+  if (props.flipX === true) {
+    const t = uMin;
+    uMin = uMax;
+    uMax = t;
+  }
+  if (props.flipY === true) {
+    const t = vMin;
+    vMin = vMax;
+    vMax = t;
+  }
+  const rotation = props.rotation ?? (prev ? prev[8] : 0);
+  const hasDepthSlot = layer.depth !== "none";
+  const z = hasDepthSlot ? props.z ?? (prev ? prev[13] : layer.layerZ) : 0;
+  data[base + 0] = posX;
+  data[base + 1] = posY;
+  data[base + 2] = visible ? trueW : 0;
+  data[base + 3] = visible ? trueH : 0;
+  data[base + 4] = uMin;
+  data[base + 5] = vMin;
+  data[base + 6] = uMax;
+  data[base + 7] = vMax;
+  data[base + 8] = rotation;
+  if (props.color) {
+    data[base + 9] = props.color[0];
+    data[base + 10] = props.color[1];
+    data[base + 11] = props.color[2];
+    data[base + 12] = props.color[3];
+  } else if (isAdd) {
+    data[base + 9] = 1;
+    data[base + 10] = 1;
+    data[base + 11] = 1;
+    data[base + 12] = 1;
+  }
+  if (hasDepthSlot) {
+    data[base + 13] = z;
+  }
+}
+function markDirty(layer, lo, hi) {
+  if (layer._dirtyMin >= layer._dirtyMax) {
+    layer._dirtyMin = lo;
+    layer._dirtyMax = hi;
+  } else {
+    if (lo < layer._dirtyMin) {
+      layer._dirtyMin = lo;
+    }
+    if (hi > layer._dirtyMax) {
+      layer._dirtyMax = hi;
+    }
+  }
+  layer._version = layer._version + 1 | 0;
+}
+function _markSprite2DDirty(layer, lo, hi) {
+  markDirty(layer, lo, hi);
+}
+function addSprite2DIndex(layer, props) {
+  if (props.positionPx === void 0) {
+    throw new Error("addSprite2DIndex: positionPx required.");
+  }
+  const idx = layer.count;
+  if (idx >= layer._capacity) {
+    growCapacity(layer, idx + 1);
+  }
+  writeInstance(layer, idx, props, null);
+  setSprite2DCount(layer, layer.count + 1);
+  markDirty(layer, idx, idx + 1);
+  return idx;
+}
+function updateSprite2DIndex(layer, index, patch) {
+  if (index < 0 || index >= layer.count) {
+    throw new Error(`updateSprite2DIndex: index ${index} out of range [0, ${layer.count})`);
+  }
+  const base = index * layer._instanceFloatsPerSprite;
+  const prev = layer._instanceData.subarray(base, base + layer._instanceFloatsPerSprite);
+  writeInstance(layer, index, patch, prev);
+  markDirty(layer, index, index + 1);
+}
+function removeSprite2DIndex(layer, index) {
+  if (index < 0 || index >= layer.count) {
+    throw new Error(`removeSprite2DIndex: index ${index} out of range [0, ${layer.count})`);
+  }
+  const last = layer.count - 1;
+  layer._handleHooks?.removeIndex(index, last);
+  if (index !== last) {
+    layer._instanceData.copyWithin(index * layer._instanceFloatsPerSprite, last * layer._instanceFloatsPerSprite, (last + 1) * layer._instanceFloatsPerSprite);
+    layer._savedSize.copyWithin(index * SAVED_SIZE_FLOATS_PER_SPRITE, last * SAVED_SIZE_FLOATS_PER_SPRITE, (last + 1) * SAVED_SIZE_FLOATS_PER_SPRITE);
+  }
+  layer._savedSize[last * SAVED_SIZE_FLOATS_PER_SPRITE] = 0;
+  layer._savedSize[last * SAVED_SIZE_FLOATS_PER_SPRITE + 1] = 0;
+  setSprite2DCount(layer, last);
+  markDirty(layer, index, index + 1);
+}
+function clearSprite2DLayer(layer) {
+  const count = layer.count;
+  layer._dirtyMin = 0;
+  layer._dirtyMax = 0;
+  layer._handleHooks?.clear();
+  if (count === 0) {
+    return;
+  }
+  layer._savedSize.fill(0, 0, count * SAVED_SIZE_FLOATS_PER_SPRITE);
+  setSprite2DCount(layer, 0);
+  layer._version = layer._version + 1 | 0;
+}
+function setSprite2DFrameIndex(layer, index, frame) {
+  if (index < 0 || index >= layer.count) {
+    throw new Error(`setSprite2DFrameIndex: index ${index} out of range [0, ${layer.count})`);
+  }
+  const frameIdx = resolveSpriteFrame(layer.atlas, frame);
+  const f = layer.atlas.frames[frameIdx];
+  const base = index * layer._instanceFloatsPerSprite;
+  const flipX = layer._instanceData[base + 4] > layer._instanceData[base + 6];
+  const flipY = layer._instanceData[base + 5] > layer._instanceData[base + 7];
+  layer._instanceData[base + 4] = flipX ? f.uvMax[0] : f.uvMin[0];
+  layer._instanceData[base + 5] = flipY ? f.uvMax[1] : f.uvMin[1];
+  layer._instanceData[base + 6] = flipX ? f.uvMin[0] : f.uvMax[0];
+  layer._instanceData[base + 7] = flipY ? f.uvMin[1] : f.uvMax[1];
+  markDirty(layer, index, index + 1);
+}
+
+export { DEPTH_INSTANCE_FLOATS_PER_SPRITE, DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_FLOATS_PER_SPRITE, PURE_2D_INSTANCE_STRIDE_BYTES, SAVED_SIZE_FLOATS_PER_SPRITE, _markSprite2DDirty, addSprite2DIndex, clearSprite2DLayer, createSprite2DLayer, removeSprite2DIndex, setSprite2DFrameIndex, setSprite2DShaderParams, updateSprite2DIndex };
+//# sourceMappingURL=sprite-2d.js.map

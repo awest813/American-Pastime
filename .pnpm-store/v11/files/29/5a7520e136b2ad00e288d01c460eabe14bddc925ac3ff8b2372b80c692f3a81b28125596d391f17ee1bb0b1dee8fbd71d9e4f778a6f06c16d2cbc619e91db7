@@ -1,0 +1,45 @@
+import { isPly, isPlyCompressedOrSH, convertPlyToSplat } from './splat-ply-parser.js';
+import { buildSplatGeometry } from './splat-data.js';
+import { createGaussianSplattingMesh } from '../mesh/GaussianSplatting/gaussian-splatting-mesh.js';
+import { attachGaussianSplattingMesh } from '../mesh/GaussianSplatting/gaussian-splatting-pipeline.js';
+import { W as WorkerWrapper } from '../_chunks/splat-sort-worker-zHmV60Ww.js';
+
+async function attachParsedSplat(scene, name, parsed, fragments) {
+  const geom = buildSplatGeometry(parsed.data);
+  const worker = new WorkerWrapper({ name: "babylon-lite-splat-sort" });
+  const eng = scene.surface.engine;
+  const mesh = createGaussianSplattingMesh(eng, name, geom, worker, parsed);
+  if (parsed.sh && parsed.shDegree && parsed.shDegree > 0) {
+    const { attachGaussianSplattingMeshSH } = await import('../mesh/GaussianSplatting/gaussian-splatting-pipeline-sh.js');
+    attachGaussianSplattingMeshSH(scene, mesh, parsed.sh, fragments);
+  } else {
+    attachGaussianSplattingMesh(scene, mesh, fragments);
+  }
+  return mesh;
+}
+async function loadSplat(scene, url, fragments) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`loadSplat: HTTP ${response.status} for ${url}`);
+  }
+  const data = await response.arrayBuffer();
+  let parsed;
+  if (isPly(data)) {
+    if (isPlyCompressedOrSH(data)) {
+      const { convertCompressedPlyToParsedSplat } = await import('./splat-ply-compressed.js');
+      parsed = convertCompressedPlyToParsedSplat(data);
+    } else {
+      parsed = convertPlyToSplat(data);
+    }
+    if (parsed.data.byteLength === 0) {
+      throw new Error(`loadSplat: failed to parse PLY at ${url} (unsupported property layout)`);
+    }
+  } else {
+    parsed = { data };
+  }
+  const name = url.substring(url.lastIndexOf("/") + 1) || "splat";
+  return await attachParsedSplat(scene, name, parsed, fragments);
+}
+
+export { attachParsedSplat, loadSplat };
+//# sourceMappingURL=load-splat.js.map

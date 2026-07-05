@@ -1,0 +1,478 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { buildRenderTarget } from '../engine/render-target.js';
+import { createRenderTargetMrt, disposeRenderTargetMrt, buildRenderTargetMrt, getSampledColorTexture, getSampledColorView } from '../engine/render-target-mrt.js';
+import { getMaterialSource } from '../material/material-view.js';
+import { createEmptyUniformBuffer } from '../resource/gpu-buffers.js';
+import { getSceneBindGroupLayout } from '../render/scene-helpers.js';
+import { ensureSceneLightState } from '../render/lights-ubo.js';
+import { SCENE_UBO_BYTES } from '../shader/scene-uniforms-size.js';
+import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType } from './geometry-types.js';
+import { _packSceneUniforms } from './scene-uniforms-pack.js';
+
+function createGeometryRendererTask(config, engine, scene) {
+  const eng = engine;
+  const sc = scene;
+  if (config.textureDescriptions.length === 0) {
+    throw new Error("GeometryRendererTask: textureDescriptions must contain at least one entry.");
+  }
+  if (config.textureDescriptions.length > 8) {
+    throw new Error(`GeometryRendererTask: textureDescriptions length ${config.textureDescriptions.length} exceeds the WebGPU max of 8 color attachments.`);
+  }
+  const attachments = config.textureDescriptions.map((d, i) => {
+    const desc = GEOMETRY_TEXTURE_DESCRIPTIONS[d.type];
+    if (!desc) {
+      throw new Error(`GeometryRendererTask: unknown texture type ${d.type}.`);
+    }
+    return {
+      _type: d.type,
+      _index: i,
+      _format: d.format ?? desc.defaultFormat,
+      _clearValue: d.clearValue ?? desc.clearValue
+    };
+  });
+  const types = attachments.map((a) => a._type);
+  const needsVelocity = types.includes(GeometryTextureType.LINEAR_VELOCITY);
+  const needsParams = needsVelocity || types.includes(GeometryTextureType.NORMALIZED_VIEW_DEPTH);
+  const samples = config.samples ?? 1;
+  const size = config.size ?? sc.surface;
+  if (config.depthTexture) {
+    const ds = config.depthTexture._descriptor.samples ?? 1;
+    if (ds !== samples) {
+      throw new Error(`GeometryRendererTask: depthTexture sampleCount (${ds}) must match samples (${samples}).`);
+    }
+  }
+  if (config.targetTexture) {
+    const ts = config.targetTexture._descriptor.samples ?? 1;
+    if (ts !== samples) {
+      throw new Error(`GeometryRendererTask: targetTexture sampleCount (${ts}) must match samples (${samples}).`);
+    }
+    if (!config.targetTexture._descriptor.format) {
+      throw new Error("GeometryRendererTask: targetTexture must have a format.");
+    }
+  }
+  const colorFormats = attachments.map((a) => a._format);
+  const outputTarget = createRenderTargetMrt({
+    label: config.name ?? "geometry-renderer",
+    colorFormats,
+    depthStencilFormat: config.depthTexture ? void 0 : "depth32float",
+    sampleCount: samples,
+    size
+  });
+  const wrapperTargets = [];
+  const typeAccessors = {};
+  for (let t = 0; t < GEOMETRY_TEXTURE_DESCRIPTIONS.length; t++) {
+    typeAccessors[t] = null;
+  }
+  for (const a of attachments) {
+    const wrapper = createWrapperRenderTarget(outputTarget, a);
+    wrapperTargets.push(wrapper);
+    typeAccessors[a._type] = wrapper;
+  }
+  const ownedDepthWrapper = config.depthTexture ? null : createDepthWrapperRenderTarget(outputTarget, samples);
+  const geometryDepthTexture = config.depthTexture ?? ownedDepthWrapper;
+  const sceneBGL = getSceneBindGroupLayout(eng);
+  const sceneUBO = createEmptyUniformBuffer(eng, SCENE_UBO_BYTES);
+  const lightsUBO = ensureSceneLightState(eng, sc)._buffer;
+  const sceneBG = eng._device.createBindGroup({
+    layout: sceneBGL,
+    entries: [
+      { binding: 0, resource: { buffer: sceneUBO } },
+      { binding: 1, resource: { buffer: lightsUBO } }
+    ]
+  });
+  const paramsUBO = needsParams ? createEmptyUniformBuffer(eng, 80) : null;
+  const paramsData = needsParams ? new F32(20) : null;
+  const colorAttachments = attachments.map(() => ({
+    view: void 0,
+    loadOp: "clear",
+    storeOp: "store",
+    clearValue: { r: 0, g: 0, b: 0, a: 0 }
+  }));
+  if (config.targetTexture) {
+    const hasClear = config.targetTextureClearColor !== void 0;
+    colorAttachments.push({
+      view: void 0,
+      loadOp: hasClear ? "clear" : "load",
+      storeOp: "store",
+      ...hasClear ? { clearValue: config.targetTextureClearColor } : {}
+    });
+  }
+  const renderPassDescriptor = {
+    label: config.name ?? "geometry-renderer",
+    colorAttachments
+  };
+  const sigColorFormats = colorFormats.slice();
+  if (config.targetTexture) {
+    sigColorFormats.push(config.targetTexture._descriptor.format);
+  }
+  const signature = {
+    _colorFormat: sigColorFormats.join(),
+    _colorFormats: sigColorFormats,
+    _depthStencilFormat: (config.depthTexture ? config.depthTexture._descriptor.dFormat : outputTarget._descriptor.depthStencilFormat) ?? "depth32float",
+    _depthCompare: "greater-equal",
+    _sampleCount: samples
+  };
+  const task = {
+    name: config.name ?? "geometry-renderer",
+    engine: eng,
+    scene: sc,
+    _passes: [],
+    _mrt: outputTarget,
+    outputTexture: config.targetTexture,
+    geometryDepthTexture,
+    geometryIrradianceTexture: typeAccessors[GeometryTextureType.IRRADIANCE],
+    geometryWorldPositionTexture: typeAccessors[GeometryTextureType.WORLD_POSITION],
+    geometryLocalPositionTexture: typeAccessors[GeometryTextureType.LOCAL_POSITION],
+    geometryReflectivityTexture: typeAccessors[GeometryTextureType.REFLECTIVITY],
+    geometryViewDepthTexture: typeAccessors[GeometryTextureType.VIEW_DEPTH],
+    geometryNormalizedViewDepthTexture: typeAccessors[GeometryTextureType.NORMALIZED_VIEW_DEPTH],
+    geometryScreenspaceDepthTexture: typeAccessors[GeometryTextureType.SCREENSPACE_DEPTH],
+    geometryViewNormalTexture: typeAccessors[GeometryTextureType.VIEW_NORMAL],
+    geometryWorldNormalTexture: typeAccessors[GeometryTextureType.WORLD_NORMAL],
+    geometryAlbedoTexture: typeAccessors[GeometryTextureType.ALBEDO],
+    geometryLinearVelocityTexture: typeAccessors[GeometryTextureType.LINEAR_VELOCITY],
+    excludeFromVelocity(mesh) {
+      task._excludedFromVelocity.add(mesh);
+    },
+    includeInVelocity(mesh) {
+      task._excludedFromVelocity.delete(mesh);
+    },
+    _attachments: attachments,
+    _views: /* @__PURE__ */ new Map(),
+    _bound: [],
+    _wrapperTargets: wrapperTargets,
+    _ownedDepthWrapper: ownedDepthWrapper,
+    _sceneUBO: sceneUBO,
+    _sceneBG: sceneBG,
+    _sceneData: new F32(SCENE_UBO_BYTES / 4),
+    _paramsUBO: paramsUBO,
+    _paramsData: paramsData,
+    _previousViewProjection: new F32(16),
+    _viewProjectionScratch: new F32(16),
+    _renderPassDescriptor: renderPassDescriptor,
+    _colorAttachments: colorAttachments,
+    _depthAttachment: null,
+    _previousWorlds: /* @__PURE__ */ new Map(),
+    _ownedDepth: false,
+    _excludedFromVelocity: /* @__PURE__ */ new Set(),
+    _needsVelocity: needsVelocity,
+    _needsParams: needsParams,
+    _signature: signature,
+    _createStandardGeometryView: null,
+    _computeStandardFeatures: null,
+    _createPbrGeometryView: null,
+    _computePbrFeatures: null,
+    _createNodeGeometryView: null,
+    async _preload() {
+      const meshes = config.meshes ?? sc.meshes;
+      let hasStandard = false;
+      let hasPbr = false;
+      let hasNode = false;
+      for (const mesh of meshes) {
+        const family = resolveMaterialFamily(mesh.material);
+        if (family === "standard") {
+          hasStandard = true;
+        } else if (family === "pbr") {
+          hasPbr = true;
+        } else if (family === "node") {
+          hasNode = true;
+        }
+      }
+      const loads = [];
+      if (hasStandard) {
+        loads.push(
+          (async () => {
+            const [viewMod, matMod] = await Promise.all([import('../material/standard/geometry-view.js'), import('../material/standard/standard-material.js')]);
+            task._createStandardGeometryView = viewMod.createStandardGeometryMaterialView;
+            task._computeStandardFeatures = matMod._computeStandardMaterialFeatures;
+          })()
+        );
+      }
+      if (hasPbr) {
+        loads.push(
+          (async () => {
+            const [viewMod, matMod] = await Promise.all([import('../material/pbr/pbr-geometry-view.js'), import('../material/pbr/pbr-material.js')]);
+            task._createPbrGeometryView = viewMod.createPbrGeometryMaterialView;
+            task._computePbrFeatures = matMod._computePbrMaterialFeatures;
+          })()
+        );
+      }
+      if (hasNode) {
+        loads.push(
+          (async () => {
+            const viewMod = await import('../material/node/node-geometry-view.js');
+            task._createNodeGeometryView = viewMod.createNodeGeometryMaterialView;
+          })()
+        );
+      }
+      await Promise.all(loads);
+    },
+    record() {
+      recordTask(task, config, eng, sc);
+    },
+    execute() {
+      return executeTask(task, eng, sc, config);
+    },
+    dispose() {
+      disposeTask(task);
+    }
+  };
+  return task;
+}
+function recordTask(task, config, eng, sc) {
+  buildRenderTargetMrt(task._mrt, eng);
+  task._ownedDepth = !config.depthTexture;
+  if (config.targetTexture && !config.targetTexture._colorTexture) {
+    buildRenderTarget(config.targetTexture, eng);
+  }
+  const mrt = task._mrt;
+  for (const a of task._attachments) {
+    const w = task._wrapperTargets[a._index];
+    w._colorTexture = getSampledColorTexture(mrt, a._index);
+    w._colorView = getSampledColorView(mrt, a._index);
+    w._width = mrt._width;
+    w._height = mrt._height;
+  }
+  if (task._ownedDepthWrapper) {
+    task._ownedDepthWrapper._depthTexture = mrt._depthTexture;
+    task._ownedDepthWrapper._depthView = mrt._depthView;
+    task._ownedDepthWrapper._width = mrt._width;
+    task._ownedDepthWrapper._height = mrt._height;
+  }
+  const lightsUBO = ensureSceneLightState(eng, sc)._buffer;
+  task._sceneBG = eng._device.createBindGroup({
+    layout: getSceneBindGroupLayout(eng),
+    entries: [
+      { binding: 0, resource: { buffer: task._sceneUBO } },
+      { binding: 1, resource: { buffer: lightsUBO } }
+    ]
+  });
+  task._bound.length = 0;
+  task._views.clear();
+  task._previousWorlds.clear();
+  const meshes = config.meshes ?? sc.meshes;
+  const attachmentTypes = task._attachments.map((a) => a._type);
+  for (const mesh of meshes) {
+    const resolved = resolveSourceMaterial(task, mesh.material);
+    if (!resolved) {
+      continue;
+    }
+    const view = ensureView(task, resolved, attachmentTypes, config);
+    const renderable = view._buildGroup._rebuildSingle(sc, mesh, view);
+    const binding = renderable.bind(eng, task._signature);
+    task._bound.push({ _mesh: mesh, _binding: binding, _view: view });
+    if (task._needsVelocity) {
+      task._previousWorlds.set(mesh, new F32(mesh.worldMatrix));
+    }
+  }
+  task._bound.sort((a, b) => (isAlphaBlend(a._binding.renderable) ? 1 : 0) - (isAlphaBlend(b._binding.renderable) ? 1 : 0));
+  rebuildRenderPassDescriptor(task, config);
+}
+function ensureView(task, resolved, attachmentTypes, config) {
+  const cached = task._views.get(resolved._mat);
+  if (cached) {
+    return cached;
+  }
+  const viewConfig = {
+    attachments: attachmentTypes,
+    emitColor: config.targetTexture !== void 0,
+    gpUBO: task._paramsUBO,
+    reverseCulling: config.reverseCulling
+  };
+  const view = resolved._family === "standard" ? task._createStandardGeometryView(resolved._mat, viewConfig) : resolved._family === "pbr" ? task._createPbrGeometryView(resolved._mat, viewConfig) : task._createNodeGeometryView(resolved._mat, viewConfig);
+  task._views.set(resolved._mat, view);
+  return view;
+}
+function isAlphaBlend(r) {
+  return r.isTransparent === true;
+}
+function rebuildRenderPassDescriptor(task, config) {
+  const mrt = task._mrt;
+  for (const a of task._attachments) {
+    const att = task._colorAttachments[a._index];
+    att.view = mrt._colorViews[a._index];
+    att.resolveTarget = mrt._resolveColorViews[a._index] ?? void 0;
+    att.loadOp = "clear";
+    att.storeOp = "store";
+    att.clearValue = a._clearValue;
+  }
+  if (config.targetTexture) {
+    const tail = task._colorAttachments[task._attachments.length];
+    tail.view = config.targetTexture._colorView;
+    tail.resolveTarget = void 0;
+  }
+  let depthView;
+  let depthFormat;
+  let depthClearValue;
+  if (config.depthTexture) {
+    depthView = config.depthTexture._depthView;
+    depthFormat = config.depthTexture._descriptor.dFormat;
+    depthClearValue = config.depthTexture._descriptor._depthClearValue ?? 0;
+  } else {
+    depthView = mrt._depthView;
+    depthFormat = mrt._descriptor.depthStencilFormat;
+    depthClearValue = 0;
+  }
+  task._depthAttachment = depthView ? {
+    view: depthView,
+    depthClearValue,
+    depthLoadOp: "clear",
+    depthStoreOp: "store",
+    ...depthFormat?.includes("stencil") ? { stencilClearValue: 0, stencilLoadOp: "clear", stencilStoreOp: "store" } : {}
+  } : null;
+  task._renderPassDescriptor.colorAttachments = task._colorAttachments;
+  task._renderPassDescriptor.depthStencilAttachment = task._depthAttachment ?? void 0;
+}
+function executeTask(task, eng, sc, config) {
+  const camera = config.camera ?? sc.camera;
+  if (!camera) {
+    return 0;
+  }
+  const mrt = task._mrt;
+  if (mrt._width === 0 || mrt._height === 0) {
+    return 0;
+  }
+  const aspect = mrt._width / mrt._height;
+  writeSceneUBO(task, eng, sc, camera, aspect);
+  if (task._needsParams) {
+    writeParamsUBO(task, eng, camera);
+  }
+  const updateCtx = { targetWidth: mrt._width, targetHeight: mrt._height, _camera: camera };
+  for (const b of task._bound) {
+    b._binding.update?.(updateCtx);
+  }
+  const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+  pass.setBindGroup(0, task._sceneBG);
+  let lastPipeline = null;
+  let draws = 0;
+  for (const b of task._bound) {
+    if (b._mesh.visible === false) {
+      continue;
+    }
+    const pipeline = b._binding.pipeline;
+    if (pipeline !== lastPipeline) {
+      pass.setPipeline(pipeline);
+      lastPipeline = pipeline;
+    }
+    draws += b._binding.draw(pass, eng);
+    if (task._needsVelocity && !task._excludedFromVelocity.has(b._mesh)) {
+      const prev = task._previousWorlds.get(b._mesh);
+      if (prev) {
+        prev.set(b._mesh.worldMatrix);
+      }
+    }
+  }
+  pass.end();
+  if (task._needsVelocity) {
+    task._previousViewProjection.set(task._viewProjectionScratch);
+  }
+  return draws;
+}
+function writeSceneUBO(task, eng, sc, camera, aspect) {
+  const data = task._sceneData;
+  _packSceneUniforms(data, eng, sc, camera, aspect);
+  const contribs = sc._sceneUboContributors;
+  if (contribs) {
+    for (const c of contribs) {
+      c(data, sc);
+    }
+  }
+  task._viewProjectionScratch.set(data.subarray(0, 16));
+  eng._device.queue.writeBuffer(task._sceneUBO, 0, data);
+}
+function writeParamsUBO(task, eng, camera) {
+  const data = task._paramsData;
+  data.set(task._previousViewProjection, 0);
+  data[16] = camera.nearPlane;
+  data[17] = camera.farPlane;
+  data[18] = 0;
+  data[19] = 0;
+  eng._device.queue.writeBuffer(task._paramsUBO, 0, data);
+}
+function disposeTask(task) {
+  task._passes.length = 0;
+  task._bound.length = 0;
+  task._views.clear();
+  task._previousWorlds.clear();
+  disposeRenderTargetMrt(task._mrt);
+  task._ownedDepth = false;
+  task._sceneUBO.destroy();
+  task._paramsUBO?.destroy();
+  task._wrapperTargets.length = 0;
+}
+function resolveMaterialFamily(material) {
+  if (!material) {
+    return null;
+  }
+  const family = getMaterialSource(material)._buildGroup?._materialFamily;
+  return family === "standard" || family === "pbr" || family === "node" ? family : null;
+}
+function resolveSourceMaterial(task, material) {
+  if (!material) {
+    return null;
+  }
+  const src = getMaterialSource(material);
+  const buildGroup = src._buildGroup;
+  if (!buildGroup) {
+    return null;
+  }
+  if (buildGroup._materialFamily === "standard") {
+    const mat = src;
+    if (!mat._renderFeatures) {
+      mat._renderFeatures = { features: task._computeStandardFeatures(mat) };
+    }
+    return { _mat: mat, _family: "standard" };
+  }
+  if (buildGroup._materialFamily === "pbr") {
+    const mat = src;
+    if (!mat._renderFeatures) {
+      mat._renderFeatures = task._computePbrFeatures(mat);
+    }
+    return { _mat: mat, _family: "pbr" };
+  }
+  if (buildGroup._materialFamily === "node") {
+    return { _mat: src, _family: "node" };
+  }
+  return null;
+}
+function createWrapperRenderTarget(mrt, attachment) {
+  const baseDesc = mrt._descriptor;
+  const wrapperDesc = {
+    lbl: `${baseDesc.label ?? "geometry"}.${attachment._index}`,
+    format: attachment._format,
+    samples: 1,
+    size: baseDesc.size
+  };
+  return {
+    _descriptor: wrapperDesc,
+    _colorTexture: null,
+    _colorView: null,
+    _depthTexture: null,
+    _depthView: null,
+    _width: 0,
+    _height: 0,
+    _eager: true
+  };
+}
+function createDepthWrapperRenderTarget(mrt, sampleCount) {
+  const baseDesc = mrt._descriptor;
+  const wrapperDesc = {
+    lbl: `${baseDesc.label ?? "geometry"}.depth`,
+    dFormat: baseDesc.depthStencilFormat,
+    samples: sampleCount,
+    size: baseDesc.size
+  };
+  return {
+    _descriptor: wrapperDesc,
+    _colorTexture: null,
+    _colorView: null,
+    _depthTexture: null,
+    _depthView: null,
+    _width: 0,
+    _height: 0,
+    _eager: true
+  };
+}
+
+export { createGeometryRendererTask };
+//# sourceMappingURL=geometry-renderer-task.js.map

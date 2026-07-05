@@ -1,0 +1,11 @@
+import { type FunctionComponent } from "react";
+import { type AdvancedDynamicTexture } from "@babylonjs/gui/2D/advancedDynamicTexture.js";
+export declare const AdvancedDynamicTextureGeneralProperties: import("react").ForwardRefExoticComponent<{
+    texture: AdvancedDynamicTexture;
+} & {
+    spinnerSize?: import("@fluentui/react-spinner").SpinnerProps["size"];
+    spinnerLabel?: string;
+} & import("react").RefAttributes<never>>;
+export declare const AdvancedDynamicTexturePreviewProperties: FunctionComponent<{
+    texture: AdvancedDynamicTexture;
+}>;

@@ -1,0 +1,19 @@
+import { type FunctionComponent } from "react";
+import { type Sprite } from "@babylonjs/core/index.js";
+import { type ISelectionService } from "../../../services/selectionService";
+export declare const SpriteGeneralProperties: FunctionComponent<{
+    sprite: Sprite;
+    selectionService: ISelectionService;
+}>;
+export declare const SpriteTransformProperties: FunctionComponent<{
+    sprite: Sprite;
+}>;
+export declare const SpriteAnimationProperties: FunctionComponent<{
+    sprite: Sprite;
+}>;
+export declare const SpriteOtherProperties: FunctionComponent<{
+    sprite: Sprite;
+}>;
+export declare const SpriteCellProperties: FunctionComponent<{
+    sprite: Sprite;
+}>;

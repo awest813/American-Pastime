@@ -1,0 +1,87 @@
+import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from './types.js';
+import { createAnimationController } from '../skeleton/skeleton-updater.js';
+
+const DEFAULT_FRAME_RATE = 60;
+function playAnimation(group) {
+  group.isPlaying = true;
+  group._stopped = false;
+}
+function pauseAnimation(group) {
+  group.isPlaying = false;
+}
+function stopAnimation(group) {
+  group.isPlaying = false;
+  group.currentTime = 0;
+  group._stopped = true;
+}
+function goToFrame(group, frame, engine) {
+  const ctrl = group._ctrl;
+  group.currentTime = frame / (group.frameRate || DEFAULT_FRAME_RATE);
+  group.isPlaying = false;
+  if (ctrl) {
+    syncControllerFromGroup(group, ctrl);
+    if (engine || !group._stopped || !group._gltfMixer) {
+      ctrl.tick(0, engine);
+      group.currentTime = ctrl.time;
+    }
+  }
+}
+function tickAnimation(group, deltaMs, engine) {
+  if (!group._stopped && group._ctrl) {
+    syncControllerFromGroup(group, group._ctrl);
+    group._ctrl.tick(deltaMs, engine);
+    group.currentTime = group._ctrl.time;
+  }
+}
+function syncControllerFromGroup(group, ctrl) {
+  ctrl.time = group.currentTime;
+  ctrl.playing = group.isPlaying;
+  ctrl.speedRatio = group.speedRatio;
+  ctrl.loop = group.loopAnimation;
+  ctrl._setMask?.(group.mask ?? null);
+}
+function createAnimationGroups(animData) {
+  const { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, nodeNames, boneOverrides } = animData;
+  const hasPointer = clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
+  const hasNodeWriteback = clips.some(
+    (c) => c.channels.some(
+      (ch) => (ch.path === PATH_TRANSLATION || ch.path === PATH_ROTATION || ch.path === PATH_SCALE) && ch.nodeIdx >= 0 && !excludedNodeIndices.has(ch.nodeIdx) && !!nodeTargets[ch.nodeIdx]
+    )
+  );
+  if (clips.length === 0 || skeletons.length === 0 && morphBindings.length === 0 && !hasPointer && !hasNodeWriteback) {
+    return [];
+  }
+  return clips.map((clip, clipIndex) => {
+    const ctrl = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames);
+    const started = clipIndex === 0;
+    const group = {
+      name: clip.name || `animation_${clipIndex}`,
+      duration: clip.duration,
+      frameRate: clip.frameRate || DEFAULT_FRAME_RATE,
+      isPlaying: started,
+      currentTime: 0,
+      targetedAnimations: clip.channels.map((ch) => {
+        const nodeIndex = ch.nodeIdx >= 0 ? ch.nodeIdx : void 0;
+        return {
+          target: nodeIndex !== void 0 ? nodeTargets[nodeIndex] : void 0,
+          targetName: nodeIndex !== void 0 ? nodeNames[nodeIndex] : void 0,
+          nodeIndex,
+          path: pathName(ch.path)
+        };
+      }),
+      speedRatio: 1,
+      loopAnimation: true,
+      weight: 1,
+      _ctrl: ctrl,
+      _stopped: !started
+    };
+    group._gltfMixer = [clip, nodes, skeletons];
+    return group;
+  });
+}
+function pathName(path) {
+  return path === PATH_TRANSLATION ? "translation" : path === PATH_ROTATION ? "rotation" : path === PATH_SCALE ? "scale" : path === PATH_POINTER ? "pointer" : "weights";
+}
+
+export { createAnimationGroups, goToFrame, pauseAnimation, playAnimation, stopAnimation, tickAnimation };
+//# sourceMappingURL=animation-group.js.map

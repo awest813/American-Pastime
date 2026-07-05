@@ -1,0 +1,78 @@
+import { HAS_DIFFUSE_TEXTURE, DIFFUSE_USES_UV2, HAS_EMISSIVE_TEXTURE, HAS_DEPTH_EMISSIVE_TEXTURE, HAS_BUMP_TEXTURE, HAS_SPECULAR_TEXTURE, SPECULAR_USES_UV2, HAS_AMBIENT_TEXTURE, AMBIENT_USES_UV2, HAS_LIGHTMAP_TEXTURE, LIGHTMAP_USES_UV2, LIGHTMAP_SHADOWMAP, LIGHTMAP_FLIP_V, HAS_OPACITY_TEXTURE, OPACITY_FROM_RGB, DOUBLE_SIDED, HAS_REFLECTION_TEXTURE, HAS_CUBE_REFLECTION, DISABLE_LIGHTING, MATERIAL_ALPHA_BLEND } from './standard-flags.js';
+export { collectStdBoundTextures } from './collect-std-bound-textures.js';
+export { createStandardMaterial } from './create-standard-material.js';
+export { getStandardGroupBuilder } from './standard-group-builder.js';
+
+function _computeStandardMaterialFeatures(m) {
+  let f = 0;
+  if (m.diffuseTexture) {
+    f |= HAS_DIFFUSE_TEXTURE;
+    if (m.diffuseCoordIndex === 1) {
+      f |= DIFFUSE_USES_UV2;
+    }
+  }
+  if (m.emissiveTexture) {
+    f |= HAS_EMISSIVE_TEXTURE;
+    if (m.emissiveTexture._sampleType === "depth") {
+      f |= HAS_DEPTH_EMISSIVE_TEXTURE;
+    }
+  }
+  if (m.bumpTexture) {
+    f |= HAS_BUMP_TEXTURE;
+  }
+  if (m.specularTexture) {
+    f |= HAS_SPECULAR_TEXTURE;
+    if (m.specularCoordIndex === 1) {
+      f |= SPECULAR_USES_UV2;
+    }
+  }
+  if (m.ambientTexture) {
+    f |= HAS_AMBIENT_TEXTURE;
+    if (m.ambientCoordIndex === 1) {
+      f |= AMBIENT_USES_UV2;
+    }
+  }
+  if (m.lightmapTexture) {
+    f |= HAS_LIGHTMAP_TEXTURE;
+    if (m.lightmapCoordIndex === 1) {
+      f |= LIGHTMAP_USES_UV2;
+    }
+    if (m.useLightmapAsShadowmap) {
+      f |= LIGHTMAP_SHADOWMAP;
+    }
+    if (m.lightmapTexture.uAng === Math.PI) {
+      f |= LIGHTMAP_FLIP_V;
+    }
+  }
+  if (m.opacityTexture) {
+    f |= HAS_OPACITY_TEXTURE;
+    if (m.opacityFromRGB) {
+      f |= OPACITY_FROM_RGB;
+    }
+  }
+  if (!m.backFaceCulling) {
+    f |= DOUBLE_SIDED;
+  }
+  if (m.reflectionTexture) {
+    f |= HAS_REFLECTION_TEXTURE;
+  }
+  if (m.reflectionCubeTexture) {
+    f |= HAS_CUBE_REFLECTION;
+  }
+  if (m.disableLighting) {
+    f |= DISABLE_LIGHTING;
+  }
+  if (m.alpha < 1) {
+    f |= MATERIAL_ALPHA_BLEND;
+  }
+  return f;
+}
+function _standardFeatureKey(features, meshFeatures, variant = "") {
+  return variant ? `${features}:${meshFeatures}:${variant}` : `${features}:${meshFeatures}`;
+}
+function _standardShaderVariantKey(shadowLights) {
+  return shadowLights.length === 0 ? "" : shadowLights.map((sl) => `${sl.lightIndex}${sl.shadowType === "pcf" ? "p" : "e"}`).join(",");
+}
+
+export { _computeStandardMaterialFeatures, _standardFeatureKey, _standardShaderVariantKey };
+//# sourceMappingURL=standard-material.js.map

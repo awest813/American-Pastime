@@ -1,0 +1,14 @@
+import { type FunctionComponent, type PropsWithChildren } from "react";
+type SettingsPopoverProps = {
+    /** Controlled open state */
+    open?: boolean;
+    /** Callback when open state changes */
+    onOpenChange?: (open: boolean) => void;
+};
+/**
+ * Settings popover component
+ * @param props
+ * @returns
+ */
+export declare const SettingsPopover: FunctionComponent<PropsWithChildren<SettingsPopoverProps>>;
+export {};

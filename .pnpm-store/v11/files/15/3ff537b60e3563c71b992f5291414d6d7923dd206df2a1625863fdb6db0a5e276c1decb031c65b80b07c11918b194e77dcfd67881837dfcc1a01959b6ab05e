@@ -1,0 +1,12 @@
+import { type FunctionComponent } from "react";
+import { type Animation } from "@babylonjs/core/Animations/animation.js";
+type EditAnimationPanelProps = {
+    animation: Animation;
+    onClose: () => void;
+};
+/**
+ * Panel for editing animation properties
+ * @returns The edit animation panel component
+ */
+export declare const EditAnimationPanel: FunctionComponent<EditAnimationPanelProps>;
+export {};

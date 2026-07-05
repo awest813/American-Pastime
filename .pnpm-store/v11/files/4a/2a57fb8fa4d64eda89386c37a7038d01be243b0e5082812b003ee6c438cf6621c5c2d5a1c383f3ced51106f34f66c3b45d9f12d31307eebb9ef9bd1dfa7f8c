@@ -1,0 +1,10 @@
+import { type FunctionComponent } from "react";
+import { type ClusteredLightContainer } from "@babylonjs/core/index.js";
+import { type ISelectionService } from "../../../services/selectionService";
+export declare const ClusteredLightContainerSetupProperties: FunctionComponent<{
+    context: ClusteredLightContainer;
+}>;
+export declare const ClusteredLightContainerLightsProperties: FunctionComponent<{
+    container: ClusteredLightContainer;
+    selectionService: ISelectionService;
+}>;

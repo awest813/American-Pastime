@@ -1,0 +1,99 @@
+let _ignoreNone = null;
+function ignoreNone() {
+  return _ignoreNone ??= [BigInt(0)];
+}
+function getCollector(world) {
+  if (!world._queryCollector) {
+    world._queryCollector = world._hknp.HP_QueryCollector_Create(1)[1];
+  }
+  return world._queryCollector;
+}
+function hitVec(slot) {
+  return { x: slot[0], y: slot[1], z: slot[2] };
+}
+function shapeProximity(world, query) {
+  const hknp = world._hknp;
+  const collector = getCollector(world);
+  const { position: p, rotation: r } = query;
+  const hkQuery = [query.shape._hkShape, [p.x, p.y, p.z], [r.x, r.y, r.z, r.w], query.maxDistance, query.shouldHitTriggers ?? false, ignoreNone()];
+  hknp.HP_World_ShapeProximityWithCollector(world._hkWorld, collector, hkQuery);
+  if (hknp.HP_QueryCollector_GetNumHits(collector)[1] > 0) {
+    const [distance, hitInputData, hitShapeData] = hknp.HP_QueryCollector_GetShapeProximityResult(collector, 0)[1];
+    return {
+      hasHit: true,
+      distance,
+      inputHitPoint: hitVec(hitInputData[3]),
+      hitPoint: hitVec(hitShapeData[3]),
+      inputHitNormal: hitVec(hitInputData[4]),
+      hitNormal: hitVec(hitShapeData[4])
+    };
+  }
+  return emptyResult();
+}
+function shapeCast(world, query) {
+  const hknp = world._hknp;
+  const collector = getCollector(world);
+  const { rotation: r, startPosition: s, endPosition: e } = query;
+  const hkQuery = [query.shape._hkShape, [r.x, r.y, r.z, r.w], [s.x, s.y, s.z], [e.x, e.y, e.z], query.shouldHitTriggers ?? false, ignoreNone()];
+  hknp.HP_World_ShapeCastWithCollector(world._hkWorld, collector, hkQuery);
+  if (hknp.HP_QueryCollector_GetNumHits(collector)[1] > 0) {
+    const [fraction, hitInputData, hitShapeData] = hknp.HP_QueryCollector_GetShapeCastResult(collector, 0)[1];
+    return {
+      hasHit: true,
+      fraction,
+      inputHitPoint: hitVec(hitInputData[3]),
+      hitPoint: hitVec(hitShapeData[3]),
+      inputHitNormal: hitVec(hitInputData[4]),
+      hitNormal: hitVec(hitShapeData[4])
+    };
+  }
+  return emptyResult();
+}
+function physicsRaycast(world, from, to, query = {}) {
+  const hknp = world._hknp;
+  const collector = getCollector(world);
+  const membership = query.membership ?? -1;
+  const collideWith = query.collideWith ?? -1;
+  const hkQuery = [[from.x, from.y, from.z], [to.x, to.y, to.z], [membership, collideWith], query.shouldHitTriggers ?? false, ignoreNone()];
+  hknp.HP_World_CastRayWithCollector(world._hkWorld, collector, hkQuery);
+  if (hknp.HP_QueryCollector_GetNumHits(collector)[1] > 0) {
+    const [, hitData] = hknp.HP_QueryCollector_GetCastRayResult(collector, 0)[1];
+    const hitPos = hitData[3];
+    const dx = from.x - hitPos[0];
+    const dy = from.y - hitPos[1];
+    const dz = from.z - hitPos[2];
+    return {
+      hasHit: true,
+      hitPoint: hitVec(hitPos),
+      hitNormal: hitVec(hitData[4]),
+      hitDistance: Math.sqrt(dx * dx + dy * dy + dz * dz),
+      triangleIndex: hitData[5],
+      body: findBodyById(world, hitData[0][0])
+    };
+  }
+  return { hasHit: false, hitPoint: { x: 0, y: 0, z: 0 }, hitNormal: { x: 0, y: 0, z: 0 }, hitDistance: 0, triangleIndex: -1, body: null };
+}
+function findBodyById(world, hitBodyId) {
+  const bodies = world._bodies;
+  for (let i = 0; i < bodies.length; i++) {
+    if (bodies[i]._hkBody[0] === hitBodyId) {
+      return bodies[i];
+    }
+  }
+  return null;
+}
+function emptyResult() {
+  const zero = () => ({ x: 0, y: 0, z: 0 });
+  return {
+    hasHit: false,
+    distance: 0,
+    fraction: 0,
+    inputHitPoint: zero(),
+    hitPoint: zero(),
+    inputHitNormal: zero(),
+    hitNormal: zero()
+  };
+}
+
+export { physicsRaycast, shapeCast, shapeProximity };
+//# sourceMappingURL=havok-queries.js.map

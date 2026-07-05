@@ -1,0 +1,56 @@
+import { F32, U32 } from '../engine/typed-arrays.js';
+
+function createTorusData(opts = {}) {
+  const diameter = opts.diameter ?? 1;
+  const thickness = opts.thickness ?? 0.5;
+  const tessellation = opts.tessellation ?? 16;
+  const R = diameter / 2;
+  const r = thickness / 2;
+  const stride = tessellation + 1;
+  const vertexCount = stride * stride;
+  const indexCount = stride * stride * 6;
+  const positions = new F32(vertexCount * 3);
+  const normals = new F32(vertexCount * 3);
+  const uvs = new F32(vertexCount * 2);
+  const indices = new U32(indexCount);
+  const TWO_PI = Math.PI * 2;
+  let vi = 0;
+  let ui = 0;
+  let ii = 0;
+  for (let i = 0; i <= tessellation; i++) {
+    const outerAngle = i * TWO_PI / tessellation - Math.PI / 2;
+    const cosOuter = Math.cos(outerAngle);
+    const sinOuter = Math.sin(outerAngle);
+    for (let j = 0; j <= tessellation; j++) {
+      const innerAngle = j * TWO_PI / tessellation + Math.PI;
+      const dx = Math.cos(innerAngle);
+      const dy = Math.sin(innerAngle);
+      const px = dx * r;
+      const x = (px + R) * cosOuter;
+      const y = dy * r;
+      const z = -(px + R) * sinOuter;
+      positions[vi] = x;
+      positions[vi + 1] = y;
+      positions[vi + 2] = z;
+      normals[vi] = dx * cosOuter;
+      normals[vi + 1] = dy;
+      normals[vi + 2] = -dx * sinOuter;
+      vi += 3;
+      uvs[ui] = i / tessellation;
+      uvs[ui + 1] = 1 - j / tessellation;
+      ui += 2;
+      const nextI = (i + 1) % stride;
+      const nextJ = (j + 1) % stride;
+      indices[ii++] = i * stride + j;
+      indices[ii++] = i * stride + nextJ;
+      indices[ii++] = nextI * stride + j;
+      indices[ii++] = i * stride + nextJ;
+      indices[ii++] = nextI * stride + nextJ;
+      indices[ii++] = nextI * stride + j;
+    }
+  }
+  return { positions, normals, uvs, indices };
+}
+
+export { createTorusData };
+//# sourceMappingURL=create-torus.js.map

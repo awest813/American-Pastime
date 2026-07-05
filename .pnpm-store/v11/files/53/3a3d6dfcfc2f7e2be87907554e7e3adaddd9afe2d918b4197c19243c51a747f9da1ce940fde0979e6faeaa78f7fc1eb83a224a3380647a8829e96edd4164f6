@@ -1,0 +1,6 @@
+import { type FunctionComponent } from "react";
+/**
+ * Bottom bar component with playback controls and frame navigation.
+ * @returns The BottomBar component.
+ */
+export declare const BottomBar: FunctionComponent;

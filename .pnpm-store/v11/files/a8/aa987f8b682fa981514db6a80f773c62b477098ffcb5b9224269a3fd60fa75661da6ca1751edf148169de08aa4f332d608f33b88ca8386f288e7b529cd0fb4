@@ -1,0 +1,56 @@
+import { initMeshTransform } from '../mesh/mesh.js';
+import { createSceneNodeFromMatrix, createSceneNode } from './scene-node.js';
+
+function createTransformNode(name, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1) {
+  return createSceneNode(name, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
+}
+function cloneTransformNode(src) {
+  if ("_gpu" in src) {
+    return cloneMeshNode(src);
+  }
+  const clone = src._localMatrix ? createSceneNodeFromMatrix(src.name + "_clone", src._localMatrix) : createTransformNode(
+    src.name + "_clone",
+    src.position.x,
+    src.position.y,
+    src.position.z,
+    src.rotationQuaternion.x,
+    src.rotationQuaternion.y,
+    src.rotationQuaternion.z,
+    src.rotationQuaternion.w,
+    src.scaling.x,
+    src.scaling.y,
+    src.scaling.z
+  );
+  for (const child of src.children) {
+    if (!("lightType" in child)) {
+      const childClone = cloneTransformNode(child);
+      childClone.parent = clone;
+      clone.children.push(childClone);
+    } else {
+      const childClone = { ...child, name: child.name + "_clone", children: [] };
+      childClone.parent = clone;
+      clone.children.push(childClone);
+    }
+  }
+  return clone;
+}
+function cloneMeshNode(mesh) {
+  const meshClone = {
+    ...mesh,
+    name: mesh.name + "_clone",
+    children: [],
+    _gpu: { ...mesh._gpu }
+  };
+  initMeshTransform(meshClone, mesh.position.x, mesh.position.y, mesh.position.z, 0, 0, 0, mesh.scaling.x, mesh.scaling.y, mesh.scaling.z);
+  const rq = mesh.rotationQuaternion;
+  meshClone.rotationQuaternion.set(rq.x, rq.y, rq.z, rq.w);
+  for (const child of mesh.children) {
+    const childClone = cloneTransformNode(child);
+    childClone.parent = meshClone;
+    meshClone.children.push(childClone);
+  }
+  return meshClone;
+}
+
+export { cloneTransformNode, createTransformNode };
+//# sourceMappingURL=transform-node.js.map

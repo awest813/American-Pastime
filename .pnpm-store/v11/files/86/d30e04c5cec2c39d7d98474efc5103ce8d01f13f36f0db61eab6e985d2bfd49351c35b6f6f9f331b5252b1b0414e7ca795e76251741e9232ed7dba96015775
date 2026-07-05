@@ -1,0 +1,10 @@
+import { type FunctionComponent } from "react";
+type AddAnimationPanelProps = {
+    onClose: () => void;
+};
+/**
+ * Panel for adding new animations
+ * @returns The add animation panel component
+ */
+export declare const AddAnimationPanel: FunctionComponent<AddAnimationPanelProps>;
+export {};

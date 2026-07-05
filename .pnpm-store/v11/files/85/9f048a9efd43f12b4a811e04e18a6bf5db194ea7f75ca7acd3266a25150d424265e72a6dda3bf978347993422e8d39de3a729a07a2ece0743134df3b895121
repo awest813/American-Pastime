@@ -1,0 +1,158 @@
+import { F32, U8 } from '../engine/typed-arrays.js';
+import { acquireGPUTexture, releaseGPUTexture } from '../resource/gpu-pool.js';
+import { mipLevelCount } from '../texture/mip-count.js';
+import { computeSceneSize } from '../material/pbr/scene-size.js';
+import { registerEnvSceneUniforms } from '../scene/scene-ubo-extras.js';
+import { getBilinearSampler, getTrilinearSampler } from '../resource/samplers.js';
+
+function createEnvSamplers(engine) {
+  return {
+    cubeSampler: getTrilinearSampler(engine),
+    brdfSampler: getBilinearSampler(engine)
+  };
+}
+function assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, lodGenerationScale, engine) {
+  const { cubeSampler, brdfSampler } = createEnvSamplers(engine);
+  return {
+    specularCube,
+    specularCubeView: specularCube.createView({ dimension: "cube" }),
+    brdfLut,
+    brdfLutView: brdfLut.createView(),
+    cubeSampler,
+    brdfSampler,
+    irradianceSH,
+    sphericalHarmonics: polynomialToPreScaledHarmonics(irradianceSH),
+    lodGenerationScale
+  };
+}
+
+const ENV_MAGIC = new U8([134, 22, 135, 150, 246, 214, 150, 54]);
+async function loadEnvironment(scene, url, options) {
+  const engine = scene.surface.engine;
+  const envPromise = fetch(url).then((r) => r.arrayBuffer());
+  const brdfPromise = fetch(options.brdfUrl).then((r) => r.blob()).then((b) => createImageBitmap(b, { premultiplyAlpha: "none", colorSpaceConversion: "none" }));
+  const envBuffer = await envPromise;
+  const { faceBlobs, irradianceSH, width, mipCount } = parseEnvFile(envBuffer);
+  const faceImages = await Promise.all(faceBlobs.map((blob) => createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" })));
+  const rgbd = await import('../loader-env/rgbd-decode.js');
+  const specularCube = rgbd.uploadCubemapRGBD(engine, faceImages, width, mipCount);
+  for (const img of faceImages) {
+    img.close();
+  }
+  const brdfImage = await brdfPromise;
+  const brdfLut = rgbd.decodeBrdfPng(engine, brdfImage);
+  brdfImage.close();
+  const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, engine);
+  scene._envTextures = textures;
+  registerEnvSceneUniforms(scene);
+  acquireGPUTexture(specularCube);
+  acquireGPUTexture(brdfLut);
+  scene._disposables.push(() => {
+    releaseGPUTexture(specularCube);
+    releaseGPUTexture(brdfLut);
+  });
+  scene.imageProcessing.toneMappingEnabled = true;
+  scene.imageProcessing.exposure = 0.8;
+  scene.imageProcessing.contrast = 1.2;
+  const groundUrl = options?.groundTextureUrl;
+  const groundTexPromise = groundUrl ? fetch(groundUrl).then((r) => r.blob()).then((b) => createImageBitmap(b, { premultiplyAlpha: "none" })) : void 0;
+  const skyboxUrl = options?.skyboxUrl;
+  const skyboxIsDds = skyboxUrl != null && skyboxUrl.toLowerCase().endsWith(".dds");
+  const skyboxIsEnv = skyboxUrl != null && (skyboxUrl === url || skyboxUrl.toLowerCase().endsWith(".env"));
+  const bgOptions = {
+    skipSkybox: skyboxIsDds || skyboxIsEnv || options?.skipSkybox,
+    skipGround: options?.skipGround
+  };
+  scene._deferredBuilders.push(async () => {
+    const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
+    const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
+    const skyHalfSize = autoSkyboxSize / 2;
+    if (!bgOptions.skipSkybox) {
+      const skybox = await import('../material/pbr/background-solid-skybox.js');
+      scene._renderables.push(skybox.buildSolidSkyboxRenderable(scene, textures, skyHalfSize, rootPosition, primaryColor));
+    }
+    if (!bgOptions.skipGround) {
+      const ground = await import('../material/pbr/background-ground.js');
+      scene._renderables.push(await ground.buildGroundRenderable(engine, groundSize, rootPosition, primaryColor, groundUrl, groundTexPromise));
+    }
+    if (skyboxIsDds) {
+      const skybox = await import('../material/pbr/background-dds-skybox.js');
+      scene._renderables.push(await skybox.buildDdsSkyboxRenderable(scene, skyHalfSize, rootPosition, primaryColor, skyboxUrl));
+    }
+    if (skyboxIsEnv) {
+      const skybox = await import('../material/pbr/background-hdr-skybox.js');
+      scene._renderables.push(skybox.buildHdrSkyboxRenderable(scene, textures, skyHalfSize, rootPosition, primaryColor));
+    }
+  });
+  return textures;
+}
+function parseEnvFile(buffer) {
+  const bytes = new U8(buffer);
+  for (let i = 0; i < 8; i++) {
+    if (bytes[i] !== ENV_MAGIC[i]) {
+      throw new Error("Invalid .env file: bad magic");
+    }
+  }
+  let pos = 8;
+  while (pos < bytes.length && bytes[pos] !== 0) {
+    pos++;
+  }
+  const jsonStr = new TextDecoder().decode(bytes.subarray(8, pos));
+  pos++;
+  const binaryStart = pos;
+  const manifest = JSON.parse(jsonStr);
+  const width = manifest.width;
+  const mipCount = mipLevelCount(width, width);
+  const irr = manifest.irradiance;
+  const irradianceSH = new F32(27);
+  const shKeys = ["x", "y", "z", "xx", "yy", "zz", "yz", "zx", "xy"];
+  for (let i = 0; i < 9; i++) {
+    const coeff = irr[shKeys[i]];
+    irradianceSH[i * 3] = coeff[0];
+    irradianceSH[i * 3 + 1] = coeff[1];
+    irradianceSH[i * 3 + 2] = coeff[2];
+  }
+  const mipmaps = manifest.specular.mipmaps;
+  const imageType = manifest.imageType || "image/png";
+  const faceBlobs = [];
+  for (const entry of mipmaps) {
+    const start = binaryStart + entry.position;
+    const slice = buffer.slice(start, start + entry.length);
+    faceBlobs.push(new Blob([slice], { type: imageType }));
+  }
+  return { faceBlobs, irradianceSH, width, mipCount };
+}
+function polynomialToPreScaledHarmonics(poly) {
+  const C00xy = 0.3333338747897695;
+  const C00z = 0.33333298856284405;
+  const C1 = 1.4999984284682104;
+  const C2 = 3.999982863580422;
+  const C20zz = 1.3333326611423701;
+  const C20xy = 0.6666653397393608;
+  const C22 = 1.999991431790211;
+  const out = new F32(36);
+  for (let i = 0; i < 3; i++) {
+    const x = poly[i];
+    const y = poly[3 + i];
+    const z = poly[6 + i];
+    const xx = poly[9 + i];
+    const yy = poly[12 + i];
+    const zz = poly[15 + i];
+    const yz = poly[18 + i];
+    const zx = poly[21 + i];
+    const xy = poly[24 + i];
+    out[i] = (xx + yy) * C00xy + zz * C00z;
+    out[4 + i] = y * C1;
+    out[8 + i] = z * C1;
+    out[12 + i] = x * C1;
+    out[16 + i] = xy * C2;
+    out[20 + i] = yz * C2;
+    out[24 + i] = zz * C20zz - (xx + yy) * C20xy;
+    out[28 + i] = zx * C2;
+    out[32 + i] = (xx - yy) * C22;
+  }
+  return out;
+}
+
+export { assembleEnvironmentTextures as a, createEnvSamplers as c, loadEnvironment as l, polynomialToPreScaledHarmonics as p };
+//# sourceMappingURL=load-env-ChDWNc4W.js.map

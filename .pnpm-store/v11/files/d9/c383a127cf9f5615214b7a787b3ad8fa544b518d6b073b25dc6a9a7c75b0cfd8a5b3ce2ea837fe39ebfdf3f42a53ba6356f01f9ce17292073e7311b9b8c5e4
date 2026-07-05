@@ -1,0 +1,7 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IToolsService } from "../toolsService";
+export declare const ReflectorServiceDefinition: ServiceDefinition<[], [IToolsService]>;
+declare const _default: {
+    readonly serviceDefinitions: readonly [ServiceDefinition<[], [IToolsService]>];
+};
+export default _default;

@@ -1,0 +1,23 @@
+import { type FunctionComponent } from "react";
+import { type BaseTexture, type ISize } from "@babylonjs/core/index.js";
+import { type IPixelData } from "./canvasManager";
+type PropertiesBarProps = {
+    texture: BaseTexture;
+    size: ISize;
+    saveTexture: () => void;
+    pixelData: IPixelData;
+    face: number;
+    setFace: (face: number) => void;
+    resetTexture: () => void;
+    resizeTexture: (width: number, height: number) => void;
+    uploadTexture: (file: File) => void;
+    mipLevel: number;
+    setMipLevel: (mipLevel: number) => void;
+};
+/**
+ * Properties bar component showing texture info and actions
+ * @param props - The properties bar properties
+ * @returns The properties bar component
+ */
+export declare const PropertiesBar: FunctionComponent<PropertiesBarProps>;
+export {};

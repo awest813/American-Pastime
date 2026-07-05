@@ -1,0 +1,10 @@
+import type { CSSUnit, CSSUnitName, GrowDirection } from '../types';
+export type UnitHandle = {
+    elementDimension: (element: HTMLElement | null) => number;
+    getOffsetStep: () => number;
+    fromPxToValue: (px: number) => number;
+    roundValue: (value: number) => number;
+    toCSSValue: (value: number) => string;
+    name: CSSUnitName;
+};
+export declare function useUnitHandle(growDirection: GrowDirection, unit: CSSUnit): UnitHandle;

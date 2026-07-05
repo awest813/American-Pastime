@@ -1,0 +1,26 @@
+import { onPhysicsAfterStep } from './havok.js';
+
+function setPhysicsShapeIsTrigger(world, shape, isTrigger) {
+  world._hknp.HP_Shape_SetTrigger(shape._hkShape, isTrigger);
+}
+function onPhysicsTrigger(world, cb) {
+  const hknp = world._hknp;
+  const TRIGGER_ENTERED = 8;
+  const TRIGGER_EXITED = 16;
+  onPhysicsAfterStep(world, () => {
+    let addr = hknp.HP_World_GetTriggerEvents(world._hkWorld)[1];
+    while (addr) {
+      const intBuf = new Int32Array(hknp.HEAPU8.buffer, addr);
+      const type = intBuf[0];
+      if (type === TRIGGER_ENTERED) {
+        cb({ type: "ENTERED" });
+      } else if (type === TRIGGER_EXITED) {
+        cb({ type: "EXITED" });
+      }
+      addr = hknp.HP_World_GetNextTriggerEvent(world._hkWorld, addr);
+    }
+  });
+}
+
+export { onPhysicsTrigger, setPhysicsShapeIsTrigger };
+//# sourceMappingURL=havok-trigger.js.map

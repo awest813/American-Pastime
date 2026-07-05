@@ -1,0 +1,5 @@
+import { type HemisphericLight } from "@babylonjs/core/index.js";
+import { type FunctionComponent } from "react";
+export declare const HemisphericLightSetupProperties: FunctionComponent<{
+    context: HemisphericLight;
+}>;

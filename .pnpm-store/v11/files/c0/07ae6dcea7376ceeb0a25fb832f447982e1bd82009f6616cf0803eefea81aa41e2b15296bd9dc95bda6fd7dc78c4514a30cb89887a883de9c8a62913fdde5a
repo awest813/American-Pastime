@@ -1,0 +1,73 @@
+import { _setShadowTaskInputPreloader, _getShadowTaskCasterMeshes } from './shadow-inputs.js';
+
+function createShadowTask(engine, scene) {
+  const shadowGenerators = /* @__PURE__ */ new Set();
+  const recordedVersion = /* @__PURE__ */ new WeakMap();
+  _setShadowTaskInputPreloader(preloadShadowTaskInput);
+  const task = {
+    name: "shadow",
+    engine,
+    scene,
+    _passes: [],
+    async _preload() {
+      const loads = [];
+      for (const light of scene.lights) {
+        const sg = light.shadowGenerator;
+        const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
+        if (sg?._preloadShadowTask && casterMeshes) {
+          shadowGenerators.add(sg);
+          loads.push(sg._preloadShadowTask(casterMeshes));
+        }
+      }
+      await Promise.all(loads);
+    },
+    record() {
+      task._passes.length = 0;
+      for (const light of scene.lights) {
+        const sg = light.shadowGenerator;
+        const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
+        if (sg?._ensureShadowTaskState && casterMeshes) {
+          shadowGenerators.add(sg);
+          const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
+          state._task.record();
+        }
+      }
+    },
+    execute() {
+      let draws = 0;
+      for (const light of scene.lights) {
+        const sg = light.shadowGenerator;
+        const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
+        if (sg?._ensureShadowTaskState && sg._renderShadowMap && casterMeshes) {
+          shadowGenerators.add(sg);
+          const existing = sg._shadowTaskState ?? null;
+          const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
+          if (!existing || existing._casterMeshes !== casterMeshes || recordedVersion.get(sg) !== scene._renderableVersion) {
+            state._task.record();
+            recordedVersion.set(sg, scene._renderableVersion);
+          }
+          draws += sg._renderShadowMap(engine, state);
+        }
+      }
+      return draws;
+    },
+    dispose() {
+      task._passes.length = 0;
+      for (const sg of shadowGenerators) {
+        const state = sg._shadowTaskState;
+        if (state) {
+          state._task.dispose();
+          sg._shadowTaskState = void 0;
+        }
+      }
+      shadowGenerators.clear();
+    }
+  };
+  return task;
+}
+async function preloadShadowTaskInput(shadowGenerator, casterMeshes) {
+  await shadowGenerator._preloadShadowTask?.(casterMeshes);
+}
+
+export { createShadowTask };
+//# sourceMappingURL=shadow-task.js.map

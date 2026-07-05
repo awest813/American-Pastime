@@ -1,0 +1,29 @@
+import { createSceneContext, onBeforeRender, addToScene, disposeScene, registerScene } from '../scene/scene-core.js';
+import { createHemisphericLight } from '../light/hemispheric.js';
+
+function createUtilityLayer(engine, mainScene, options) {
+  const scene = createSceneContext(engine);
+  scene.clearColor = { r: 0, g: 0, b: 0, a: 0 };
+  scene.camera = mainScene.camera;
+  onBeforeRender(scene, () => {
+    if (scene.camera !== mainScene.camera) {
+      scene.camera = mainScene.camera;
+    }
+  });
+  if (options?.addDefaultLight !== false) {
+    const light = createHemisphericLight([0, 1, 0]);
+    light.intensity = options?.lightIntensity ?? 2;
+    light.groundColor = [0.5, 0.5, 0.5];
+    addToScene(scene, light);
+  }
+  return { scene, mainScene };
+}
+async function registerUtilityLayer(utility) {
+  await registerScene(utility.scene);
+}
+function disposeUtilityLayer(utility) {
+  disposeScene(utility.scene);
+}
+
+export { createUtilityLayer, disposeUtilityLayer, registerUtilityLayer };
+//# sourceMappingURL=utility-layer.js.map

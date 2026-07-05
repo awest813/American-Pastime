@@ -1,0 +1,6 @@
+import { binaryEmitter } from './_math-factory.js';
+
+const emitter = binaryEmitter("MaxBlock", (l, r) => `max(${l}, ${r})`);
+
+export { emitter };
+//# sourceMappingURL=max-block.js.map

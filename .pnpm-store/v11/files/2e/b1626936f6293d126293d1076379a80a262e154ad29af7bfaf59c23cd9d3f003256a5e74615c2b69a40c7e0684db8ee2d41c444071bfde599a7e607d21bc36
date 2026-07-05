@@ -1,0 +1,181 @@
+import { F32, U16, U32 } from '../../engine/typed-arrays.js';
+import { BU, TU } from '../../engine/gpu-flags.js';
+import { mat4Identity } from '../../math/mat4-identity.js';
+import { mat4Compose } from '../../math/mat4-compose.js';
+import { ObservableVec3 } from '../../math/observable-vec3.js';
+import { ObservableQuat } from '../../math/observable-quat.js';
+import { createWorldMatrixState, attachWorldMatrixState } from '../../scene/world-matrix-state.js';
+import { eulerToQuat, createEulerProxy } from '../../scene/scene-node.js';
+import { buildSplatGeometry } from '../../loader-splat/splat-data.js';
+
+function createGaussianSplattingMesh(engine, name, geom, worker, parsed) {
+  const device = engine._device;
+  const queue = device.queue;
+  const { textureWidth, textureHeight, vertexCount } = geom;
+  const makeRgba32f = (data) => {
+    const tex = device.createTexture({
+      size: [textureWidth, textureHeight],
+      format: "rgba32float",
+      usage: TU.TEXTURE_BINDING | TU.COPY_DST
+    });
+    queue.writeTexture({ texture: tex }, data.buffer, { bytesPerRow: textureWidth * 16 }, { width: textureWidth, height: textureHeight });
+    return { tex, view: tex.createView() };
+  };
+  const centers = makeRgba32f(geom.centersRGBA);
+  const covA = makeRgba32f(geom.covARGBA);
+  const covB = makeRgba32f(geom.covBRGBA);
+  const colors = makeRgba32f(geom.colorsRGBA);
+  const sampler = device.createSampler({
+    magFilter: "nearest",
+    minFilter: "nearest",
+    addressModeU: "clamp-to-edge",
+    addressModeV: "clamp-to-edge"
+  });
+  const quadBuffer = device.createBuffer({ size: 32, usage: BU.VERTEX, mappedAtCreation: true });
+  new F32(quadBuffer.getMappedRange()).set([-2, -2, 2, -2, 2, 2, -2, 2]);
+  quadBuffer.unmap();
+  const indexBuffer = device.createBuffer({ size: 12, usage: BU.INDEX, mappedAtCreation: true });
+  new U16(indexBuffer.getMappedRange()).set([0, 1, 2, 0, 2, 3]);
+  indexBuffer.unmap();
+  const splatIndexCpu = new F32(vertexCount);
+  for (let i = 0; i < vertexCount; i++) {
+    splatIndexCpu[i] = i;
+  }
+  const splatIndexBuffer = device.createBuffer({
+    size: splatIndexCpu.byteLength,
+    usage: BU.VERTEX | BU.COPY_DST
+  });
+  queue.writeBuffer(splatIndexBuffer, 0, splatIndexCpu.buffer, 0, splatIndexCpu.byteLength);
+  let firstResolve = null;
+  const firstSortReady = new Promise((res) => {
+    firstResolve = res;
+  });
+  let retainedSplatsData = parsed.data;
+  const mesh = {
+    _kind: "gs-mesh",
+    name,
+    vertexCount,
+    textureWidth,
+    textureHeight,
+    boundMin: geom.boundMin.slice(),
+    boundMax: geom.boundMax.slice(),
+    shDegree: parsed.shDegree ?? 0,
+    _worker: worker,
+    _depthMix: new BigInt64Array(vertexCount),
+    _sortWorldMatrix: new F32(16),
+    _sortCameraForward: new F32(3),
+    _sortCameraPosition: new F32(3),
+    _canPostToWorker: true,
+    firstSortReady,
+    _firstSortResolve: firstResolve,
+    _gs: {
+      _centersTex: centers.tex,
+      _centersView: centers.view,
+      _covATex: covA.tex,
+      _covAView: covA.view,
+      _covBTex: covB.tex,
+      _covBView: covB.view,
+      _colorsTex: colors.tex,
+      _colorsView: colors.view,
+      _sampler: sampler,
+      _quadBuffer: quadBuffer,
+      _indexBuffer: indexBuffer,
+      _splatIndexBuffer: splatIndexBuffer,
+      _splatIndexCpu: splatIndexCpu,
+      _shTextures: null,
+      _shViews: null
+    }
+  };
+  Object.defineProperty(mesh, "splatsData", {
+    get: () => retainedSplatsData
+  });
+  mesh.updateData = (newBuffer) => {
+    const newGeom = buildSplatGeometry(newBuffer);
+    if (newGeom.vertexCount !== mesh.vertexCount) {
+      throw Error("GS vertex count mismatch");
+    }
+    const gs = mesh._gs;
+    const writeTex = (tex, data) => {
+      queue.writeTexture({ texture: tex }, data.buffer, { bytesPerRow: newGeom.textureWidth * 16 }, { width: newGeom.textureWidth, height: newGeom.textureHeight });
+    };
+    writeTex(gs._centersTex, newGeom.centersRGBA);
+    writeTex(gs._covATex, newGeom.covARGBA);
+    writeTex(gs._covBTex, newGeom.covBRGBA);
+    writeTex(gs._colorsTex, newGeom.colorsRGBA);
+    mesh.boundMin = newGeom.boundMin.slice();
+    mesh.boundMax = newGeom.boundMax.slice();
+    mesh._worker.postMessage({ p: newGeom.positions, n: newGeom.vertexCount }, [newGeom.positions.buffer]);
+    mesh._sortWorldMatrix.fill(0);
+    mesh._sortCameraForward.fill(0);
+    mesh._sortCameraPosition.fill(0);
+    retainedSplatsData = newBuffer;
+  };
+  initSplatTransform(mesh);
+  worker.postMessage({ p: geom.positions, n: vertexCount }, [geom.positions.buffer]);
+  worker.onmessage = (e) => {
+    const data = e.data;
+    mesh._depthMix = data.d;
+    const indices = new U32(data.d.buffer);
+    const cpu = mesh._gs._splatIndexCpu;
+    for (let j = 0; j < mesh.vertexCount; j++) {
+      cpu[j] = indices[2 * j];
+    }
+    queue.writeBuffer(mesh._gs._splatIndexBuffer, 0, cpu.buffer, 0, cpu.byteLength);
+    mesh._canPostToWorker = true;
+    if (mesh._firstSortResolve) {
+      mesh._firstSortResolve();
+      mesh._firstSortResolve = null;
+    }
+  };
+  return mesh;
+}
+function disposeGaussianSplattingMesh(mesh) {
+  const gs = mesh._gs;
+  [gs._centersTex, gs._covATex, gs._covBTex, gs._colorsTex, gs._quadBuffer, gs._indexBuffer, gs._splatIndexBuffer, ...gs._shTextures ?? []].forEach(
+    (resource) => resource.destroy()
+  );
+  mesh._worker.terminate();
+}
+function initSplatTransform(node) {
+  const wm = createWorldMatrixState(() => {
+    const p = node.position, rq2 = node.rotationQuaternion, s = node.scaling;
+    const isIdentity = p.x === 0 && p.y === 0 && p.z === 0 && rq2.x === 0 && rq2.y === 0 && rq2.z === 0 && rq2.w === 1 && s.x === 1 && s.y === 1 && s.z === 1;
+    return isIdentity ? mat4Identity() : mat4Compose(p.x, p.y, p.z, rq2.x, rq2.y, rq2.z, rq2.w, s.x, s.y, s.z);
+  });
+  const onDirty = () => wm.markLocalDirty();
+  const [iqx, iqy, iqz, iqw] = eulerToQuat(0, 0, 0);
+  const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onDirty);
+  node.rotationQuaternion = rq;
+  node.rotation = createEulerProxy(rq);
+  node.position = new ObservableVec3(0, 0, 0, onDirty);
+  node.scaling = new ObservableVec3(1, 1, 1, onDirty);
+  node.children = [];
+  Object.defineProperty(node, "parent", {
+    get() {
+      return wm.parent;
+    },
+    set(v) {
+      wm.parent = v;
+    },
+    configurable: true,
+    enumerable: true
+  });
+  Object.defineProperty(node, "worldMatrix", {
+    get() {
+      return wm.getWorldMatrix();
+    },
+    configurable: true,
+    enumerable: false
+  });
+  Object.defineProperty(node, "worldMatrixVersion", {
+    get() {
+      return wm.getWorldMatrixVersion();
+    },
+    configurable: true,
+    enumerable: false
+  });
+  attachWorldMatrixState(node, wm);
+}
+
+export { createGaussianSplattingMesh, disposeGaussianSplattingMesh };
+//# sourceMappingURL=gaussian-splatting-mesh.js.map

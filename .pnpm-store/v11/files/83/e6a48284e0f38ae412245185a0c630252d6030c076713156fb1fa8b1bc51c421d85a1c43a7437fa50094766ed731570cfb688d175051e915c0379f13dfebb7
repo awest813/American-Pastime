@@ -1,0 +1,43 @@
+import { createLightBase, applyWorldMatrixAccessors } from './light-base.js';
+import { localMatrixFromDirection } from './light-matrix.js';
+import { allocateMat4 } from '../math/_matrix-allocator.js';
+import { ObservableVec3 } from '../math/observable-vec3.js';
+
+function createDirectionalLight(direction, intensity = 1) {
+  const _localMatrix = allocateMat4();
+  const { wm, onDirty, lvs } = createLightBase(() => {
+    return localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z, _localMatrix);
+  });
+  const light = applyWorldMatrixAccessors(
+    {
+      lightType: "directional",
+      children: [],
+      direction: new ObservableVec3(direction[0], direction[1], direction[2], onDirty),
+      position: new ObservableVec3(0, 0, 0, onDirty),
+      diffuse: [1, 1, 1],
+      specular: [1, 1, 1],
+      intensity,
+      _writeLightUbo: (data, offset) => {
+        const o = offset;
+        const w = light.worldMatrix;
+        data[o] = w[8];
+        data[o + 1] = w[9];
+        data[o + 2] = w[10];
+        data[o + 3] = 1;
+        data[o + 4] = light.diffuse[0] * light.intensity;
+        data[o + 5] = light.diffuse[1] * light.intensity;
+        data[o + 6] = light.diffuse[2] * light.intensity;
+        data[o + 7] = Number.MAX_VALUE;
+        data[o + 8] = light.specular[0] * light.intensity;
+        data[o + 9] = light.specular[1] * light.intensity;
+        data[o + 10] = light.specular[2] * light.intensity;
+      }
+    },
+    wm,
+    lvs
+  );
+  return light;
+}
+
+export { createDirectionalLight };
+//# sourceMappingURL=directional-light.js.map

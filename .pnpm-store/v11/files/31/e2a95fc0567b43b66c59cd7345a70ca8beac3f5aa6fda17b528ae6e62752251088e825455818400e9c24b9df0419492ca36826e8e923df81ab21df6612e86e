@@ -1,0 +1,366 @@
+import { SS } from '../../engine/gpu-flags.js';
+import { REVERSE_DEPTH_COMPARE } from '../../engine/render-target.js';
+import { getSceneBindGroupLayout, createDefaultPipelineDescriptor } from '../../render/scene-helpers.js';
+import { SCENE_UBO_WGSL } from '../../shader/scene-uniforms.js';
+import { computeUboLayout } from '../../shader/ubo-layout.js';
+import { MAX_LIGHTS } from '../../light/types.js';
+
+function buildMeshStruct() {
+  return `struct MeshU {
+    world: mat4x4<f32>,
+    receivesShadow: vec4<f32>,
+    lc: u32,
+    li: array<vec4<u32>, ${Math.ceil(MAX_LIGHTS / 4)}>,
+};
+@group(1) @binding(0) var<uniform> meshU: MeshU;
+fn nli(i: u32) -> u32 { return meshU.li[i / 4u][i % 4u]; }`;
+}
+const SENTINEL_FRAG_OUTPUT = "_NME_FRAG_OUTPUT_";
+const SENTINEL_FRAG_DEPTH = "_NME_FRAG_DEPTH_";
+const SENTINEL_VTX_OUTPUT = "_NME_VTX_OUTPUT_";
+const SENTINEL_FRONT_FACING = "_NME_FRONT_FACING_";
+const SENTINEL_FRAG_COORD = "_NME_FRAG_COORD_";
+const SENTINEL_SCREEN_SIZE = "_NME_SCREEN_SIZE_";
+let _cache = null;
+let _cachedDevice = null;
+function getCache(engine) {
+  if (!_cache || _cachedDevice !== engine._device) {
+    _cache = /* @__PURE__ */ new Map();
+    _cachedDevice = engine._device;
+  }
+  return _cache;
+}
+function clearNodePipelineCache() {
+  _cache?.clear();
+  _cache = null;
+  _cachedDevice = null;
+}
+function buildVertexIn(state) {
+  if (state.vertexAttributes.length === 0) {
+    return `struct VertexIn {};`;
+  }
+  const lines = state.vertexAttributes.map((a, i) => `    @location(${i}) ${a._name}: ${a._type},`);
+  return `struct VertexIn {
+${lines.join("\n")}
+};`;
+}
+function buildVertexOut(state) {
+  const lines = [`    @builtin(position) position: vec4<f32>,`];
+  state.varyings.forEach((v, i) => {
+    lines.push(`    @location(${i}) ${v._name}: ${v._type},`);
+  });
+  return `struct VertexOut {
+${lines.join("\n")}
+};`;
+}
+function buildNodeUbo(state, binding) {
+  if (state.nodeUboFields.length === 0) {
+    return null;
+  }
+  const layout = computeUboLayout(state.nodeUboFields);
+  const lines = state.nodeUboFields.map((f) => `    ${f._name}: ${f._type},`);
+  const struct = `struct NodeU {
+${lines.join("\n")}
+};
+@group(1) @binding(${binding}) var<uniform> nodeU: NodeU;`;
+  return { struct, size: layout._totalBytes, offsets: layout._offsets };
+}
+function indent(body) {
+  return body.split("\n").map((l) => l.length === 0 ? l : `    ${l}`).join("\n");
+}
+function compileNodePipeline(state, vertexBody, fragmentBody, opts) {
+  const { _engine, _format, _msaaSamples } = opts;
+  const device = _engine._device;
+  const mrt = opts._mrtOutput;
+  let nextBinding = 1;
+  const _nodeUboBinding = state.nodeUboFields.length > 0 ? nextBinding++ : null;
+  const nodeUbo = _nodeUboBinding !== null ? buildNodeUbo(state, _nodeUboBinding) : null;
+  const _nodeUboSize = nodeUbo?.size ?? 0;
+  const _nodeUboOffsets = nodeUbo?.offsets ?? /* @__PURE__ */ new Map();
+  const _textureBindings = [];
+  const textureWgslDecls = [];
+  for (const tex of state.textures) {
+    const _name = tex.name;
+    const _texBinding = nextBinding++;
+    const _sampBinding = nextBinding++;
+    _textureBindings.push({ _name, _texBinding, _sampBinding });
+    const wgslTexType = tex.kind === "textureCube" ? "texture_cube<f32>" : "texture_2d<f32>";
+    textureWgslDecls.push(`@group(1) @binding(${_texBinding}) var nodeTex_${_name}: ${wgslTexType};`);
+    textureWgslDecls.push(`@group(1) @binding(${_sampBinding}) var nodeSamp_${_name}: sampler;`);
+  }
+  const lightsWgslDecls = state.usesLightsUbo ? `struct LightEntry { vLightData: vec4<f32>, vLightDiffuse: vec4<f32>, vLightSpecular: vec4<f32>, vLightDirection: vec4<f32> };
+struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<LightEntry, ${MAX_LIGHTS}> };
+@group(0) @binding(1) var<uniform> nmeLights: lightsUniforms;` : "";
+  let _morphBindings = null;
+  const morphWgslDecls = [];
+  if (state.usesMorphTargets) {
+    const _deltasBinding = nextBinding++;
+    const _uboBinding = nextBinding++;
+    _morphBindings = { _deltasBinding, _uboBinding };
+    morphWgslDecls.push(
+      `struct morphDeltasUniforms { d: array<f32> };`,
+      `@group(1) @binding(${_deltasBinding}) var<storage, read> morphDeltas: morphDeltasUniforms;`,
+      `struct morphUniforms { count: u32, vertexCount: u32, _p0: u32, _p1: u32, weights: array<f32> };`,
+      `@group(1) @binding(${_uboBinding}) var<storage, read> morph: morphUniforms;`,
+      // Helpers are emitted inline (module-scope) so they can reference `morph` + `morphDeltas`.
+      `fn nme_morphPosition(base: vec3<f32>, vi: u32) -> vec3<f32> {
+    var acc = base;
+    for (var i = 0u; i < morph.count; i = i + 1u) {
+        let b = (i * morph.vertexCount + vi) * 6u;
+        acc = acc + morph.weights[i] * vec3<f32>(morphDeltas.d[b], morphDeltas.d[b + 1u], morphDeltas.d[b + 2u]);
+    }
+    return acc;
+}`,
+      `fn nme_morphNormal(base: vec3<f32>, vi: u32) -> vec3<f32> {
+    var acc = base;
+    for (var i = 0u; i < morph.count; i = i + 1u) {
+        let b = (i * morph.vertexCount + vi) * 6u;
+        acc = acc + morph.weights[i] * vec3<f32>(morphDeltas.d[b + 3u], morphDeltas.d[b + 4u], morphDeltas.d[b + 5u]);
+    }
+    return acc;
+}`
+    );
+  }
+  let _envBindings = null;
+  let envWgslDecls = "";
+  let envBglEntries = [];
+  if (state.usesEnv && opts._envEmitter) {
+    const env = opts._envEmitter(nextBinding);
+    _envBindings = env.bindings;
+    envWgslDecls = env.wgslDecls;
+    envBglEntries = env.bglEntries;
+    nextBinding += env.bindingCount;
+  }
+  const noColorOutput = opts._noColorOutput === true;
+  const esmShadowOutput = opts._esmShadowOutput === true;
+  const shadowOutput = noColorOutput || esmShadowOutput;
+  const shadowEmit = !shadowOutput && state.shadowLights.length > 0 && opts._shadowEmitter ? opts._shadowEmitter(state.shadowLights, nextBinding, state.varyings) : null;
+  if (shadowEmit) {
+    nextBinding += shadowEmit._bindingCount;
+  }
+  const _shadowBindings = shadowEmit?._bindings ?? [];
+  const shadowWgslDecls = shadowEmit?._wgslDecls ?? "";
+  const shadowVertexInject = shadowEmit?._vertexInject ?? "";
+  const esmShadowDepthCode = opts._esmShadowDepthCode ?? "";
+  const _esmShadowParamsBinding = esmShadowOutput ? nextBinding++ : null;
+  const _geometryGpBinding = mrt && mrt._needsGpUbo ? nextBinding++ : null;
+  const _geomUbo = mrt && _geometryGpBinding !== null ? mrt._buildGeomUbo(_geometryGpBinding) : null;
+  const shadowFragmentHelper = shadowEmit?._fragmentHelper ?? (shadowOutput && state.shadowLights.length > 0 ? `fn nme_computeShadowFactors(input: VertexOut) -> array<f32, ${MAX_LIGHTS}> {
+    return array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
+}` : "");
+  const helperSources = /* @__PURE__ */ new Map();
+  for (const s of [state.vertex, state.fragment]) {
+    for (const [k, v] of s.helpers) {
+      const existing2 = helperSources.get(k);
+      if (existing2 !== void 0 && existing2 !== v) {
+        throw new Error(`NodeMaterial: helper key "${k}" registered with conflicting source bodies`);
+      }
+      helperSources.set(k, v);
+    }
+  }
+  const vertexIn = buildVertexIn(state);
+  const vertexOut = buildVertexOut(state);
+  const fragmentOut = !mrt && !noColorOutput && state.usesFragDepth ? `struct FragmentOut {
+    @location(0) color: vec4<f32>,
+    @builtin(frag_depth) fragDepth: f32,
+};` : "";
+  const wgslParts = ["// Auto-generated by NodeMaterial — DO NOT EDIT", SCENE_UBO_WGSL, buildMeshStruct()];
+  if (nodeUbo) {
+    wgslParts.push(nodeUbo.struct);
+  }
+  if (textureWgslDecls.length > 0) {
+    wgslParts.push(textureWgslDecls.join("\n"));
+  }
+  if (lightsWgslDecls) {
+    wgslParts.push(lightsWgslDecls);
+  }
+  if (morphWgslDecls.length > 0) {
+    wgslParts.push(morphWgslDecls.join("\n"));
+  }
+  if (envWgslDecls) {
+    wgslParts.push(envWgslDecls);
+  }
+  wgslParts.push(vertexIn);
+  wgslParts.push(vertexOut);
+  if (fragmentOut) {
+    wgslParts.push(fragmentOut);
+  }
+  if (mrt) {
+    wgslParts.push(mrt._struct);
+  }
+  if (shadowWgslDecls) {
+    wgslParts.push(shadowWgslDecls);
+  }
+  if (_esmShadowParamsBinding !== null) {
+    wgslParts.push(
+      `struct NmeShadowParams { biasAndScale: vec4<f32>, depthValues: vec4<f32> };
+@group(1) @binding(${_esmShadowParamsBinding}) var<uniform> nmeShadowParams: NmeShadowParams;`
+    );
+  }
+  if (_geomUbo) {
+    wgslParts.push(_geomUbo._wgsl);
+  }
+  if (shadowFragmentHelper.length > 0) {
+    wgslParts.push(shadowFragmentHelper);
+  }
+  for (const src of helperSources.values()) {
+    wgslParts.push(src);
+  }
+  const vsSig = state.usesMorphTargets ? `(in: VertexIn, @builtin(vertex_index) vertexIndex: u32)` : `(in: VertexIn)`;
+  wgslParts.push(
+    `@vertex
+fn vs_main${vsSig} -> VertexOut {
+    var out: VertexOut;
+    var ${SENTINEL_VTX_OUTPUT}: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+${indent(vertexBody)}
+` + (!shadowOutput && shadowVertexInject.length > 0 ? `    ${shadowVertexInject}
+` : ``) + `    out.position = ${SENTINEL_VTX_OUTPUT};
+    return out;
+}`
+  );
+  const fsReturnType = mrt ? mrt._fsReturnType : noColorOutput ? "" : state.usesFragDepth && !esmShadowOutput ? " -> FragmentOut" : " -> @location(0) vec4<f32>";
+  const fragDepthDecl = !mrt && (noColorOutput || esmShadowOutput || state.usesFragDepth) ? `    var ${SENTINEL_FRAG_DEPTH}: f32 = in.position.z;
+` : "";
+  const fsReturn = mrt ? mrt._fsReturn : noColorOutput ? "" : esmShadowOutput ? `${indent(esmShadowDepthCode)}
+` : state.usesFragDepth ? `    return FragmentOut(${SENTINEL_FRAG_OUTPUT}, ${SENTINEL_FRAG_DEPTH});
+` : `    return ${SENTINEL_FRAG_OUTPUT};
+`;
+  wgslParts.push(
+    `@fragment
+fn fs_main(in: VertexOut, @builtin(front_facing) ${SENTINEL_FRONT_FACING}: bool)${fsReturnType} {
+    var ${SENTINEL_FRAG_OUTPUT}: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+` + fragDepthDecl + `${indent(fragmentBody)}
+` + fsReturn + `}`
+  );
+  const rawWgsl = wgslParts.join("\n\n");
+  const _wgsl = rawWgsl.replaceAll("_NME_CAMERA_POS_", "scene.vEyePosition.xyz").replaceAll("_NME_FOG_PARAMS_", "scene.vFogInfos").replaceAll("sceneU.", "scene.").replaceAll(SENTINEL_FRAG_COORD, "in.position").replaceAll(SENTINEL_SCREEN_SIZE, "vec2<f32>(scene.vFogColor.w, scene._envPad0)");
+  const alphaMode = opts._alphaMode ?? 0;
+  const depthFormat = opts._depthStencilFormat ?? "depth24plus-stencil8";
+  const cacheKey = `${_wgsl}|${_format}|${depthFormat}|${_msaaSamples}|${opts._backFaceCulling !== false ? 1 : 0}|${alphaMode}|${mrt ? mrt._cacheKey : noColorOutput ? 1 : esmShadowOutput ? 2 : 0}`;
+  const cache = getCache(_engine);
+  const existing = cache.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+  const blend = alphaModeToBlend(alphaMode);
+  const depthWriteEnabled = blend === void 0;
+  const sceneBGL = getSceneBindGroupLayout(_engine);
+  const meshBglEntries = [{ binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } }];
+  if (_nodeUboBinding !== null) {
+    meshBglEntries.push({ binding: _nodeUboBinding, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } });
+  }
+  for (const tb of _textureBindings) {
+    meshBglEntries.push({ binding: tb._texBinding, visibility: SS.VERTEX | SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } });
+    meshBglEntries.push({ binding: tb._sampBinding, visibility: SS.VERTEX | SS.FRAGMENT, sampler: { type: "filtering" } });
+  }
+  if (_morphBindings !== null) {
+    meshBglEntries.push({
+      binding: _morphBindings._deltasBinding,
+      visibility: SS.VERTEX,
+      buffer: { type: "read-only-storage" }
+    });
+    meshBglEntries.push({
+      binding: _morphBindings._uboBinding,
+      visibility: SS.VERTEX,
+      buffer: { type: "read-only-storage" }
+    });
+  }
+  if (_envBindings) {
+    meshBglEntries.push(...envBglEntries);
+  }
+  if (shadowEmit) {
+    meshBglEntries.push(...shadowEmit._bglEntries);
+  }
+  if (_esmShadowParamsBinding !== null) {
+    meshBglEntries.push({ binding: _esmShadowParamsBinding, visibility: SS.FRAGMENT, buffer: { type: "uniform" } });
+  }
+  if (_geomUbo) {
+    meshBglEntries.push(_geomUbo._bglEntry);
+  }
+  const _meshBGL = device.createBindGroupLayout({ label: "node-mesh", entries: meshBglEntries });
+  const _vertexBuffers = state.vertexAttributes.map((a, i) => ({
+    arrayStride: a._arrayStride,
+    stepMode: a._stepMode ?? "vertex",
+    attributes: [{ format: a._gpuFormat, offset: a._offset ?? 0, shaderLocation: i }]
+  }));
+  const shaderModule = device.createShaderModule({ label: "node-material", code: _wgsl });
+  const _pipeline = mrt ? mrt._buildPipeline(device, {
+    _shaderModule: shaderModule,
+    _sceneBGL: sceneBGL,
+    _meshBGL,
+    _vertexBuffers,
+    _depthFormat: depthFormat,
+    _depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
+    _msaaSamples
+  }) : device.createRenderPipeline(
+    noColorOutput ? {
+      label: "node-material-depth",
+      layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
+      vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
+      fragment: { module: shaderModule, entryPoint: "fs_main", targets: [] },
+      depthStencil: { format: depthFormat, depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE, depthWriteEnabled: true },
+      multisample: { count: _msaaSamples },
+      primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none" }
+    } : {
+      ...createDefaultPipelineDescriptor({
+        _label: "node-material",
+        _engine,
+        _bgls: [sceneBGL, _meshBGL],
+        _vertModule: shaderModule,
+        _fragModule: shaderModule,
+        _vertexBuffers,
+        _format,
+        _depthStencilFormat: opts._depthStencilFormat,
+        _depthCompare: opts._depthCompare,
+        _msaaSamples,
+        _cullMode: opts._backFaceCulling !== false ? "back" : "none",
+        _blend: esmShadowOutput ? void 0 : blend,
+        _depthWriteEnabled: esmShadowOutput || depthWriteEnabled
+      }),
+      vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
+      fragment: { module: shaderModule, entryPoint: "fs_main", targets: [!esmShadowOutput && blend ? { format: _format, blend } : { format: _format }] }
+    }
+  );
+  const result = {
+    _wgsl,
+    _pipeline,
+    _meshBGL,
+    _nodeUboSize,
+    _nodeUboOffsets,
+    _nodeUboBinding,
+    _textureBindings,
+    _morphBindings,
+    _envBindings,
+    _shadowBindings,
+    _usesClipPlanes: state.usesClipPlanes,
+    _usesMeshAttributeFlags: state.usesMeshAttributeExists,
+    _esmShadowParamsBinding,
+    _geometryGpBinding
+  };
+  cache.set(cacheKey, result);
+  return result;
+}
+function alphaModeToBlend(mode) {
+  switch (mode) {
+    case 1:
+      return {
+        color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" }
+      };
+    case 2:
+      return {
+        color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" }
+      };
+    case 7:
+      return {
+        color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" }
+      };
+    default:
+      return void 0;
+  }
+}
+
+export { clearNodePipelineCache, compileNodePipeline };
+//# sourceMappingURL=node-pipeline.js.map

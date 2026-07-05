@@ -1,0 +1,67 @@
+import { validateExtraTextureNames, createSpriteLayerFx, makeCustomShaderLayoutEntries, nextCustomShaderKey, makeShaderModuleCache, makeExtraBindingsWgsl, makeFxStructWgsl, EMPTY_PARAMS } from './custom-shader-core.js';
+import { makeSpritePrologueWgsl } from './sprite-pipeline.js';
+import { _registerSpriteFxHook } from './sprite-fx-hook.js';
+
+function makeCustomSpriteWgsl(hasDepth, spriteGroupIndex, extraTextures, fragment, uvScroll) {
+  const fxBinding = 3 + extraTextures.length * 2;
+  return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
+${makeExtraBindingsWgsl(spriteGroupIndex, 3, extraTextures)}${makeFxStructWgsl(spriteGroupIndex, fxBinding)}
+@fragment
+fn fs(in: O) -> @location(0) vec4f {
+${fragment}
+}`;
+}
+const SPRITE_FX_HOOK = {
+  initLayer(layer, opts) {
+    const customShader = opts.customShader;
+    if (customShader) {
+      layer.customShader = customShader;
+      layer.shaderParams = [0, 0, 0, 0];
+    }
+  },
+  pipelineKeyPart(layer) {
+    return layer.customShader?._key ?? "";
+  },
+  shaderModule(engine, hasDepth, layer) {
+    return layer.customShader?._getShaderModule(engine, hasDepth, layer._uvScrollAttr != null) ?? null;
+  },
+  layoutEntries(layer, startBinding) {
+    return layer.customShader?._layoutEntries(startBinding) ?? null;
+  },
+  createLayerFx(engine, label, layer) {
+    return layer.customShader?._createLayerFx(engine, label) ?? null;
+  },
+  updateFx(fx, layer, deltaMs) {
+    fx.update(layer.shaderParams ?? EMPTY_PARAMS, deltaMs);
+  },
+  bindEntries(fx, startBinding) {
+    return fx.bindEntries(startBinding);
+  },
+  disposeFx(fx) {
+    fx.destroy();
+  }
+};
+function createSprite2DCustomShader(options) {
+  _registerSpriteFxHook(SPRITE_FX_HOOK);
+  const fragment = options.fragment;
+  if (typeof fragment !== "string" || fragment.trim().length === 0) {
+    throw new Error("createSprite2DCustomShader: `fragment` must be a non-empty WGSL string.");
+  }
+  const extraTextures = options.extraTextures ?? [];
+  validateExtraTextureNames("createSprite2DCustomShader", extraTextures);
+  const moduleCache = makeShaderModuleCache();
+  return {
+    _entityType: "sprite-2d-custom-shader",
+    _extraTextures: extraTextures,
+    _key: nextCustomShaderKey("s"),
+    _composeWgsl: (hasDepth, spriteGroupIndex, uvScroll) => makeCustomSpriteWgsl(hasDepth, spriteGroupIndex, extraTextures, fragment, uvScroll),
+    // `spriteGroupIndex = hasDepth ? 1 : 0`: depth-hosted layers put the scene UBO at group 0, so the
+    // sprite resources (atlas, extras, fx) shift to group 1; pure-2D layers keep them at group 0.
+    _getShaderModule: (engine, hasDepth, uvScroll) => moduleCache(engine, `${hasDepth ? "1" : "0"}:${uvScroll ? "u" : "-"}`, () => makeCustomSpriteWgsl(hasDepth, hasDepth ? 1 : 0, extraTextures, fragment, uvScroll)),
+    _layoutEntries: (startBinding) => makeCustomShaderLayoutEntries(extraTextures, startBinding),
+    _createLayerFx: (engine, label) => createSpriteLayerFx(engine, label, extraTextures)
+  };
+}
+
+export { createSprite2DCustomShader };
+//# sourceMappingURL=sprite-custom-shader.js.map

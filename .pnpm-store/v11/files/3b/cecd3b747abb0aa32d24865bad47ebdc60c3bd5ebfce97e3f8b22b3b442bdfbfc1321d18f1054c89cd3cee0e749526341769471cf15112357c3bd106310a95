@@ -1,0 +1,377 @@
+import { getBusInputNode } from './audio-bus.js';
+import { cleanAudioUrl } from './audio-fetch.js';
+import { createAudioSignal } from './audio-signal.js';
+import { SoundState } from './static-sound.js';
+import { createSoundSubGraph, connectSoundSubGraph, disposeSoundSubGraph, setSoundSubGraphVolume } from './sound-sub-graph.js';
+
+async function createStreamingSoundAsync(engine, source, options = {}) {
+  if (engine._isOffline) {
+    throw new Error("Streaming sounds require a real-time AudioContext.");
+  }
+  await engine._isReady;
+  const graph = createSoundSubGraph(engine._ctx, engine, options.volume ?? 1);
+  const outBus = options.outBus ?? engine._mainBus;
+  connectSoundSubGraph(graph, getBusInputNode(outBus));
+  const onEnded = createAudioSignal();
+  const sound = {
+    get state() {
+      return sound._state;
+    },
+    get instanceCount() {
+      return sound._instances.size;
+    },
+    get preloadCompletedCount() {
+      return sound._preloaded.length;
+    },
+    get onEnded() {
+      return onEnded;
+    },
+    _engine: engine,
+    _source: source,
+    _graph: graph,
+    _outBus: outBus,
+    _options: {
+      autoplay: options.autoplay ?? false,
+      loop: options.loop ?? false,
+      maxInstances: options.maxInstances ?? Infinity,
+      preloadCount: options.preloadCount ?? 1,
+      startOffset: options.startOffset ?? 0
+    },
+    _instances: /* @__PURE__ */ new Set(),
+    _preloaded: [],
+    _newest: null,
+    _state: SoundState.Stopped,
+    _onEnded: onEnded,
+    _dispose: () => disposeStreamingSound(sound)
+  };
+  engine._sounds.add(sound);
+  if (sound._options.preloadCount > 0) {
+    await preloadStreamingInstancesAsync(sound, sound._options.preloadCount);
+  }
+  if (sound._options.autoplay) {
+    playStreamingSound(sound);
+  }
+  return sound;
+}
+function preloadStreamingInstanceAsync(sound) {
+  const instance = _createStreamingInstance(sound);
+  if (!sound._preloaded.includes(instance)) {
+    sound._preloaded.push(instance);
+  }
+  return instance._preloadedPromise;
+}
+async function preloadStreamingInstancesAsync(sound, count) {
+  const promises = [];
+  for (let i = 0; i < count; i++) {
+    promises.push(preloadStreamingInstanceAsync(sound));
+  }
+  await Promise.all(promises);
+}
+function playStreamingSound(sound, options = {}) {
+  if (sound._state === SoundState.Paused) {
+    resumeStreamingSound(sound, options);
+    return;
+  }
+  let instance;
+  if (sound._preloaded.length > 0) {
+    instance = sound._preloaded[0];
+    instance._options.startOffset = sound._options.startOffset;
+    _removePreloaded(sound, instance);
+  } else {
+    instance = _createStreamingInstance(sound);
+  }
+  instance._onEnded.addOnce(instance._endedHandler);
+  sound._instances.add(instance);
+  sound._newest = instance;
+  const onStateChanged = () => {
+    if (instance._state === SoundState.Started) {
+      _stopExcessInstances(sound);
+      unsubStateChanged();
+    }
+  };
+  const unsubStateChanged = instance._onStateChanged.add(onStateChanged);
+  const opts = {
+    loop: options.loop ?? sound._options.loop,
+    startOffset: options.startOffset ?? sound._options.startOffset,
+    volume: options.volume ?? 1
+  };
+  _instancePlay(instance, opts);
+  sound._state = instance._state;
+}
+function pauseStreamingSound(sound) {
+  for (const instance of sound._instances) {
+    _instancePause(instance);
+  }
+  sound._state = SoundState.Paused;
+}
+function resumeStreamingSound(sound, options = {}) {
+  if (sound._state !== SoundState.Paused) {
+    return;
+  }
+  for (const instance of sound._instances) {
+    _instanceResume(instance, options);
+  }
+  sound._state = SoundState.Started;
+}
+function stopStreamingSound(sound) {
+  sound._state = SoundState.Stopped;
+  for (const instance of Array.from(sound._instances)) {
+    _instanceStop(instance);
+  }
+}
+function setStreamingSoundVolume(sound, value, options) {
+  setSoundSubGraphVolume(sound._graph, value, options);
+}
+function disposeStreamingSound(sound) {
+  stopStreamingSound(sound);
+  for (const instance of Array.from(sound._instances)) {
+    _instanceDispose(instance);
+  }
+  sound._instances.clear();
+  for (const instance of sound._preloaded.slice()) {
+    _instanceDispose(instance);
+  }
+  sound._preloaded.length = 0;
+  disposeSoundSubGraph(sound._graph);
+  sound._onEnded._clear();
+  sound._engine._sounds.delete(sound);
+}
+function _stopExcessInstances(sound) {
+  if (sound._options.maxInstances < Infinity) {
+    const started = Array.from(sound._instances).filter((i) => i._state === SoundState.Started);
+    const toStop = started.length - sound._options.maxInstances;
+    for (let i = 0; i < toStop; i++) {
+      _instanceStop(started[i]);
+    }
+  }
+}
+function _removePreloaded(sound, instance) {
+  const index = sound._preloaded.indexOf(instance);
+  if (index !== -1) {
+    sound._preloaded.splice(index, 1);
+  }
+}
+function _onInstanceEnded(sound, instance) {
+  if (sound._newest === instance) {
+    sound._newest = null;
+  }
+  sound._instances.delete(instance);
+  if (sound._instances.size === 0) {
+    sound._state = SoundState.Stopped;
+    sound._onEnded._notify(sound);
+  }
+  _instanceDispose(instance);
+}
+function _createStreamingInstance(sound) {
+  const engine = sound._engine;
+  let resolveReady;
+  let rejectReady;
+  const readyPromise = new Promise((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  const instance = {
+    _sound: sound,
+    _engine: engine,
+    _options: {
+      loop: sound._options.loop,
+      startOffset: sound._options.startOffset
+    },
+    _mediaElement: void 0,
+    _sourceNode: null,
+    _volumeNode: new GainNode(engine._ctx),
+    _state: SoundState.Stopped,
+    _enginePlayTime: Infinity,
+    _enginePauseTime: 0,
+    _isReady: false,
+    _readyPromise: readyPromise,
+    _resolveReady: resolveReady,
+    _rejectReady: rejectReady,
+    // The preloaded promise resolves on ready and rejects on error.
+    _preloadedPromise: readyPromise,
+    _engineStateUnsub: null,
+    _userGestureUnsub: null,
+    _onEnded: createAudioSignal(),
+    _onStateChanged: createAudioSignal(),
+    _endedHandler: () => _onInstanceEnded(sound, instance),
+    _canPlayThroughHandler: () => _onCanPlayThrough(instance),
+    _mediaEndedHandler: () => _onMediaEnded(instance),
+    _errorHandler: (reason) => _onMediaError(instance, reason),
+    _engineStateHandler: () => _onEngineStateChanged(instance),
+    _userGestureHandler: () => _instancePlay(instance, { loop: instance._options.loop, startOffset: instance._options.startOffset, volume: instance._volumeNode.gain.value })
+  };
+  _initMediaElement(instance);
+  return instance;
+}
+function _initMediaElement(instance) {
+  const source = instance._sound._source;
+  let mediaElement;
+  if (typeof source === "string") {
+    mediaElement = new Audio(cleanAudioUrl(source));
+  } else if (Array.isArray(source)) {
+    mediaElement = new Audio();
+    for (const url of source) {
+      const sourceEl = document.createElement("source");
+      sourceEl.src = cleanAudioUrl(url);
+      mediaElement.appendChild(sourceEl);
+    }
+  } else {
+    mediaElement = source;
+  }
+  mediaElement.crossOrigin = "anonymous";
+  mediaElement.controls = false;
+  mediaElement.loop = instance._options.loop;
+  mediaElement.preload = "auto";
+  mediaElement.addEventListener("canplaythrough", instance._canPlayThroughHandler, { once: true });
+  mediaElement.addEventListener("ended", instance._mediaEndedHandler, { once: true });
+  mediaElement.addEventListener("error", instance._errorHandler, { once: true });
+  mediaElement.load();
+  const sourceNode = new MediaElementAudioSourceNode(instance._engine._ctx, { mediaElement });
+  sourceNode.connect(instance._volumeNode);
+  instance._volumeNode.connect(instance._sound._graph._in);
+  instance._sourceNode = sourceNode;
+  instance._mediaElement = mediaElement;
+}
+function _setStreamingInstanceState(instance, state) {
+  instance._state = state;
+  instance._onStateChanged._notify(instance);
+}
+function _instanceCurrentTime(instance) {
+  if (instance._state === SoundState.Stopped) {
+    return 0;
+  }
+  const timeSinceLastStart = instance._state === SoundState.Paused ? 0 : instance._engine.currentTime - instance._enginePlayTime;
+  return instance._enginePauseTime + timeSinceLastStart + instance._options.startOffset;
+}
+function _instancePlay(instance, options) {
+  if (instance._state === SoundState.Started) {
+    return;
+  }
+  instance._options.loop = options.loop;
+  instance._mediaElement.loop = options.loop;
+  let startOffset = options.startOffset;
+  if (instance._state === SoundState.Paused) {
+    startOffset = _instanceCurrentTime(instance);
+  }
+  if (startOffset > 0) {
+    instance._mediaElement.currentTime = startOffset;
+  }
+  instance._volumeNode.gain.value = options.volume;
+  _play(instance);
+}
+function _instancePause(instance) {
+  if (instance._state !== SoundState.Starting && instance._state !== SoundState.Started) {
+    return;
+  }
+  _setStreamingInstanceState(instance, SoundState.Paused);
+  instance._enginePauseTime += instance._engine.currentTime - instance._enginePlayTime;
+  instance._mediaElement.pause();
+}
+function _instanceResume(instance, options) {
+  if (instance._state !== SoundState.Paused) {
+    return;
+  }
+  _instancePlay(instance, {
+    loop: options.loop ?? instance._options.loop,
+    startOffset: options.startOffset ?? instance._options.startOffset,
+    volume: options.volume ?? instance._volumeNode.gain.value
+  });
+}
+function _instanceStop(instance) {
+  if (instance._state === SoundState.Stopped) {
+    return;
+  }
+  instance._mediaElement.pause();
+  _onMediaEnded(instance);
+  instance._engineStateUnsub?.();
+  instance._engineStateUnsub = null;
+}
+function _instanceDispose(instance) {
+  _instanceStop(instance);
+  instance._sourceNode?.disconnect(instance._volumeNode);
+  instance._sourceNode = null;
+  instance._volumeNode.disconnect();
+  const mediaElement = instance._mediaElement;
+  if (mediaElement) {
+    mediaElement.removeEventListener("canplaythrough", instance._canPlayThroughHandler);
+    mediaElement.removeEventListener("ended", instance._mediaEndedHandler);
+    mediaElement.removeEventListener("error", instance._errorHandler);
+  }
+  instance._engineStateUnsub?.();
+  instance._engineStateUnsub = null;
+  instance._userGestureUnsub?.();
+  instance._userGestureUnsub = null;
+  instance._resolveReady();
+  instance._onEnded._clear();
+  instance._onStateChanged._clear();
+}
+function _onCanPlayThrough(instance) {
+  instance._isReady = true;
+  instance._resolveReady();
+}
+function _onMediaEnded(instance) {
+  const wasPaused = instance._state === SoundState.Paused;
+  _setStreamingInstanceState(instance, SoundState.Stopped);
+  if (!wasPaused) {
+    instance._onEnded._notify(instance);
+  }
+}
+function _onMediaError(instance, reason) {
+  _setStreamingInstanceState(instance, SoundState.FailedToStart);
+  instance._rejectReady(reason);
+  _instanceDispose(instance);
+}
+function _onEngineStateChanged(instance) {
+  if (instance._engine.state !== "running") {
+    return;
+  }
+  if (instance._options.loop && instance._state === SoundState.Starting) {
+    _instancePlay(instance, { loop: instance._options.loop, startOffset: instance._options.startOffset, volume: instance._volumeNode.gain.value });
+  }
+  instance._engineStateUnsub?.();
+  instance._engineStateUnsub = null;
+}
+function _play(instance) {
+  _setStreamingInstanceState(instance, SoundState.Starting);
+  if (!instance._isReady) {
+    void _playWhenReady(instance);
+    return;
+  }
+  if (instance._state !== SoundState.Starting) {
+    return;
+  }
+  if (instance._engine.state === "running") {
+    const result = instance._mediaElement.play();
+    instance._enginePlayTime = instance._engine.currentTime;
+    _setStreamingInstanceState(instance, SoundState.Started);
+    if (result && typeof result.then === "function") {
+      void _awaitPlayResult(instance, result);
+    }
+  } else if (instance._options.loop) {
+    instance._engineStateUnsub = instance._engine.onStateChanged.add(instance._engineStateHandler);
+  } else {
+    _instanceStop(instance);
+    _setStreamingInstanceState(instance, SoundState.FailedToStart);
+  }
+}
+async function _playWhenReady(instance) {
+  try {
+    await instance._readyPromise;
+    _play(instance);
+  } catch {
+    _setStreamingInstanceState(instance, SoundState.FailedToStart);
+  }
+}
+async function _awaitPlayResult(instance, result) {
+  try {
+    await result;
+  } catch {
+    _setStreamingInstanceState(instance, SoundState.FailedToStart);
+    if (instance._options.loop) {
+      instance._userGestureUnsub = instance._engine.onUserGesture.addOnce(instance._userGestureHandler);
+    }
+  }
+}
+
+export { createStreamingSoundAsync, disposeStreamingSound, pauseStreamingSound, playStreamingSound, preloadStreamingInstanceAsync, preloadStreamingInstancesAsync, resumeStreamingSound, setStreamingSoundVolume, stopStreamingSound };
+//# sourceMappingURL=streaming-sound.js.map

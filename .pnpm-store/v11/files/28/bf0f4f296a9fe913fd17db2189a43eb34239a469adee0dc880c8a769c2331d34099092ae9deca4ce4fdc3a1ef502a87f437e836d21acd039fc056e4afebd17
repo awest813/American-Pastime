@@ -1,0 +1,25 @@
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../../services/selectionService";
+import { SpriteManager } from "@babylonjs/core/Sprites/spriteManager.js";
+export declare const SpriteManagerGeneralProperties: FunctionComponent<{
+    spriteManager: SpriteManager;
+    selectionService: ISelectionService;
+}>;
+export declare const SpriteManagerOtherProperties: FunctionComponent<{
+    spriteManager: SpriteManager;
+}>;
+export declare const SpriteManagerCellProperties: FunctionComponent<{
+    spriteManager: SpriteManager;
+}>;
+export declare const SpriteManagerFileProperties: FunctionComponent<{
+    spriteManager: SpriteManager;
+    selectionService: ISelectionService;
+}>;
+export declare const SpriteManagerSnippetProperties: FunctionComponent<{
+    spriteManager: SpriteManager;
+    selectionService: ISelectionService;
+}>;
+export declare const SpriteManagerActionsProperties: FunctionComponent<{
+    spriteManager: SpriteManager;
+    selectionService: ISelectionService;
+}>;

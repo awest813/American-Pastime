@@ -1,0 +1,25 @@
+const gsGpuPickingFragment = {
+  id: "gsGpuPicking",
+  helperFunctions: (
+    /* wgsl */
+    `
+struct GsPickingU { pickingColor: vec3<f32> };
+@group(2) @binding(0) var<uniform> picking: GsPickingU;
+`
+  ),
+  fragmentSlots: {
+    GS_FRAGMENT_BEFORE_FRAGCOLOR: (
+      /* wgsl */
+      `
+            if (finalColor.a < 0.001) { discard; }
+            finalColor = vec4<f32>(picking.pickingColor, 1.0);
+        `
+    )
+  }
+};
+function encodeIdToColor(id) {
+  return [(id >> 16 & 255) / 255, (id >> 8 & 255) / 255, (id & 255) / 255];
+}
+
+export { encodeIdToColor, gsGpuPickingFragment };
+//# sourceMappingURL=gs-gpu-picking-fragment.js.map

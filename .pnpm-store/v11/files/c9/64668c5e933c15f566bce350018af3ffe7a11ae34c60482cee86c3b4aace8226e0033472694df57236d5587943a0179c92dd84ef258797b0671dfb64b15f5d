@@ -1,0 +1,151 @@
+import { U8, DV } from '../engine/typed-arrays.js';
+import { TU } from '../engine/gpu-flags.js';
+import { getOrCreateSampler, acquireTexture } from '../resource/gpu-pool.js';
+import { loadTexture2D } from './texture-2d.js';
+import { suffixToFeature, getCompressedFormat } from './compressed-formats.js';
+
+const KTX_MAGIC = new U8([171, 75, 84, 88, 32, 49, 49, 187, 13, 10, 26, 10]);
+function parseKtx1(buffer) {
+  const bytes = new U8(buffer);
+  if (buffer.byteLength < 64) {
+    throw new Error("KTX: file too small");
+  }
+  for (let i = 0; i < 12; i++) {
+    if (bytes[i] !== KTX_MAGIC[i]) {
+      throw new Error("KTX: invalid magic");
+    }
+  }
+  const view = new DV(buffer);
+  if (view.getUint32(12, true) !== 67305985) {
+    throw new Error("KTX: unsupported endianness");
+  }
+  if (view.getUint32(16, true) !== 0) {
+    throw new Error("KTX: not a compressed texture (glType != 0)");
+  }
+  if (view.getUint32(24, true) !== 0) {
+    throw new Error("KTX: not a compressed texture (glFormat != 0)");
+  }
+  const glInternalFormat = view.getUint32(28, true);
+  const format = getCompressedFormat(glInternalFormat);
+  if (!format) {
+    throw new Error(`KTX: unknown glInternalFormat 0x${glInternalFormat.toString(16)}`);
+  }
+  const width = view.getUint32(36, true);
+  const height = view.getUint32(40, true);
+  const pixelDepth = view.getUint32(44, true);
+  const numberOfArrayElements = view.getUint32(48, true);
+  const numberOfFaces = view.getUint32(52, true);
+  const numberOfMipmapLevels = Math.max(view.getUint32(56, true), 1);
+  const bytesOfKeyValueData = view.getUint32(60, true);
+  if (pixelDepth > 0) {
+    throw new Error("KTX: 3D textures not supported");
+  }
+  if (numberOfArrayElements > 0) {
+    throw new Error("KTX: texture arrays not supported");
+  }
+  if (numberOfFaces !== 1) {
+    throw new Error("KTX: cubemaps not supported (use loadCubeTexture)");
+  }
+  let offset = 64 + bytesOfKeyValueData;
+  if (offset > buffer.byteLength) {
+    throw new Error("KTX: key/value data overflows buffer");
+  }
+  const mips = [];
+  let mipW = width;
+  let mipH = height;
+  for (let i = 0; i < numberOfMipmapLevels; i++) {
+    if (offset + 4 > buffer.byteLength) {
+      throw new Error(`KTX: truncated at mip ${i} size field`);
+    }
+    const imageSize = view.getUint32(offset, true);
+    offset += 4;
+    if (offset + imageSize > buffer.byteLength) {
+      throw new Error(`KTX: mip ${i} data overflows buffer`);
+    }
+    mips.push({ data: new U8(buffer, offset, imageSize), width: mipW, height: mipH });
+    offset += imageSize;
+    offset = offset + 3 & -4;
+    mipW = Math.max(1, mipW >> 1);
+    mipH = Math.max(1, mipH >> 1);
+  }
+  if (mips.length === 0) {
+    throw new Error("KTX: no mip levels found");
+  }
+  return { format, width, height, mips };
+}
+function uploadCompressed(engine, parsed, opts) {
+  const device = engine._device;
+  const fmt = parsed.format;
+  const texture = device.createTexture({
+    size: { width: parsed.width, height: parsed.height },
+    format: fmt.gpuFormat,
+    mipLevelCount: parsed.mips.length,
+    usage: TU.TEXTURE_BINDING | TU.COPY_DST
+  });
+  for (let i = 0; i < parsed.mips.length; i++) {
+    const mip = parsed.mips[i];
+    const blocksPerRow = Math.ceil(mip.width / fmt.blockW);
+    const rowBytes = blocksPerRow * fmt.blockBytes;
+    const copyW = blocksPerRow * fmt.blockW;
+    const copyH = Math.ceil(mip.height / fmt.blockH) * fmt.blockH;
+    device.queue.writeTexture({ texture, mipLevel: i }, mip.data, { bytesPerRow: rowBytes }, { width: copyW, height: copyH });
+  }
+  const minF = opts.minFilter ?? "linear";
+  const magF = opts.magFilter ?? "linear";
+  const mipF = parsed.mips.length > 1 ? "linear" : "nearest";
+  const allLinear = minF === "linear" && magF === "linear" && mipF === "linear";
+  const sampler = getOrCreateSampler(engine, {
+    addressModeU: opts.addressModeU ?? "repeat",
+    addressModeV: opts.addressModeV ?? "repeat",
+    minFilter: minF,
+    magFilter: magF,
+    mipmapFilter: mipF,
+    maxAnisotropy: allLinear ? 4 : 1
+  });
+  const tex2d = {
+    texture,
+    view: texture.createView(),
+    sampler,
+    width: parsed.width,
+    height: parsed.height
+  };
+  acquireTexture(tex2d);
+  return tex2d;
+}
+function rewriteUrl(baseUrl, suffix) {
+  const qIdx = baseUrl.indexOf("?");
+  const base = qIdx >= 0 ? baseUrl.substring(0, qIdx) : baseUrl;
+  const query = qIdx >= 0 ? baseUrl.substring(qIdx) : "";
+  const dotIdx = base.lastIndexOf(".");
+  if (dotIdx < 0) {
+    return base + suffix + query;
+  }
+  return base.substring(0, dotIdx) + suffix + query;
+}
+async function loadKtxTexture2D(engine, baseUrl, suffixes, opts = {}) {
+  const device = engine._device;
+  const supported = [];
+  for (const suffix of suffixes) {
+    const feature = suffixToFeature(suffix);
+    if (feature && device.features.has(feature)) {
+      supported.push(suffix);
+    }
+  }
+  for (const suffix of supported) {
+    try {
+      const ktxUrl = rewriteUrl(baseUrl, suffix);
+      const resp = await fetch(ktxUrl);
+      if (!resp.ok) {
+        throw new Error(`KTX fetch failed: ${resp.status}`);
+      }
+      const parsed = parseKtx1(await resp.arrayBuffer());
+      return uploadCompressed(engine, parsed, opts);
+    } catch (e) {
+      console.warn(`KTX load failed for suffix "${suffix}":`, e);
+    }
+  }
+  return loadTexture2D(engine, baseUrl, opts);
+}
+
+export { loadKtxTexture2D };
+//# sourceMappingURL=ktx-loader.js.map

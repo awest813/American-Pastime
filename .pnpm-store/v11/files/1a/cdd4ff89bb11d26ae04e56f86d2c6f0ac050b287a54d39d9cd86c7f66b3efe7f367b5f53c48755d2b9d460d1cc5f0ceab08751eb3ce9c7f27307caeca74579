@@ -1,0 +1,6 @@
+import { type Scene } from "@babylonjs/core/index.js";
+import { ExtensibleAccordion } from "@babylonjs/shared-ui-components/modularTool/components/extensibleAccordion.js";
+export declare const HelpersDebugSectionIdentity: unique symbol;
+export declare const TextureChannelsDebugSectionIdentity: unique symbol;
+export declare const FeaturesDebugSectionIdentity: unique symbol;
+export declare const DebugPane: typeof ExtensibleAccordion<Scene>;

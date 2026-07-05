@@ -1,0 +1,6 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../../sceneContext";
+import { type IWatcherService } from "../../watcherService";
+import { type ISceneExplorerService } from "./sceneExplorerService";
+import "@babylonjs/core/Sprites/spriteSceneComponent.js";
+export declare const SpriteManagerExplorerServiceDefinition: ServiceDefinition<[], [ISceneExplorerService, ISceneContext, IWatcherService]>;

@@ -1,0 +1,230 @@
+let spriteAnimationOwners;
+function getSpriteAnimationOwners() {
+  if (!spriteAnimationOwners) {
+    spriteAnimationOwners = /* @__PURE__ */ new WeakMap();
+  }
+  return spriteAnimationOwners;
+}
+function getSpriteAnimationOwner(animation) {
+  return spriteAnimationOwners?.get(animation);
+}
+function setSpriteAnimationOwner(animation, manager) {
+  getSpriteAnimationOwners().set(animation, manager);
+}
+function clearSpriteAnimationOwner(animation) {
+  spriteAnimationOwners?.delete(animation);
+}
+function normalizeDelay(delayMs) {
+  return Number.isFinite(delayMs) && delayMs > 1 ? delayMs : 1;
+}
+function createSpriteAnimationManager(options) {
+  const manager = {
+    _entityType: "sprite-animation-manager",
+    animations: [],
+    fixedDeltaMs: options?.fixedDeltaMs ?? 0,
+    running: false,
+    _onUpdate: options?.onUpdate
+  };
+  return manager;
+}
+function createSpriteFrameAnimation(target, from, to, loop, delayMs, options) {
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    throw new Error("Sprite frame animation requires finite from/to frame indices.");
+  }
+  const fromFrame = Math.trunc(from);
+  const toFrame = Math.trunc(to);
+  const animation = {
+    _entityType: "sprite-frame-animation",
+    target,
+    from: fromFrame,
+    to: toFrame,
+    current: fromFrame,
+    loop,
+    delayMs: normalizeDelay(delayMs),
+    accumulatedMs: 0,
+    animationStarted: true,
+    onEnd: options?.onEnd,
+    removeWhenFinished: options?.removeWhenFinished === true
+  };
+  target.setFrame(fromFrame);
+  return animation;
+}
+function addSpriteAnimation(manager, animation) {
+  const owner = getSpriteAnimationOwner(animation);
+  if (owner === manager) {
+    return;
+  }
+  if (owner) {
+    removeSpriteAnimation(owner, animation);
+  }
+  setSpriteAnimationOwner(animation, manager);
+  manager.animations.push(animation);
+}
+function playSpriteTargetAnimation(manager, target, from, to, loop, delayMs, options) {
+  const animation = createSpriteFrameAnimation(target, from, to, loop, delayMs, options);
+  addSpriteAnimation(manager, animation);
+  return animation;
+}
+function removeSpriteAnimation(manager, animation) {
+  const index = manager.animations.indexOf(animation);
+  if (index !== -1) {
+    manager.animations.splice(index, 1);
+  }
+  if (getSpriteAnimationOwner(animation) === manager) {
+    clearSpriteAnimationOwner(animation);
+  }
+}
+function clearSpriteAnimations(manager) {
+  for (const animation of manager.animations) {
+    if (getSpriteAnimationOwner(animation) === manager) {
+      clearSpriteAnimationOwner(animation);
+    }
+  }
+  manager.animations.length = 0;
+}
+function playSpriteFrameAnimation(animation, from = animation.from, to = animation.to, loop = animation.loop, delayMs = animation.delayMs, options) {
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    throw new Error("Sprite frame animation requires finite from/to frame indices.");
+  }
+  const fromFrame = Math.trunc(from);
+  const toFrame = Math.trunc(to);
+  animation.from = fromFrame;
+  animation.to = toFrame;
+  animation.current = fromFrame;
+  animation.loop = loop;
+  animation.delayMs = normalizeDelay(delayMs);
+  animation.accumulatedMs = 0;
+  animation.animationStarted = true;
+  if (options !== void 0) {
+    animation.onEnd = options.onEnd;
+    animation.removeWhenFinished = options.removeWhenFinished === true;
+  }
+  animation.target.setFrame(fromFrame);
+}
+function stopSpriteAnimation(animation) {
+  animation.animationStarted = false;
+}
+function updateSpriteAnimationManager(manager, deltaMs) {
+  const stepMs = manager.fixedDeltaMs > 0 ? manager.fixedDeltaMs : deltaMs;
+  if (!Number.isFinite(stepMs) || stepMs < 0) {
+    return;
+  }
+  const animations = manager.animations.slice();
+  for (const animation of animations) {
+    if (!advanceSpriteAnimation(animation, stepMs)) {
+      removeSpriteAnimation(manager, animation);
+    }
+  }
+}
+function advanceSpriteAnimation(animation, deltaMs) {
+  if (animation.target.isAlive?.() === false) {
+    animation.animationStarted = false;
+    return false;
+  }
+  if (!animation.animationStarted) {
+    return true;
+  }
+  animation.accumulatedMs += deltaMs;
+  if (animation.accumulatedMs <= animation.delayMs) {
+    return true;
+  }
+  animation.accumulatedMs = animation.accumulatedMs % animation.delayMs;
+  const direction = animation.from > animation.to ? -1 : 1;
+  const next = animation.current + direction;
+  const passedEnd = direction > 0 ? next > animation.to : next < animation.to;
+  if (!passedEnd) {
+    animation.current = next;
+    animation.target.setFrame(next);
+    return true;
+  }
+  if (animation.loop) {
+    animation.current = animation.from;
+    animation.target.setFrame(animation.from);
+    return true;
+  }
+  animation.current = animation.to;
+  animation.target.setFrame(animation.to);
+  animation.animationStarted = false;
+  animation.onEnd?.();
+  if (animation.removeWhenFinished) {
+    animation.target.remove?.();
+  }
+  return false;
+}
+function attachSpriteAnimationsToScene(scene, manager) {
+  assertCanAttachToRenderLoop(manager);
+  const hook = (deltaMs) => {
+    updateSpriteAnimationManager(manager, deltaMs);
+  };
+  scene._beforeRender.unshift(hook);
+  const binding = {
+    _entityType: "sprite-animation-binding",
+    active: true,
+    _dispose: () => {
+      const index = scene._beforeRender.indexOf(hook);
+      if (index !== -1) {
+        scene._beforeRender.splice(index, 1);
+      }
+      if (manager._binding === binding) {
+        manager._binding = void 0;
+      }
+    }
+  };
+  manager._binding = binding;
+  scene._disposables.push(() => disposeSpriteAnimationBinding(binding));
+  return binding;
+}
+function attachSpriteAnimationsToRenderer(renderer, manager) {
+  assertCanAttachToRenderLoop(manager);
+  const hook = (deltaMs) => {
+    updateSpriteAnimationManager(manager, deltaMs);
+  };
+  renderer._beforeUpdate.push(hook);
+  const binding = {
+    _entityType: "sprite-animation-binding",
+    active: true,
+    _dispose: () => {
+      const index = renderer._beforeUpdate.indexOf(hook);
+      if (index !== -1) {
+        renderer._beforeUpdate.splice(index, 1);
+      }
+      const disposeIndex = renderer._disposeCallbacks.indexOf(disposeWithRenderer);
+      if (disposeIndex !== -1) {
+        renderer._disposeCallbacks.splice(disposeIndex, 1);
+      }
+      if (manager._binding === binding) {
+        manager._binding = void 0;
+      }
+    }
+  };
+  function disposeWithRenderer() {
+    disposeSpriteAnimationBinding(binding);
+  }
+  manager._binding = binding;
+  renderer._disposeCallbacks.push(disposeWithRenderer);
+  return binding;
+}
+function disposeSpriteAnimationBinding(binding) {
+  if (!binding.active) {
+    return;
+  }
+  binding.active = false;
+  binding._dispose();
+}
+function assertNoActiveBinding(manager) {
+  if (manager._binding?.active) {
+    throw new Error("SpriteAnimationManager is already attached to a render loop.");
+  }
+  if (manager._animationManager && manager._animationManager !== manager._loopManager) {
+    throw new Error("SpriteAnimationManager is already attached to an AnimationManager.");
+  }
+}
+function assertCanAttachToRenderLoop(manager) {
+  if (manager.running) {
+    throw new Error("SpriteAnimationManager is already running autonomously.");
+  }
+  assertNoActiveBinding(manager);
+}
+
+export { addSpriteAnimation, attachSpriteAnimationsToRenderer, attachSpriteAnimationsToScene, clearSpriteAnimations, createSpriteAnimationManager, createSpriteFrameAnimation, disposeSpriteAnimationBinding, playSpriteFrameAnimation, playSpriteTargetAnimation, removeSpriteAnimation, stopSpriteAnimation, updateSpriteAnimationManager };
+//# sourceMappingURL=sprite-animation.js.map

@@ -1,0 +1,6 @@
+import { type FunctionComponent } from "react";
+/**
+ * Animation list component showing all animations
+ * @returns Animation list component
+ */
+export declare const AnimationList: FunctionComponent;

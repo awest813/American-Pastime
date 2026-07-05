@@ -1,0 +1,19 @@
+'use client';
+import { makeStyles, mergeClasses } from '@griffel/react';
+import { tokens } from '@fluentui/react-theme';
+export const accordionPanelClassNames = {
+    root: 'fui-AccordionPanel'
+};
+/**
+ * Styles for the root slot
+ */ const useStyles = makeStyles({
+    root: {
+        margin: `0 ${tokens.spacingHorizontalM}`
+    }
+});
+/** Applies style classnames to slots */ export const useAccordionPanelStyles_unstable = (state)=>{
+    const styles = useStyles();
+    // eslint-disable-next-line react-hooks/immutability
+    state.root.className = mergeClasses(accordionPanelClassNames.root, styles.root, state.root.className);
+    return state;
+};

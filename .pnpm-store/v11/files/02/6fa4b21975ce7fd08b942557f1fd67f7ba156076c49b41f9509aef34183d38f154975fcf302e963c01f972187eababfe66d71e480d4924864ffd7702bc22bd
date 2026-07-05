@@ -1,0 +1,59 @@
+import { attachWorldMatrixState, createWorldMatrixState } from '../scene/world-matrix-state.js';
+export { ObservableVec3 } from '../math/observable-vec3.js';
+
+function createLightBase(getLocalMatrix) {
+  const wm = createWorldMatrixState(getLocalMatrix);
+  const lvs = {
+    _lightVersion: 0,
+    bump() {
+      lvs._lightVersion++;
+    }
+  };
+  const onDirty = () => {
+    wm.markLocalDirty();
+    lvs._lightVersion++;
+  };
+  return { wm, onDirty, lvs };
+}
+function applyWorldMatrixAccessors(target, wm, lvs) {
+  Object.defineProperties(target, {
+    parent: {
+      get() {
+        return wm.parent;
+      },
+      set(v) {
+        wm.parent = v;
+      },
+      enumerable: true,
+      configurable: true
+    },
+    worldMatrix: {
+      get() {
+        return wm.getWorldMatrix();
+      },
+      enumerable: true,
+      configurable: true
+    },
+    worldMatrixVersion: {
+      get() {
+        return wm.getWorldMatrixVersion();
+      },
+      enumerable: true,
+      configurable: true
+    }
+  });
+  if (lvs) {
+    Object.defineProperty(target, "_lightVersion", {
+      get() {
+        return lvs._lightVersion;
+      },
+      enumerable: false,
+      configurable: true
+    });
+  }
+  attachWorldMatrixState(target, wm);
+  return target;
+}
+
+export { applyWorldMatrixAccessors, createLightBase };
+//# sourceMappingURL=light-base.js.map

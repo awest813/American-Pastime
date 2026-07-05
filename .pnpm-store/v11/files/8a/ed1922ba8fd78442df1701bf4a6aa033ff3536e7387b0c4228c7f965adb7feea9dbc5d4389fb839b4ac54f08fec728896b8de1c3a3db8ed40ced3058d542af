@@ -1,0 +1,10 @@
+let _coverageGammaHook = null;
+function _registerSpriteCoverageGammaHook(hook) {
+  _coverageGammaHook = hook;
+}
+function _getSpriteCoverageGammaHook() {
+  return _coverageGammaHook;
+}
+
+export { _getSpriteCoverageGammaHook, _registerSpriteCoverageGammaHook };
+//# sourceMappingURL=sprite-coverage-gamma-hook.js.map

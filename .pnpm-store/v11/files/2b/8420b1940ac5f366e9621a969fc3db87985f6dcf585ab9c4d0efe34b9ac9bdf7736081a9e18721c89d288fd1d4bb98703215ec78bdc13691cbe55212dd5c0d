@@ -1,0 +1,17 @@
+import { type FunctionComponent } from "react";
+import { type ArcRotateCamera } from "@babylonjs/core/index.js";
+export declare const ArcRotateCameraTransformProperties: FunctionComponent<{
+    camera: ArcRotateCamera;
+}>;
+export declare const ArcRotateCameraControlProperties: FunctionComponent<{
+    camera: ArcRotateCamera;
+}>;
+export declare const ArcRotateCameraCollisionProperties: FunctionComponent<{
+    camera: ArcRotateCamera;
+}>;
+export declare const ArcRotateCameraLimitsProperties: FunctionComponent<{
+    camera: ArcRotateCamera;
+}>;
+export declare const ArcRotateCameraBehaviorsProperties: FunctionComponent<{
+    camera: ArcRotateCamera;
+}>;

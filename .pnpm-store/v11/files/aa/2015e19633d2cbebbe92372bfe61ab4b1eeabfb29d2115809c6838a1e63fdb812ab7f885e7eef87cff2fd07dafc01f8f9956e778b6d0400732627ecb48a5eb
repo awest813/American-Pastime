@@ -1,0 +1,1 @@
+{"version":3,"file":"pure.js","sourceRoot":"","sources":["../../../../dev/serializers/src/BVH/pure.ts"],"names":[],"mappings":"AAAA,6DAA6D;AAC7D,cAAc,iBAAiB,CAAC","sourcesContent":["/** Pure barrel — re-exports only side-effect-free modules */\nexport * from \"./bvhSerializer\";\n"]}

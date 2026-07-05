@@ -1,0 +1,15 @@
+import { type EventHandler } from '@fluentui/react-utilities';
+import { GrowDirection, ResizeHandleUpdateEventData } from '../types';
+import type { UnitHandle } from './useUnitHandle';
+export type UseMouseHandlerParams = {
+    growDirection: GrowDirection;
+    onValueChange: EventHandler<ResizeHandleUpdateEventData>;
+    onDragEnd?: EventHandler<Omit<ResizeHandleUpdateEventData, 'value'>>;
+    onDragStart?: EventHandler<Omit<ResizeHandleUpdateEventData, 'value'>>;
+    getCurrentValue: () => number;
+    unitHandle: UnitHandle;
+};
+export declare function useMouseHandler(params: UseMouseHandlerParams): {
+    attachHandlers: (node: HTMLElement) => void;
+    detachHandlers: (node: HTMLElement) => void;
+};

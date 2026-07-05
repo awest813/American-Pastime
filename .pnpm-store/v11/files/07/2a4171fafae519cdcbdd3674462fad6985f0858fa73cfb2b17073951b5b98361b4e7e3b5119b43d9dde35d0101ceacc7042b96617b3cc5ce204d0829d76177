@@ -1,0 +1,11 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { mat4MultiplyInto } from './mat4-multiply-into.js';
+
+function mat4Multiply(a, b) {
+  const out = new F32(16);
+  mat4MultiplyInto(out, 0, a, 0, b, 0);
+  return out;
+}
+
+export { mat4Multiply };
+//# sourceMappingURL=mat4-multiply.js.map

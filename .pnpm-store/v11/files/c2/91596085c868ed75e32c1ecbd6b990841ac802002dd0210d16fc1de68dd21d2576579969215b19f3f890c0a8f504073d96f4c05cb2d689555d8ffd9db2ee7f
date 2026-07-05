@@ -1,0 +1,40 @@
+import { setRampTarget, createRampParam } from './audio-param.js';
+import { rebuildSoundSubGraphHead } from './sound-sub-graph.js';
+
+const DEFAULT_PAN = 0;
+function createStereoSubNode(engine) {
+  const node = new StereoPannerNode(engine._ctx);
+  node.pan.value = DEFAULT_PAN;
+  return {
+    _engine: engine,
+    _inputNode: node,
+    _pan: createRampParam(node.pan, engine),
+    _dispose: () => {
+      node.disconnect();
+    }
+  };
+}
+function ensureStereoSubNode(host) {
+  const graph = host._graph;
+  if (graph._stereo) {
+    return graph._stereo;
+  }
+  const node = createStereoSubNode(host._engine);
+  node._inputNode.connect(graph._volume);
+  graph._stereo = node;
+  rebuildSoundSubGraphHead(graph, host._instances);
+  return node;
+}
+function enableStereo(host, options = {}) {
+  const node = ensureStereoSubNode(host);
+  if (options.pan !== void 0) {
+    setRampTarget(node._pan, options.pan);
+  }
+}
+function setStereoPan(host, pan, options) {
+  const node = ensureStereoSubNode(host);
+  setRampTarget(node._pan, pan, options);
+}
+
+export { enableStereo, setStereoPan };
+//# sourceMappingURL=stereo.js.map

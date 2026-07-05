@@ -1,0 +1,13 @@
+import { ImageMimeType } from "babylonjs-gltf2interface";
+import { type BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture.js";
+import { type Nullable } from "@babylonjs/core/types.js";
+export declare function GetFileExtensionFromMimeType(mimeType: ImageMimeType): string;
+/**
+ * Gets cached image data from a texture's internal buffer, if available.
+ * @param babylonTexture texture to check for cached image data
+ * @returns image data and mime type if found; null otherwise
+ */
+export declare function GetCachedImageAsync(babylonTexture: BaseTexture): Promise<Nullable<{
+    data: ArrayBuffer;
+    mimeType: string;
+}>>;

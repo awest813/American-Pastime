@@ -1,0 +1,104 @@
+import { addPassDependencies } from './pass.js';
+
+const DEFAULT_CLEAR_COLOR = { r: 0.2, g: 0.2, b: 0.3, a: 1 };
+function createRenderPass(name, task) {
+  const pass = {
+    name,
+    _parentTask: task,
+    _dependencies: /* @__PURE__ */ new Set(),
+    _renderTarget: null,
+    _renderTargetDepth: null,
+    _renderPassDescriptor: { colorAttachments: [] },
+    _colorAttachment: null,
+    _depthAttachment: null,
+    clearColor: { ...DEFAULT_CLEAR_COLOR },
+    clear: true,
+    _executeFunc: null,
+    _beforeExecute: null,
+    _initialize() {
+      const rt = pass._renderTarget;
+      if (!rt) {
+        throw new Error(`RenderPass "${pass.name}": render target not set`);
+      }
+      const colorView = rt._colorView;
+      let colorAttachment = null;
+      if (colorView) {
+        colorAttachment = {
+          view: colorView,
+          loadOp: pass.clear ? "clear" : "load",
+          storeOp: "store",
+          clearValue: pass.clearColor
+        };
+      }
+      const depthRt = pass._renderTargetDepth ?? rt;
+      const depthFormat = depthRt._descriptor.dFormat;
+      const depthView = depthRt._depthView;
+      const hasStencil = depthFormat ? depthFormat === "depth24plus-stencil8" || depthFormat === "depth32float-stencil8" || depthFormat === "stencil8" : false;
+      let depthAttachment = null;
+      if (depthView) {
+        depthAttachment = {
+          view: depthView,
+          depthClearValue: depthRt._descriptor._depthClearValue ?? 0,
+          depthLoadOp: "clear",
+          depthStoreOp: "store",
+          ...hasStencil ? { stencilClearValue: 0, stencilLoadOp: "clear", stencilStoreOp: "store" } : {}
+        };
+      }
+      pass._colorAttachment = colorAttachment;
+      pass._depthAttachment = depthAttachment;
+      pass._renderPassDescriptor = {
+        label: pass.name,
+        colorAttachments: colorAttachment ? [colorAttachment] : [],
+        depthStencilAttachment: depthAttachment ?? void 0
+      };
+    },
+    _execute() {
+      const rt = pass._renderTarget;
+      if (!rt) {
+        return 0;
+      }
+      pass._beforeExecute?.();
+      const eng = pass._parentTask.engine;
+      const att = pass._colorAttachment;
+      if (att) {
+        att.clearValue = pass.clearColor;
+        att.loadOp = pass.clear ? "clear" : "load";
+        att.view = rt._colorView;
+      }
+      const enc = eng._currentEncoder.beginRenderPass(pass._renderPassDescriptor);
+      let draws = 0;
+      if (pass._executeFunc) {
+        draws = pass._executeFunc(enc);
+      }
+      enc.end();
+      return draws;
+    },
+    _dispose() {
+      pass._renderTarget = null;
+      pass._renderTargetDepth = null;
+      pass._colorAttachment = null;
+      pass._depthAttachment = null;
+      pass._renderPassDescriptor = { colorAttachments: [] };
+      pass._executeFunc = null;
+      pass._beforeExecute = null;
+      pass._dependencies.clear();
+    }
+  };
+  task._passes.push(pass);
+  return pass;
+}
+function setRenderPassRenderTarget(pass, rt) {
+  pass._renderTarget = rt;
+  addPassDependencies(pass, rt);
+}
+function setRenderPassRenderTargetDepth(pass, rt) {
+  pass._renderTargetDepth = rt;
+  addPassDependencies(pass, rt);
+}
+function setRenderPassClear(pass, clear, clearColor) {
+  pass.clear = clear;
+  pass.clearColor = clearColor;
+}
+
+export { createRenderPass, setRenderPassClear, setRenderPassRenderTarget, setRenderPassRenderTargetDepth };
+//# sourceMappingURL=render-pass.js.map

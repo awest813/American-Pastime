@@ -1,0 +1,11 @@
+import { type FunctionComponent } from "react";
+type GraphProps = {
+    width: number;
+    height: number;
+};
+/**
+ * Main graph area for displaying and editing animation curves
+ * @returns The graph component
+ */
+export declare const Graph: FunctionComponent<GraphProps>;
+export {};

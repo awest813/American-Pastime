@@ -1,0 +1,117 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "useUnitHandle", {
+    enumerable: true,
+    get: function() {
+        return useUnitHandle;
+    }
+});
+const _interop_require_wildcard = require("@swc/helpers/_/_interop_require_wildcard");
+const _reactcomponents = require("@fluentui/react-components");
+const _react = /*#__PURE__*/ _interop_require_wildcard._(require("react"));
+const DEFAULT_OFFSET_STEP = 20;
+function getElementDimensionInPx(element, growDirection) {
+    if (element === null) {
+        return 0;
+    }
+    const key = growDirection === 'end' || growDirection === 'start' ? 'width' : 'height';
+    const rect = element.getBoundingClientRect();
+    return rect[key];
+}
+const createPixelsHandle = ({ growDirection })=>{
+    const name = 'px';
+    function fromPxToValue(px) {
+        return px;
+    }
+    function roundValue(value) {
+        return Math.round(value);
+    }
+    function getOffsetStep() {
+        return DEFAULT_OFFSET_STEP;
+    }
+    function elementDimension(element) {
+        return getElementDimensionInPx(element, growDirection);
+    }
+    function toCSSValue(value) {
+        return `${value}px`;
+    }
+    return {
+        elementDimension,
+        fromPxToValue,
+        toCSSValue,
+        getOffsetStep,
+        roundValue,
+        name
+    };
+};
+const createViewportHandle = ({ getWindowDimensions, growDirection })=>{
+    const name = growDirection === 'end' || growDirection === 'start' ? 'vw' : 'vh';
+    function fromPxToValue(px) {
+        if (growDirection === 'end' || growDirection === 'start') {
+            return px / getWindowDimensions().width * 100;
+        }
+        return px / getWindowDimensions().height * 100;
+    }
+    function roundValue(value) {
+        return Math.round((value + Number.EPSILON) * 1e5) / 1e5;
+    }
+    function getOffsetStep() {
+        return fromPxToValue(DEFAULT_OFFSET_STEP);
+    }
+    function elementDimension(element) {
+        return fromPxToValue(getElementDimensionInPx(element, growDirection));
+    }
+    function toCSSValue(value) {
+        return `${value}${name}`;
+    }
+    return {
+        elementDimension,
+        toCSSValue,
+        fromPxToValue,
+        getOffsetStep,
+        roundValue,
+        name
+    };
+};
+function useUnitHandle(growDirection, unit) {
+    const { targetDocument } = (0, _reactcomponents.useFluent)();
+    const unitFactory = unit === 'px' ? createPixelsHandle : createViewportHandle;
+    const windowDimensionsRef = _react.useRef({
+        width: 0,
+        height: 0
+    });
+    const windowDimensionsRafId = _react.useRef(null);
+    _react.useEffect(()=>{
+        const targetWindow = targetDocument == null ? void 0 : targetDocument.defaultView;
+        if (targetWindow && unit === 'viewport') {
+            windowDimensionsRef.current = targetWindow.document.documentElement.getBoundingClientRect();
+            const handleResize = ()=>{
+                windowDimensionsRafId.current = targetWindow.requestAnimationFrame(()=>{
+                    windowDimensionsRef.current = targetWindow.document.documentElement.getBoundingClientRect();
+                });
+            };
+            targetWindow.addEventListener('resize', handleResize);
+            return ()=>{
+                targetWindow.removeEventListener('resize', handleResize);
+                if (windowDimensionsRafId.current) {
+                    targetWindow.cancelAnimationFrame(windowDimensionsRafId.current);
+                    windowDimensionsRafId.current = null;
+                }
+            };
+        }
+    }, [
+        targetDocument,
+        unit
+    ]);
+    return _react.useMemo(()=>unitFactory({
+            getWindowDimensions: ()=>windowDimensionsRef.current,
+            growDirection
+        }), [
+        growDirection,
+        unit
+    ]);
+}
+
+//# sourceMappingURL=useUnitHandle.js.map

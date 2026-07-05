@@ -1,0 +1,465 @@
+const TEXT_INSTANCE_FLOATS = 20;
+const TEXT_INSTANCE_BYTES = TEXT_INSTANCE_FLOATS * 4;
+const WHITE_COLOR = [1, 1, 1, 1];
+function packGlyphAtSlot(out, slot, curveSet, glyphId, x, y, invScale, color) {
+  const glyph = curveSet.curves.get(glyphId);
+  const atlasSlot = curveSet.atlas.glyphSlots.get(glyphId);
+  if (!glyph || !atlasSlot) {
+    return false;
+  }
+  const { xMin, yMin, xMax, yMax } = glyph.bounds;
+  const widthFu = xMax - xMin;
+  const heightFu = yMax - yMin;
+  const bandScaleX = widthFu > 0 ? atlasSlot.vBandCount / widthFu : 0;
+  const bandScaleY = heightFu > 0 ? atlasSlot.hBandCount / heightFu : 0;
+  const bandOffsetX = -xMin * bandScaleX;
+  const bandOffsetY = -yMin * bandScaleY;
+  const w = slot * TEXT_INSTANCE_FLOATS;
+  out[w] = xMin;
+  out[w + 1] = yMin;
+  out[w + 2] = xMax;
+  out[w + 3] = yMax;
+  out[w + 4] = x;
+  out[w + 5] = y;
+  out[w + 6] = invScale;
+  out[w + 7] = 0;
+  out[w + 8] = atlasSlot.glyphLocX;
+  out[w + 9] = atlasSlot.glyphLocY;
+  out[w + 10] = atlasSlot.bandMaxX;
+  out[w + 11] = atlasSlot.bandMaxY;
+  out[w + 12] = bandScaleX;
+  out[w + 13] = bandScaleY;
+  out[w + 14] = bandOffsetX;
+  out[w + 15] = bandOffsetY;
+  out[w + 16] = color[0];
+  out[w + 17] = color[1];
+  out[w + 18] = color[2];
+  out[w + 19] = color[3];
+  return true;
+}
+function markSlotDead(out, slot) {
+  const base = slot * TEXT_INSTANCE_FLOATS;
+  for (let i = 0; i < TEXT_INSTANCE_FLOATS; i++) {
+    out[base + i] = 0;
+  }
+  out[base + 7] = 1;
+}
+function ensureInstanceCapacity(data, requiredInstances) {
+  const requiredFloats = requiredInstances * TEXT_INSTANCE_FLOATS;
+  if (data._instances.length >= requiredFloats) {
+    return;
+  }
+  let newLen = Math.max(data._instances.length * 2, TEXT_INSTANCE_FLOATS);
+  while (newLen < requiredFloats) {
+    newLen *= 2;
+  }
+  const grown = new Float32Array(newLen);
+  grown.set(data._instances.subarray(0, data._instanceCount * TEXT_INSTANCE_FLOATS));
+  data._instances = grown;
+  data._dirtyStart = 0;
+  data._dirtyEnd = data._instanceCount;
+}
+function markDirty(data, startInstance, endInstance) {
+  if (endInstance <= startInstance) {
+    return;
+  }
+  if (data._dirtyStart === data._dirtyEnd) {
+    data._dirtyStart = startInstance;
+    data._dirtyEnd = endInstance;
+  } else {
+    if (startInstance < data._dirtyStart) {
+      data._dirtyStart = startInstance;
+    }
+    if (endInstance > data._dirtyEnd) {
+      data._dirtyEnd = endInstance;
+    }
+  }
+  data._version++;
+}
+function popFreeSlot(group) {
+  return group.freeSlots.length > 0 ? group.freeSlots.pop() : -1;
+}
+function growGroup(data, group, extraSlots) {
+  const insertAt = group.slotStart + group.slotCount;
+  if (extraSlots <= 0) {
+    return insertAt;
+  }
+  ensureInstanceCapacity(data, data._instanceCount + extraSlots);
+  const floatDelta = extraSlots * TEXT_INSTANCE_FLOATS;
+  const moveStartFloat = insertAt * TEXT_INSTANCE_FLOATS;
+  const moveEndFloat = data._instanceCount * TEXT_INSTANCE_FLOATS;
+  if (moveEndFloat > moveStartFloat) {
+    data._instances.copyWithin(moveStartFloat + floatDelta, moveStartFloat, moveEndFloat);
+  }
+  for (const g of data._groups) {
+    if (g !== group && g.slotStart >= insertAt) {
+      g.slotStart += extraSlots;
+      for (let i = 0; i < g.freeSlots.length; i++) {
+        g.freeSlots[i] = g.freeSlots[i] + extraSlots;
+      }
+    }
+  }
+  for (const rec of data._runRecords.values()) {
+    const slots = rec.slots;
+    for (let i = 0; i < slots.length; i++) {
+      if (slots[i] >= insertAt) {
+        slots[i] = slots[i] + extraSlots;
+      }
+    }
+  }
+  data._instanceCount += extraSlots;
+  group.slotCount += extraSlots;
+  markDirty(data, insertAt, data._instanceCount);
+  return insertAt;
+}
+function allocateSlots(data, group, count) {
+  const out = new Array(count);
+  let extendNeeded = 0;
+  for (let i = 0; i < count; i++) {
+    const reused = popFreeSlot(group);
+    if (reused !== -1) {
+      out[i] = reused;
+    } else {
+      out[i] = -1;
+      extendNeeded++;
+    }
+  }
+  if (extendNeeded > 0) {
+    const firstNewSlot = growGroup(data, group, extendNeeded);
+    let n = firstNewSlot;
+    for (let i = 0; i < count; i++) {
+      if (out[i] === -1) {
+        out[i] = n++;
+      }
+    }
+  }
+  return out;
+}
+function freeSlots(data, group, slots) {
+  let minSlot = Number.POSITIVE_INFINITY;
+  let maxSlot = -1;
+  for (const s of slots) {
+    markSlotDead(data._instances, s);
+    group.freeSlots.push(s);
+    if (s < minSlot) {
+      minSlot = s;
+    }
+    if (s > maxSlot) {
+      maxSlot = s;
+    }
+  }
+  if (maxSlot >= 0) {
+    markDirty(data, minSlot, maxSlot + 1);
+  }
+}
+function findGroup(data, curveSetId) {
+  for (const g of data._groups) {
+    if (g.curveSetId === curveSetId) {
+      return g;
+    }
+  }
+  return void 0;
+}
+function lookupCurveSet(storage, curveSetId, op) {
+  const cs = storage._curveSets.get(curveSetId);
+  if (!cs) {
+    throw new Error(`updateTextData ${op}: storage does not contain curveSet "${curveSetId}" — add it via updateGlyphStorage first.`);
+  }
+  return cs;
+}
+function ensureGroup(data, curveSetId) {
+  const existing = findGroup(data, curveSetId);
+  if (existing) {
+    return existing;
+  }
+  const curveSet = lookupCurveSet(data._storage, curveSetId, "addRun");
+  const group = {
+    curveSetId,
+    curveSet,
+    slotStart: data._instanceCount,
+    slotCount: 0,
+    liveCount: 0,
+    freeSlots: [],
+    bindGroup: null,
+    bindGroupVersion: -1
+  };
+  data._groups.push(group);
+  return group;
+}
+function writeRunToSlots(data, group, run, slots) {
+  const ratio = run.pixelsPerFontUnit;
+  const invScale = ratio !== 0 ? 1 / ratio : 0;
+  const runColor = run.defaultColor ?? WHITE_COLOR;
+  const liveSlots = [];
+  let minSlot = Number.POSITIVE_INFINITY;
+  let maxSlot = -1;
+  for (let i = 0; i < run.glyphs.length; i++) {
+    const pg = run.glyphs[i];
+    const slot = slots[i];
+    const color = pg.color ?? runColor;
+    const ok = packGlyphAtSlot(data._instances, slot, group.curveSet, pg.glyphId, pg.x, pg.y, invScale, color);
+    if (ok) {
+      liveSlots.push(slot);
+    } else {
+      markSlotDead(data._instances, slot);
+      group.freeSlots.push(slot);
+    }
+    if (slot < minSlot) {
+      minSlot = slot;
+    }
+    if (slot > maxSlot) {
+      maxSlot = slot;
+    }
+  }
+  if (maxSlot >= 0) {
+    markDirty(data, minSlot, maxSlot + 1);
+  }
+  return liveSlots;
+}
+function applyReset(data, runs, storage) {
+  let totalGlyphs = 0;
+  for (const run of runs) {
+    totalGlyphs += run.glyphs.length;
+  }
+  const required = totalGlyphs * TEXT_INSTANCE_FLOATS;
+  if (data._instances.length < required) {
+    let newLen = Math.max(data._instances.length * 2, TEXT_INSTANCE_FLOATS);
+    while (newLen < required) {
+      newLen *= 2;
+    }
+    data._instances = new Float32Array(newLen);
+  }
+  const prevGroupByCurveSet = /* @__PURE__ */ new Map();
+  for (const g of data._groups) {
+    prevGroupByCurveSet.set(g.curveSetId, g);
+  }
+  data._storage = storage;
+  const runsByCurveSet = /* @__PURE__ */ new Map();
+  for (const run of runs) {
+    let list = runsByCurveSet.get(run.curveSet);
+    if (!list) {
+      list = [];
+      runsByCurveSet.set(run.curveSet, list);
+    }
+    list.push(run);
+  }
+  const newGroups = [];
+  const newRunRecords = /* @__PURE__ */ new Map();
+  let writeSlot = 0;
+  for (const [curveSetId, groupRuns] of runsByCurveSet) {
+    const curveSet = lookupCurveSet(storage, curveSetId, "reset");
+    const existing = prevGroupByCurveSet.get(curveSetId);
+    const group = existing ?? {
+      curveSetId,
+      curveSet,
+      slotStart: writeSlot,
+      slotCount: 0,
+      liveCount: 0,
+      freeSlots: [],
+      bindGroup: null,
+      bindGroupVersion: -1
+    };
+    if (group.curveSet !== curveSet) {
+      group.curveSet = curveSet;
+      group.bindGroup = null;
+      group.bindGroupVersion = -1;
+    }
+    group.slotStart = writeSlot;
+    group.freeSlots = [];
+    const groupIdx = newGroups.length;
+    let liveInGroup = 0;
+    for (const run of groupRuns) {
+      const slots = new Array(run.glyphs.length);
+      for (let i = 0; i < run.glyphs.length; i++) {
+        slots[i] = writeSlot++;
+      }
+      const live = writeRunToSlots(data, group, run, slots);
+      liveInGroup += live.length;
+      newRunRecords.set(run, { run, groupIdx, slots: live });
+    }
+    group.slotCount = writeSlot - group.slotStart;
+    group.liveCount = liveInGroup;
+    newGroups.push(group);
+  }
+  data._instanceCount = writeSlot;
+  data._groups = newGroups;
+  data._runs.length = 0;
+  for (const r of runs) {
+    data._runs.push(r);
+  }
+  data._runRecords = newRunRecords;
+  data._dirtyStart = 0;
+  data._dirtyEnd = writeSlot;
+  data._version++;
+}
+function resolveRun(data, ref) {
+  if (typeof ref === "number") {
+    const r = data._runs[ref];
+    if (!r) {
+      throw new Error(`updateTextData: run index ${ref} out of range (0..${data._runs.length - 1}).`);
+    }
+    return r;
+  }
+  return ref;
+}
+function applyAddRun(data, run, insertBefore) {
+  if (data._runRecords.has(run)) {
+    throw new Error("updateTextData addRun: GlyphRun reference is already in this TextData.");
+  }
+  const group = ensureGroup(data, run.curveSet);
+  const groupIdx = data._groups.indexOf(group);
+  const slots = allocateSlots(data, group, run.glyphs.length);
+  const live = writeRunToSlots(data, group, run, slots);
+  group.liveCount += live.length;
+  data._runRecords.set(run, { run, groupIdx, slots: live });
+  const at = insertBefore ?? data._runs.length;
+  data._runs.splice(at, 0, run);
+}
+function applyRemoveRun(data, ref) {
+  const run = resolveRun(data, ref);
+  const rec = data._runRecords.get(run);
+  if (!rec) {
+    throw new Error("updateTextData removeRun: GlyphRun reference is not in this TextData.");
+  }
+  const group = data._groups[rec.groupIdx];
+  freeSlots(data, group, rec.slots);
+  group.liveCount -= rec.slots.length;
+  data._runRecords.delete(run);
+  const runIdx = data._runs.indexOf(run);
+  if (runIdx >= 0) {
+    data._runs.splice(runIdx, 1);
+  }
+  if (group.liveCount === 0) {
+    dropEmptyGroup(data, group);
+  }
+}
+function dropEmptyGroup(data, group) {
+  const idx = data._groups.indexOf(group);
+  if (idx < 0) {
+    return;
+  }
+  const removedStart = group.slotStart;
+  const removedCount = group.slotCount;
+  data._groups.splice(idx, 1);
+  for (const r of data._runRecords.values()) {
+    if (r.groupIdx > idx) {
+      r.groupIdx--;
+    }
+  }
+  if (removedCount > 0) {
+    const floatDelta = removedCount * TEXT_INSTANCE_FLOATS;
+    const moveStartFloat = (removedStart + removedCount) * TEXT_INSTANCE_FLOATS;
+    const moveEndFloat = data._instanceCount * TEXT_INSTANCE_FLOATS;
+    if (moveEndFloat > moveStartFloat) {
+      data._instances.copyWithin(moveStartFloat - floatDelta, moveStartFloat, moveEndFloat);
+    }
+    for (const g of data._groups) {
+      if (g.slotStart >= removedStart) {
+        g.slotStart -= removedCount;
+        for (let i = 0; i < g.freeSlots.length; i++) {
+          g.freeSlots[i] = g.freeSlots[i] - removedCount;
+        }
+      }
+    }
+    for (const r of data._runRecords.values()) {
+      const slots = r.slots;
+      for (let i = 0; i < slots.length; i++) {
+        if (slots[i] >= removedStart) {
+          slots[i] = slots[i] - removedCount;
+        }
+      }
+    }
+    data._instanceCount -= removedCount;
+    markDirty(data, removedStart, data._instanceCount);
+  }
+}
+function applyReplaceRun(data, prevRef, newRun) {
+  const prev = resolveRun(data, prevRef);
+  const rec = data._runRecords.get(prev);
+  if (!rec) {
+    throw new Error("updateTextData replaceRun: previous GlyphRun reference is not in this TextData.");
+  }
+  if (prev !== newRun && data._runRecords.has(newRun)) {
+    throw new Error("updateTextData replaceRun: new GlyphRun reference is already in this TextData.");
+  }
+  const group = data._groups[rec.groupIdx];
+  const sameGroup = newRun.curveSet === group.curveSetId;
+  if (sameGroup && newRun.glyphs.length === rec.slots.length) {
+    const live = writeRunToSlots(data, group, newRun, rec.slots);
+    if (live.length === rec.slots.length) {
+      data._runRecords.delete(prev);
+      data._runRecords.set(newRun, { run: newRun, groupIdx: rec.groupIdx, slots: live });
+      const runIdx2 = data._runs.indexOf(prev);
+      if (runIdx2 >= 0) {
+        data._runs[runIdx2] = newRun;
+      }
+      return;
+    }
+    group.liveCount -= rec.slots.length - live.length;
+    data._runRecords.delete(prev);
+    data._runRecords.set(newRun, { run: newRun, groupIdx: rec.groupIdx, slots: live });
+    const runIdx = data._runs.indexOf(prev);
+    if (runIdx >= 0) {
+      data._runs[runIdx] = newRun;
+    }
+    return;
+  }
+  const insertPos = data._runs.indexOf(prev);
+  applyRemoveRun(data, prev);
+  applyAddRun(data, newRun, insertPos >= 0 ? insertPos : void 0);
+}
+function createTextData(storage, runs) {
+  const runsArray = [];
+  const data = {
+    runs: runsArray,
+    _runs: runsArray,
+    _groups: [],
+    _runRecords: /* @__PURE__ */ new Map(),
+    _instances: new Float32Array(TEXT_INSTANCE_FLOATS),
+    _instanceCount: 0,
+    _storage: storage,
+    _version: 1,
+    _dirtyStart: 0,
+    _dirtyEnd: 0,
+    _gpu: null
+  };
+  if (runs && runs.length > 0) {
+    applyReset(data, runs, storage);
+  }
+  return data;
+}
+function updateTextData(data, update) {
+  switch (update.update) {
+    case "reset": {
+      const runs = update.runs ?? data._runs.slice();
+      const storage = update.storage ?? data._storage;
+      applyReset(data, runs, storage);
+      return;
+    }
+    case "addRun":
+      applyAddRun(data, update.run, update.insertBefore);
+      return;
+    case "removeRun":
+      applyRemoveRun(data, update.run);
+      return;
+    case "replaceRun":
+      applyReplaceRun(data, update.previous, update.run);
+      return;
+  }
+}
+function disposeTextData(data) {
+  if (data._gpu) {
+    data._gpu.instanceBuf.destroy();
+    data._gpu = null;
+  }
+  for (const g of data._groups) {
+    g.bindGroup = null;
+  }
+  data._groups = [];
+  data._instanceCount = 0;
+  data._runs.length = 0;
+  data._runRecords.clear();
+}
+
+export { TEXT_INSTANCE_BYTES, TEXT_INSTANCE_FLOATS, createTextData, disposeTextData, updateTextData };
+//# sourceMappingURL=text-data.js.map

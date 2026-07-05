@@ -1,0 +1,41 @@
+import { getNearestSampler, getBilinearSampler } from '../resource/samplers.js';
+import { buildRenderTarget, createRenderTarget } from '../engine/render-target.js';
+
+function createRenderTargetTexture(engine, descriptor) {
+  if ("canvas" in descriptor.size) {
+    throw new Error(
+      "createRenderTargetTexture: descriptor.size must be fixed { width, height } pixels, not a SurfaceContext (would invalidate eagerly-allocated textures when the canvas resizes)."
+    );
+  }
+  const fixedSize = descriptor.size;
+  const rt = createRenderTarget(descriptor);
+  buildRenderTarget(rt, engine);
+  rt._eager = true;
+  if (!rt._colorTexture || !rt._colorView) {
+    if (!rt._depthTexture) {
+      throw new Error("createRenderTargetTexture: render target has no color or depth texture (no format / depthStencilFormat?).");
+    }
+    const texture2 = {
+      texture: rt._depthTexture,
+      view: rt._depthTexture.createView({ aspect: "depth-only" }),
+      sampler: getNearestSampler(engine),
+      width: fixedSize.width,
+      height: fixedSize.height,
+      invertY: false,
+      _sampleType: "depth"
+    };
+    return { rt, texture: texture2 };
+  }
+  const texture = {
+    texture: rt._colorTexture,
+    view: rt._colorView,
+    sampler: getBilinearSampler(engine),
+    width: fixedSize.width,
+    height: fixedSize.height,
+    invertY: true
+  };
+  return { rt, texture };
+}
+
+export { createRenderTargetTexture };
+//# sourceMappingURL=rtt.js.map

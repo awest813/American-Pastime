@@ -1,0 +1,99 @@
+import { mat4MultiplyInto } from '../math/mat4-multiply-into.js';
+import { allocateMat4 } from '../math/_matrix-allocator.js';
+
+const WM_STATE = Symbol("wmState");
+function attachWorldMatrixState(host, state) {
+  host[WM_STATE] = state;
+}
+function peekWorldMatrixState(p) {
+  if (p === null) {
+    return null;
+  }
+  const s = p[WM_STATE];
+  return s ?? null;
+}
+function createWorldMatrixState(getLocalMatrix) {
+  let _worldVersion = 0;
+  let _lastSeenParentVersion = -1;
+  let _cachedWorld = null;
+  const _ownedWorld = allocateMat4();
+  let _parent = null;
+  let _parentState = null;
+  const _children = [];
+  function invalidate() {
+    _cachedWorld = null;
+    _worldVersion++;
+    for (const child of _children) {
+      child._invalidate();
+    }
+  }
+  function pollForeignParent() {
+    const pv = _parent.worldMatrixVersion;
+    if (pv !== _lastSeenParentVersion) {
+      _lastSeenParentVersion = pv;
+      invalidate();
+    }
+  }
+  const state = {
+    get parent() {
+      return _parent;
+    },
+    set parent(p) {
+      if (p === _parent) {
+        return;
+      }
+      if (_parentState !== null) {
+        _parentState._removeChild(state);
+      }
+      _parent = p;
+      _parentState = peekWorldMatrixState(p);
+      if (_parentState !== null) {
+        _parentState._addChild(state);
+      }
+      _lastSeenParentVersion = -1;
+      invalidate();
+    },
+    markLocalDirty() {
+      invalidate();
+    },
+    getWorldMatrix() {
+      if (_parentState === null && _parent !== null) {
+        pollForeignParent();
+      }
+      if (_cachedWorld !== null) {
+        return _cachedWorld;
+      }
+      const local = getLocalMatrix();
+      if (_parent !== null) {
+        const pw = _parent.worldMatrix;
+        mat4MultiplyInto(_ownedWorld, 0, pw, 0, local, 0);
+        _cachedWorld = _ownedWorld;
+      } else {
+        _cachedWorld = local;
+      }
+      return _cachedWorld;
+    },
+    getWorldMatrixVersion() {
+      if (_parentState === null && _parent !== null) {
+        pollForeignParent();
+      }
+      return _worldVersion;
+    },
+    _invalidate() {
+      invalidate();
+    },
+    _addChild(child) {
+      _children.push(child);
+    },
+    _removeChild(child) {
+      const i = _children.indexOf(child);
+      if (i >= 0) {
+        _children.splice(i, 1);
+      }
+    }
+  };
+  return state;
+}
+
+export { attachWorldMatrixState, createWorldMatrixState };
+//# sourceMappingURL=world-matrix-state.js.map

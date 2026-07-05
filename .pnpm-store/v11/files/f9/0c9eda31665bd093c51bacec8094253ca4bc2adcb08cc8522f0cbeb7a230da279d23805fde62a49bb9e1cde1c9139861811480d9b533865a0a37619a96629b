@@ -1,0 +1,55 @@
+import { MAX_LIGHTS, LIGHT_ENTRY_FLOATS } from '../light/types.js';
+
+function getFloatingOriginOffset(scene) {
+  const cam = scene.camera;
+  if (!cam) {
+    return { x: 0, y: 0, z: 0 };
+  }
+  const w = cam.worldMatrix;
+  return { x: w[12], y: w[13], z: w[14] };
+}
+function lightFoVersion(scene) {
+  return scene.camera ? scene.camera.worldMatrixVersion : 0;
+}
+function applyLightFoOffset(data, scene) {
+  const cam = scene.camera;
+  const w = cam?.worldMatrix;
+  if (!w) {
+    return;
+  }
+  const ox = w[12];
+  const oy = w[13];
+  const oz = w[14];
+  let count = 0;
+  for (const light of scene.lights) {
+    if (count >= MAX_LIGHTS) {
+      break;
+    }
+    if (!light._writeLightUbo) {
+      continue;
+    }
+    const o = 4 + count * LIGHT_ENTRY_FLOATS;
+    const type = data[o + 3];
+    if (type === 0 || type === 2) {
+      const lw = light.worldMatrix;
+      data[o] = lw[12] - ox;
+      data[o + 1] = lw[13] - oy;
+      data[o + 2] = lw[14] - oz;
+    }
+    count++;
+  }
+}
+function wrapRenderableForFO(inner, scene, invalidate) {
+  let _lastCameraVersion = -1;
+  return () => {
+    const cv = scene.camera ? scene.camera.worldMatrixVersion : -1;
+    if (cv !== _lastCameraVersion) {
+      invalidate();
+      _lastCameraVersion = cv;
+    }
+    inner();
+  };
+}
+
+export { applyLightFoOffset, getFloatingOriginOffset, lightFoVersion, wrapRenderableForFO };
+//# sourceMappingURL=floating-origin.js.map

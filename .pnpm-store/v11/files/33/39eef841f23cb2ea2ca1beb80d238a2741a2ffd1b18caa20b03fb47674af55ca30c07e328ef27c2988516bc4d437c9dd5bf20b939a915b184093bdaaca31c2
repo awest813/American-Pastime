@@ -1,0 +1,6 @@
+import { unaryEmitter } from './_math-factory.js';
+
+const emitter = unaryEmitter("NegateBlock", (v) => `-${v}`, void 0, "value");
+
+export { emitter };
+//# sourceMappingURL=negate-block.js.map

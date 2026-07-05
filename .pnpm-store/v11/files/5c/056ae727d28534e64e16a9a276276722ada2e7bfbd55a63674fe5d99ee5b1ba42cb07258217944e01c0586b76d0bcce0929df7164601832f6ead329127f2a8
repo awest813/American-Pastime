@@ -1,0 +1,68 @@
+function computeAabb(positions, world) {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  if (world) {
+    const m0 = world[0], m1 = world[1], m2 = world[2], m4 = world[4], m5 = world[5], m6 = world[6], m8 = world[8], m9 = world[9], m10 = world[10], m12 = world[12], m13 = world[13], m14 = world[14];
+    for (let i = 0; i < positions.length; i += 3) {
+      const lx = positions[i];
+      const ly = positions[i + 1];
+      const lz = positions[i + 2];
+      const x = m0 * lx + m4 * ly + m8 * lz + m12;
+      const y = m1 * lx + m5 * ly + m9 * lz + m13;
+      const z = m2 * lx + m6 * ly + m10 * lz + m14;
+      if (x < minX) {
+        minX = x;
+      }
+      if (x > maxX) {
+        maxX = x;
+      }
+      if (y < minY) {
+        minY = y;
+      }
+      if (y > maxY) {
+        maxY = y;
+      }
+      if (z < minZ) {
+        minZ = z;
+      }
+      if (z > maxZ) {
+        maxZ = z;
+      }
+    }
+  } else {
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i];
+      const y = positions[i + 1];
+      const z = positions[i + 2];
+      if (x < minX) {
+        minX = x;
+      }
+      if (x > maxX) {
+        maxX = x;
+      }
+      if (y < minY) {
+        minY = y;
+      }
+      if (y > maxY) {
+        maxY = y;
+      }
+      if (z < minZ) {
+        minZ = z;
+      }
+      if (z > maxZ) {
+        maxZ = z;
+      }
+    }
+  }
+  return [
+    [minX, minY, minZ],
+    [maxX, maxY, maxZ]
+  ];
+}
+
+const __viteBrowserExternal = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
+    __proto__: null
+}, Symbol.toStringTag, { value: 'Module' }));
+
+export { __viteBrowserExternal as _, computeAabb as c };
+//# sourceMappingURL=__vite-browser-external-BFTKbDcV.js.map

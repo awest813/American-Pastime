@@ -1,0 +1,139 @@
+import { createPostProcessTask } from '../frame-graph/post-process-task.js';
+
+const MAX_VERTEX_BLUR_SAMPLES = 8;
+const DOF_BLUR_EXTRA_TEXTURE_WGSL = `@group(0) @binding(2) var dofCocTexture:texture_2d<f32>;`;
+const DOF_BLUR_UNIFORM_WGSL = `struct DofBlurParams{delta:vec2f,p0:f32,p1:f32}
+@group(0) @binding(3) var<uniform> dofBlurParams:DofBlurParams;`;
+const DOF_BLUR_COC_SAMPLE_WGSL = `fn sampleCoC(uv:vec2f)->f32{return textureSample(dofCocTexture,sourceSampler,uv).r;}`;
+function nearestBestKernel(kernel) {
+  const value = Math.max(1, Math.round(kernel));
+  for (const k of [value, value - 1, value + 1, value - 2, value + 2]) {
+    if (k > 0 && k % 2 !== 0 && Math.floor(k / 2) % 2 === 0) {
+      return Math.max(k, 3);
+    }
+  }
+  return Math.max(value, 3);
+}
+function gaussianWeight(x) {
+  const sigma = 1 / 3;
+  return Math.exp(-(x * x) / (2 * sigma * sigma)) / (Math.sqrt(2 * Math.PI) * sigma);
+}
+function getOptimizedBlurSamples(kernel) {
+  const n = nearestBestKernel(kernel);
+  const centerIndex = (n - 1) / 2;
+  const offsets = [];
+  const weights = [];
+  let totalWeight = 0;
+  for (let i = 0; i < n; i++) {
+    const weight = gaussianWeight(i / (n - 1) * 2 - 1);
+    offsets[i] = i - centerIndex;
+    weights[i] = weight;
+    totalWeight += weight;
+  }
+  for (let i = 0; i < weights.length; i++) {
+    weights[i] /= totalWeight;
+  }
+  const samples = [];
+  for (let i = 0; i <= centerIndex; i += 2) {
+    const j = Math.min(i + 1, Math.floor(centerIndex));
+    if (i === j) {
+      samples.push({ offset: offsets[i], weight: weights[i] });
+      continue;
+    }
+    const sharedCell = j === centerIndex;
+    const weight = weights[i] + weights[j] * (sharedCell ? 0.5 : 1);
+    const offset = offsets[i] + 1 / (1 + weights[i] / weights[j]);
+    if (offset === 0) {
+      samples.push({ offset: offsets[i], weight: weights[i] }, { offset: offsets[i + 1], weight: weights[i + 1] });
+    } else {
+      samples.push({ offset, weight }, { offset: -offset, weight });
+    }
+  }
+  return samples;
+}
+function wgslFloat(value) {
+  return value.toFixed(7).replace(/0+$/, "").replace(/\.$/, ".0");
+}
+function updateDofBlurShader(shader, kernel) {
+  const samples = getOptimizedBlurSamples(kernel);
+  const center = samples[samples.length - 1];
+  const offsetSamples = samples.slice(0, samples.length - 1);
+  const varyingCount = Math.min(offsetSamples.length, MAX_VERTEX_BLUR_SAMPLES);
+  shader.vertexOutputWGSL = "";
+  shader.vertexMainWGSL = "";
+  for (let i = 0; i < varyingCount; i++) {
+    shader.vertexOutputWGSL += `,@location(${i + 1}) sampleCoord${i}:vec2f`;
+    shader.vertexMainWGSL += `out.sampleCoord${i}=out.uv+dofBlurParams.delta*${wgslFloat(offsetSamples[i].offset)};`;
+  }
+  let body = `var blend=textureSample(sourceTextureSampler,sourceSampler,input.uv)*${wgslFloat(center.weight)};`;
+  body += `var sumOfWeights=${wgslFloat(center.weight)};`;
+  for (let i = 0; i < offsetSamples.length; i++) {
+    const sample = offsetSamples[i];
+    const coord = i < varyingCount ? `input.sampleCoord${i}` : `(input.uv+dofBlurParams.delta*${wgslFloat(sample.offset)})`;
+    body += `let f${i}=sampleCoC(${coord});let w${i}=${wgslFloat(sample.weight)}*f${i};sumOfWeights=sumOfWeights+w${i};`;
+    body += `blend=blend+textureSample(sourceTextureSampler,sourceSampler,${coord})*w${i};`;
+  }
+  body += `return blend/sumOfWeights;`;
+  shader.fragmentWGSL = DOF_BLUR_COC_SAMPLE_WGSL;
+  shader.fragmentWrapperWGSL = `@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{${body}}`;
+}
+function createDepthOfFieldBlurPostProcessTask(config, engine, scene) {
+  const params = { direction: config.direction ?? { x: 1, y: 0 }, kernel: config.kernel ?? 9 };
+  const shader = {
+    extraTextureWGSL: DOF_BLUR_EXTRA_TEXTURE_WGSL,
+    extraTextures: [config.circleOfConfusionTexture],
+    uniformWGSL: DOF_BLUR_UNIFORM_WGSL,
+    uniformBinding: 3,
+    uniformByteLength: 16,
+    writeUniforms(data) {
+      const width = Math.max(1, task.outputTexture._width || config.sourceTexture._width);
+      const height = Math.max(1, task.outputTexture._height || config.sourceTexture._height);
+      data[0] = params.direction.x / width;
+      data[1] = params.direction.y / height;
+    },
+    fragmentWGSL: ""
+  };
+  updateDofBlurShader(shader, params.kernel);
+  const task = createPostProcessTask(
+    {
+      name: config.name ?? "depth-of-field-blur",
+      sourceTexture: config.sourceTexture,
+      sourceSamplingMode: config.sourceSamplingMode ?? "linear",
+      targetTexture: config.targetTexture,
+      alphaMode: config.alphaMode,
+      viewport: config.viewport,
+      clear: config.clear,
+      _shader: shader
+    },
+    engine,
+    scene
+  );
+  const baseUpdateUniforms = task.updateUniforms;
+  let shaderKernel = params.kernel;
+  task.updateUniforms = () => {
+    if (shaderKernel !== params.kernel) {
+      shaderKernel = params.kernel;
+      updateDofBlurShader(task._shader, params.kernel);
+      task.record();
+    }
+    baseUpdateUniforms();
+  };
+  Object.defineProperties(task, {
+    direction: {
+      get: () => params.direction,
+      set: (value) => {
+        params.direction = value;
+      }
+    },
+    kernel: {
+      get: () => params.kernel,
+      set: (value) => {
+        params.kernel = value;
+      }
+    }
+  });
+  return task;
+}
+
+export { createDepthOfFieldBlurPostProcessTask };
+//# sourceMappingURL=depth-of-field-blur.js.map

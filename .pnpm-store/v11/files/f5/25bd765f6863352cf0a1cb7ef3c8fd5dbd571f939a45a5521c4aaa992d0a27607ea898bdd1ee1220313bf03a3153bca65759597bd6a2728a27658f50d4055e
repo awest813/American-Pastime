@@ -1,0 +1,24 @@
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color.js";
+import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector.js";
+type PropertyKeys<TargetT, PropertyT> = {
+    [PropertyKeyT in keyof TargetT]: TargetT[PropertyKeyT] extends PropertyT | null | undefined ? PropertyKeyT : never;
+}[keyof TargetT];
+export declare function useProperty<TargetT extends object, PropertyKeyT extends keyof TargetT>(target: TargetT, propertyKey: PropertyKeyT): TargetT[PropertyKeyT];
+export declare function useProperty<TargetT extends object, PropertyKeyT extends keyof TargetT>(target: TargetT | null | undefined, propertyKey: PropertyKeyT): TargetT[PropertyKeyT] | undefined;
+export declare function useVector3Property<TargetT extends object, PropertyKeyT extends PropertyKeys<TargetT, Vector3>>(target: TargetT, propertyKey: PropertyKeyT): TargetT[PropertyKeyT];
+export declare function useVector3Property<TargetT extends object, PropertyKeyT extends PropertyKeys<TargetT, Vector3>>(target: TargetT | null | undefined, propertyKey: PropertyKeyT): TargetT[PropertyKeyT] | undefined;
+export declare function useColor3Property<TargetT extends object, PropertyKeyT extends PropertyKeys<TargetT, Color3>>(target: TargetT, propertyKey: PropertyKeyT): TargetT[PropertyKeyT];
+export declare function useColor3Property<TargetT extends object, PropertyKeyT extends PropertyKeys<TargetT, Color3>>(target: TargetT | null | undefined, propertyKey: PropertyKeyT): TargetT[PropertyKeyT] | undefined;
+export declare function useColor4Property<TargetT extends object, PropertyKeyT extends PropertyKeys<TargetT, Color4>>(target: TargetT, propertyKey: PropertyKeyT): TargetT[PropertyKeyT];
+export declare function useColor4Property<TargetT extends object, PropertyKeyT extends PropertyKeys<TargetT, Color4>>(target: TargetT | null | undefined, propertyKey: PropertyKeyT): TargetT[PropertyKeyT] | null;
+export declare function useQuaternionProperty<TargetT extends object, PropertyKeyT extends PropertyKeys<TargetT, Quaternion>>(target: TargetT, propertyKey: PropertyKeyT): TargetT[PropertyKeyT];
+export declare function useQuaternionProperty<TargetT extends object, PropertyKeyT extends PropertyKeys<TargetT, Quaternion>>(target: TargetT | null | undefined, propertyKey: PropertyKeyT): TargetT[PropertyKeyT] | undefined;
+/**
+ * Creates a hook for a concrete value. For example, if the value is a Vector3,
+ * it will return a hook that can intercept a change to the Vector3 property or
+ * any of its components (x, y, z).
+ * @param value The current value of a property that will be hooked.
+ * @returns A hook function that can be used to observe changes to the property.
+ */
+export declare function MakePropertyHook(value: unknown): typeof useProperty;
+export {};

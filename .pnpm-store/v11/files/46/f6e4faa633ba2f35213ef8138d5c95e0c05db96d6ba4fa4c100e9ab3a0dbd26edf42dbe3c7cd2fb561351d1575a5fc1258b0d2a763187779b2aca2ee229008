@@ -1,0 +1,28 @@
+import { _ALPHA_BLEND_STATE, _PREMULTIPLIED_BLEND_STATE } from './blend-descriptors.js';
+
+const billboardBlendAlpha = {
+  _key: "alpha",
+  _descriptor: _ALPHA_BLEND_STATE,
+  _depthMode: "transparent"
+};
+const billboardBlendPremultiplied = {
+  _key: "premultiplied",
+  _descriptor: _PREMULTIPLIED_BLEND_STATE,
+  _premultipliedOpacity: true,
+  _depthMode: "transparent"
+};
+const billboardBlendCutout = {
+  _key: "cutout",
+  _depthMode: "cutout"
+};
+const billboardBlendAdditive = {
+  _key: "additive",
+  _descriptor: {
+    color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+    alpha: { srcFactor: "one", dstFactor: "one", operation: "add" }
+  },
+  _depthMode: "transparent"
+};
+
+export { billboardBlendAdditive, billboardBlendAlpha, billboardBlendCutout, billboardBlendPremultiplied };
+//# sourceMappingURL=billboard-blend.js.map

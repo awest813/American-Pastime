@@ -1,0 +1,232 @@
+import { useEventCallback } from '@fluentui/react-components';
+import * as React from 'react';
+import { clamp } from '../utils';
+import { EVENTS, UNMEASURED } from '../types';
+import { useKeyboardHandler } from './useKeyboardHandler';
+import { useMouseHandler } from './useMouseHandler';
+import { useUnitHandle } from './useUnitHandle';
+const clampWithMode = (value, min, max, relative)=>{
+    return relative || value === UNMEASURED ? value : clamp(value, min, max);
+};
+const DEFAULT_GET_A11_VALUE_TEXT = (value, unit)=>value === UNMEASURED ? undefined : `${value.toFixed(0)}${unit}`;
+export const useResizeHandle = (params)=>{
+    const { growDirection, variableName, variableTarget = 'wrapper', minValue = 0, maxValue = Number.MAX_SAFE_INTEGER, onChange, onChangeRejected, onDragStart, onDragEnd, getA11ValueText = DEFAULT_GET_A11_VALUE_TEXT, relative } = params;
+    const handleRef = React.useRef(null);
+    const wrapperRef = React.useRef(null);
+    const elementRef = React.useRef(null);
+    const currentValue = React.useRef(UNMEASURED);
+    var _params_unit;
+    const unitHandle = useUnitHandle(growDirection, (_params_unit = params.unit) != null ? _params_unit : 'px');
+    const updateTargetElVariable = React.useCallback((value)=>{
+        const targetEl = variableTarget === 'wrapper' ? wrapperRef.current : elementRef.current;
+        targetEl == null ? void 0 : targetEl.style.setProperty(variableName, unitHandle.toCSSValue(value));
+    }, [
+        variableName,
+        unitHandle
+    ]);
+    const updateElementsAttrs = React.useCallback((eventData)=>{
+        const a11yValue = relative ? // because the currentValue is just the px offset.
+        getA11ValueText(unitHandle.elementDimension(elementRef.current), unitHandle.name) : getA11ValueText(eventData.value, unitHandle.name);
+        const handleAttributes = {
+            role: 'slider',
+            'aria-valuemin': minValue,
+            ...maxValue < Number.MAX_SAFE_INTEGER && {
+                'aria-valuemax': maxValue
+            },
+            ...a11yValue && {
+                'aria-valuetext': a11yValue
+            },
+            'aria-orientation': growDirection === 'end' || growDirection === 'start' ? 'horizontal' : 'vertical'
+        };
+        Object.entries(handleAttributes).forEach(([key, value])=>{
+            var _handleRef_current;
+            (_handleRef_current = handleRef.current) == null ? void 0 : _handleRef_current.setAttribute(key, String(value));
+        });
+        // Make sure to only apply the value if it's not the initial value!
+        if (eventData.value !== UNMEASURED) {
+            updateTargetElVariable(eventData.value);
+            onChange == null ? void 0 : onChange(eventData.event, eventData);
+        }
+    }, [
+        getA11ValueText,
+        maxValue,
+        minValue,
+        onChange,
+        updateTargetElVariable
+    ]);
+    // In case the maxValue or minValue is changed, we need to make sure we are not exceeding the new limits
+    React.useEffect(()=>{
+        currentValue.current = clampWithMode(currentValue.current, minValue, maxValue, relative);
+    }, [
+        maxValue,
+        minValue,
+        relative
+    ]);
+    const onValueChange = React.useCallback((_, eventData)=>{
+        const { value } = eventData;
+        const newValue = clampWithMode(value, minValue, maxValue, relative);
+        if (newValue !== currentValue.current) {
+            // FIXME
+            // "relative" mode implementation is buggy, so the proper implementation is done only for the "absolute" mode.
+            if (relative) {
+                // Save the current value, we might need to revert to it if the new value doesn't have any impact on size
+                const oldValue = currentValue.current;
+                // Measure the size before setting the new value
+                const previousSize = unitHandle.elementDimension(elementRef.current);
+                // Set the new value and update the elements, this should result in element resize
+                currentValue.current = newValue;
+                updateElementsAttrs({
+                    ...eventData,
+                    value: currentValue.current
+                });
+                // Measure the size after setting the new value
+                const newSizeIn = unitHandle.elementDimension(elementRef.current);
+                // If the size hasn't changed, we need to revert to the old value to keep the state and DOM in sync.
+                // If we don't do this, then the handle might be stuck in a place where small changes
+                // in value don't have any effect.
+                if (newSizeIn === previousSize) {
+                    currentValue.current = oldValue;
+                    updateElementsAttrs({
+                        ...eventData,
+                        value: currentValue.current
+                    });
+                }
+                return;
+            }
+            const previousSize = unitHandle.elementDimension(elementRef.current);
+            updateTargetElVariable(newValue);
+            const newSize = unitHandle.elementDimension(elementRef.current);
+            if (previousSize === newSize) {
+                // If the size hasn't changed, we need to revert to the old value to keep the state and DOM in sync
+                updateTargetElVariable(previousSize);
+                onChangeRejected == null ? void 0 : onChangeRejected(eventData.event, {
+                    ...eventData,
+                    value: currentValue.current,
+                    rejectedValue: newValue
+                });
+                return;
+            }
+            currentValue.current = unitHandle.roundValue(newSize);
+            updateElementsAttrs({
+                ...eventData,
+                value: currentValue.current
+            });
+        }
+    }, [
+        minValue,
+        maxValue,
+        onChangeRejected,
+        relative,
+        unitHandle,
+        updateElementsAttrs
+    ]);
+    const setValue = React.useCallback((value)=>{
+        const event = new CustomEvent(EVENTS.setValue);
+        onValueChange(event, {
+            event,
+            value,
+            type: EVENTS.setValue,
+            unit: unitHandle.name
+        });
+    }, [
+        onValueChange,
+        unitHandle
+    ]);
+    const onDragStartLocal = useEventCallback((e, data)=>{
+        onDragStart == null ? void 0 : onDragStart(e, {
+            ...data,
+            value: currentValue.current
+        });
+    });
+    const onDragEndLocal = useEventCallback((e, data)=>{
+        onDragEnd == null ? void 0 : onDragEnd(e, {
+            ...data,
+            value: currentValue.current
+        });
+    });
+    const getCurrentValue = React.useCallback(()=>{
+        return relative ? currentValue.current : unitHandle.elementDimension(elementRef.current);
+    }, [
+        relative,
+        unitHandle
+    ]);
+    const { attachHandlers: attachMouseHandlers, detachHandlers: detachMouseHandlers } = useMouseHandler({
+        onDragStart: onDragStartLocal,
+        onDragEnd: onDragEndLocal,
+        onValueChange,
+        getCurrentValue,
+        growDirection,
+        unitHandle
+    });
+    const { attachHandlers: attachKeyboardHandlers, detachHandlers: detachKeyboardHandlers } = useKeyboardHandler({
+        onValueChange,
+        growDirection,
+        getCurrentValue,
+        unitHandle
+    });
+    const setHandleRef = React.useCallback((node)=>{
+        if (node) {
+            if (handleRef.current !== node) {
+                detachMouseHandlers(node);
+                detachKeyboardHandlers(node);
+            }
+            attachMouseHandlers(node);
+            attachKeyboardHandlers(node);
+            updateElementsAttrs({
+                type: EVENTS.handleRef,
+                event: new CustomEvent(EVENTS.handleRef),
+                value: UNMEASURED,
+                unit: unitHandle.name
+            });
+        }
+        handleRef.current = node;
+    }, [
+        attachKeyboardHandlers,
+        attachMouseHandlers,
+        detachKeyboardHandlers,
+        detachMouseHandlers,
+        updateElementsAttrs,
+        unitHandle
+    ]);
+    const setWrapperRef = React.useCallback((node)=>{
+        wrapperRef.current = node;
+        if (elementRef.current) {
+            updateElementsAttrs({
+                type: EVENTS.wrapperRef,
+                event: new CustomEvent(EVENTS.wrapperRef),
+                value: UNMEASURED,
+                unit: unitHandle.name
+            });
+        }
+    }, [
+        updateElementsAttrs,
+        unitHandle
+    ]);
+    const setElementRef = React.useCallback((node)=>{
+        elementRef.current = node;
+        if (elementRef.current) {
+            if (currentValue.current === UNMEASURED && relative) {
+                currentValue.current = 0;
+            }
+            updateElementsAttrs({
+                type: EVENTS.elementRef,
+                event: new CustomEvent(EVENTS.elementRef),
+                value: UNMEASURED,
+                unit: unitHandle.name
+            });
+        }
+    }, [
+        relative,
+        updateElementsAttrs,
+        unitHandle
+    ]);
+    return {
+        setValue,
+        elementRef: setElementRef,
+        handleRef: setHandleRef,
+        wrapperRef: setWrapperRef,
+        growDirection
+    };
+};
+
+//# sourceMappingURL=useResizeHandle.js.map

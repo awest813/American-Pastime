@@ -1,0 +1,2 @@
+import { type TextureEditorToolProvider } from "../../../components/textureEditor/textureEditor";
+export declare const Paintbrush: TextureEditorToolProvider;

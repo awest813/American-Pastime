@@ -1,0 +1,20 @@
+import { type ComponentType, type FunctionComponent } from "react";
+import { type IMetadata } from "./textureEditor";
+type ToolBarProps = {
+    tools: readonly {
+        name: string;
+        icon: ComponentType;
+    }[];
+    changeTool: (toolIndex: number) => void;
+    activeToolIndex: number;
+    metadata: IMetadata;
+    setMetadata: (data: any) => void;
+    hasAlpha: boolean;
+};
+/**
+ * Toolbar component for texture editing tools
+ * @param props - The toolbar properties
+ * @returns The toolbar component
+ */
+export declare const ToolBar: FunctionComponent<ToolBarProps>;
+export {};

@@ -1,0 +1,8 @@
+import { type Sound } from "@babylonjs/core/index.js";
+import { type FunctionComponent } from "react";
+export declare const SoundGeneralProperties: FunctionComponent<{
+    sound: Sound;
+}>;
+export declare const SoundCommandProperties: FunctionComponent<{
+    sound: Sound;
+}>;

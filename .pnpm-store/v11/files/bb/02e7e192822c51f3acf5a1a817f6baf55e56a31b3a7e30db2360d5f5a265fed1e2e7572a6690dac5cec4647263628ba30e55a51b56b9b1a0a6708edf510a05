@@ -1,0 +1,77 @@
+import { DV, U8 } from '../engine/typed-arrays.js';
+
+const SIG_EOCD = 101010256;
+const SIG_CDIR = 33639248;
+const SIG_LFH = 67324752;
+let _utf8 = null;
+function findEocd(view) {
+  const maxBack = Math.min(view.byteLength, 22 + 65535);
+  const start = view.byteLength - maxBack;
+  for (let i = view.byteLength - 22; i >= start; i--) {
+    if (view.getUint32(i, true) === SIG_EOCD) {
+      return i;
+    }
+  }
+  return -1;
+}
+async function unzipBuffer(buffer) {
+  const view = new DV(buffer);
+  const eocd = findEocd(view);
+  if (eocd < 0) {
+    throw new Error("zip: EOCD record not found");
+  }
+  const totalEntries = view.getUint16(eocd + 10, true);
+  const cdSize = view.getUint32(eocd + 12, true);
+  const cdOffset = view.getUint32(eocd + 16, true);
+  if (cdSize === 4294967295 || cdOffset === 4294967295) {
+    throw new Error("zip: ZIP64 archives are not supported");
+  }
+  const entries = [];
+  let p = cdOffset;
+  for (let i = 0; i < totalEntries; i++) {
+    if (view.getUint32(p, true) !== SIG_CDIR) {
+      throw new Error(`zip: bad central directory signature at offset ${p}`);
+    }
+    const gpFlag = view.getUint16(p + 8, true);
+    const method = view.getUint16(p + 10, true);
+    const compressedSize = view.getUint32(p + 20, true);
+    const uncompressedSize = view.getUint32(p + 24, true);
+    const nameLen = view.getUint16(p + 28, true);
+    const extraLen = view.getUint16(p + 30, true);
+    const commentLen = view.getUint16(p + 32, true);
+    const localOffset = view.getUint32(p + 42, true);
+    if (gpFlag & 1) {
+      throw new Error(`zip: encrypted entries are not supported`);
+    }
+    if (compressedSize === 4294967295 || uncompressedSize === 4294967295 || localOffset === 4294967295) {
+      throw new Error("zip: ZIP64 archives are not supported");
+    }
+    const name = (_utf8 ??= new TextDecoder("utf-8")).decode(new U8(buffer, p + 46, nameLen));
+    p += 46 + nameLen + extraLen + commentLen;
+    if (view.getUint32(localOffset, true) !== SIG_LFH) {
+      throw new Error(`zip: bad local file header signature at offset ${localOffset}`);
+    }
+    const lfhNameLen = view.getUint16(localOffset + 26, true);
+    const lfhExtraLen = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + lfhNameLen + lfhExtraLen;
+    const compressed = new U8(buffer, dataStart, compressedSize);
+    let bytes;
+    if (method === 0) {
+      bytes = new U8(compressed);
+    } else if (method === 8) {
+      const stream = new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw")));
+      const ab = await stream.arrayBuffer();
+      bytes = new U8(ab);
+    } else {
+      throw new Error(`zip: unsupported compression method ${method} for entry '${name}'`);
+    }
+    if (bytes.byteLength !== uncompressedSize) {
+      throw new Error(`zip: entry '${name}' decompressed size mismatch (got ${bytes.byteLength}, expected ${uncompressedSize})`);
+    }
+    entries.push({ name, bytes });
+  }
+  return entries;
+}
+
+export { unzipBuffer };
+//# sourceMappingURL=zip-parser.js.map

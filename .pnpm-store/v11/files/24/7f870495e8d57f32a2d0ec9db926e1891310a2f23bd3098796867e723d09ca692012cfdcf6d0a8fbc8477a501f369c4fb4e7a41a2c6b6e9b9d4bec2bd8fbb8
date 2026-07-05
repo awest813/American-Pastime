@@ -1,0 +1,6 @@
+import { type FunctionComponent } from "react";
+import { type CubeTexture } from "@babylonjs/core/index.js";
+import { type EnvCubeTexture } from "@babylonjs/core/Materials/Textures/envCubeTexture.js";
+export declare const CubeTextureTransformProperties: FunctionComponent<{
+    texture: CubeTexture | EnvCubeTexture;
+}>;

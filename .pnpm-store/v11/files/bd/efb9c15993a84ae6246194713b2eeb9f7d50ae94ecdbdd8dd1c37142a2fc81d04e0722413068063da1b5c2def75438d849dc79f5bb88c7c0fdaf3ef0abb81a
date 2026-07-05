@@ -1,0 +1,72 @@
+import { getOrCreateSampler } from '../resource/gpu-pool.js';
+import { U8 } from '../engine/typed-arrays.js';
+import { linearToSrgbByte } from '../math/color.js';
+import { uploadTex } from './gltf-pbr-builder.js';
+
+function gltfTexSamplerDesc(json, texInfo) {
+  const s = json.textures?.[texInfo.index]?.sampler != null ? json.samplers?.[json.textures[texInfo.index].sampler] : void 0;
+  const wrap = (m) => m === 33071 ? "clamp-to-edge" : m === 33648 ? "mirror-repeat" : "repeat";
+  const minF = s?.minFilter;
+  const minNearest = minF === 9728 || minF === 9984 || minF === 9986;
+  const mipNearest = minF === 9984 || minF === 9985;
+  const noMip = minF === 9728 || minF === 9729;
+  const magLinear = s?.magFilter !== 9728;
+  return {
+    magFilter: magLinear ? "linear" : "nearest",
+    minFilter: minNearest ? "nearest" : "linear",
+    mipmapFilter: mipNearest ? "nearest" : "linear",
+    addressModeU: wrap(s?.wrapS),
+    addressModeV: wrap(s?.wrapT),
+    ...noMip ? { lodMaxClamp: 0 } : void 0,
+    // WebGPU forbids anisotropy unless mag/min/mip filters are ALL linear; gate on
+    // every filter (incl. mipNearest, e.g. glTF LINEAR_MIPMAP_NEAREST) or createSampler throws.
+    // Also disable it for the clamped-mip path (single LOD → anisotropy is meaningless).
+    maxAnisotropy: magLinear && !minNearest && !mipNearest && !noMip ? 4 : 1
+  };
+}
+function makeSamplerFor(engine, json, defaultSampler) {
+  return (texInfo) => {
+    if (texInfo == null) {
+      return defaultSampler;
+    }
+    const desc = gltfTexSamplerDesc(json, texInfo);
+    return desc.lodMaxClamp === 0 ? engine._device.createSampler(desc) : getOrCreateSampler(engine, desc);
+  };
+}
+function buildSampledPbrTextures(engine, mat, defaultSampler, generateMipmaps, samplerFor, getCachedTex) {
+  const def = mat._rawMatDef ?? {};
+  const pbr = def.pbrMetallicRoughness ?? {};
+  const cached = (bitmap, srgb, texInfo) => {
+    const s = samplerFor(texInfo);
+    const tex = getCachedTex(bitmap, srgb);
+    return s === defaultSampler ? tex : { ...tex, sampler: s };
+  };
+  const baseColorTexture = mat._baseColorImage ? cached(mat._baseColorImage, true, pbr.baseColorTexture) : (() => {
+    const f = mat._baseColorFactor;
+    return uploadTex(
+      engine,
+      null,
+      true,
+      defaultSampler,
+      generateMipmaps,
+      new U8([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
+    );
+  })();
+  const normalTexture = mat._normalImage ? cached(mat._normalImage, false, def.normalTexture) : void 0;
+  const emissiveTexture = mat._emissiveImage ? cached(mat._emissiveImage, true, def.emissiveTexture) : void 0;
+  const single = mat._metallicRoughnessImage ?? mat._occlusionImage;
+  const ormTexInfo = mat._metallicRoughnessImage ? pbr.metallicRoughnessTexture : def.occlusionTexture;
+  let ormTexture;
+  if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
+    ormTexture = cached(single, false, ormTexInfo);
+  } else if (!single) {
+    const clamp = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+    ormTexture = uploadTex(engine, null, false, defaultSampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+  } else {
+    ormTexture = cached(mat._metallicRoughnessImage, false, pbr.metallicRoughnessTexture);
+  }
+  return { baseColorTexture, ormTexture, normalTexture, emissiveTexture };
+}
+
+export { buildSampledPbrTextures, makeSamplerFor };
+//# sourceMappingURL=gltf-sampler-desc.js.map

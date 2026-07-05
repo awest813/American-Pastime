@@ -1,0 +1,8 @@
+import { mergeClasses } from '@griffel/react';
+export const accordionItemClassNames = {
+    root: 'fui-AccordionItem'
+};
+export const useAccordionItemStyles_unstable = (state)=>{
+    state.root.className = mergeClasses(accordionItemClassNames.root, state.root.className);
+    return state;
+};

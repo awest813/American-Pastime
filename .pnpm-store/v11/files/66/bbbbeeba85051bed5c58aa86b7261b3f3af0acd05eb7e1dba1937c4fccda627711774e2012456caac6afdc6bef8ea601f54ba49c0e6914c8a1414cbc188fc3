@@ -1,0 +1,11 @@
+let MAX_LIGHTS = 16;
+function setMaxLights(n) {
+  if (!Number.isFinite(n) || n < 1) {
+    throw new Error(`setMaxLights: expected positive integer, got ${n}`);
+  }
+  MAX_LIGHTS = n | 0;
+}
+const LIGHT_ENTRY_FLOATS = 16;
+
+export { LIGHT_ENTRY_FLOATS, MAX_LIGHTS, setMaxLights };
+//# sourceMappingURL=types.js.map

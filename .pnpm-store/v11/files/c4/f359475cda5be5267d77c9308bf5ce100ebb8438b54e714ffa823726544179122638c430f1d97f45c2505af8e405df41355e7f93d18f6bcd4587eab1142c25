@@ -1,0 +1,27 @@
+import { C as COMPAT_SOURCE_FILTER, r as resolveCompatSpecifier } from "./bundler-resolve-0pEkTP9X.js";
+function liteCompat() {
+  return {
+    name: "babylonjs-lite-compat",
+    setup(build) {
+      build.onResolve({ filter: COMPAT_SOURCE_FILTER }, async (args) => {
+        const specifier = resolveCompatSpecifier(args.path);
+        if (!specifier) {
+          return null;
+        }
+        const resolved = await build.resolve(specifier, {
+          importer: args.importer,
+          resolveDir: args.resolveDir,
+          kind: args.kind
+        });
+        if (resolved.errors.length > 0) {
+          return { errors: resolved.errors };
+        }
+        return { path: resolved.path, external: resolved.external, namespace: resolved.namespace };
+      });
+    }
+  };
+}
+export {
+  liteCompat
+};
+//# sourceMappingURL=esbuild.js.map

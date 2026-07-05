@@ -1,0 +1,297 @@
+import { F32 } from '../../engine/typed-arrays.js';
+import { writeMeshLightSelection } from '../../render/lights-ubo.js';
+import { createUniformBuffer } from '../../resource/gpu-buffers.js';
+import { acquireTexture, releaseTexture } from '../../resource/gpu-pool.js';
+import { targetSignatureKey } from '../../engine/render-target.js';
+import { createThinInstanceFragment } from '../../shader/fragments/thin-instance-fragment.js';
+import { syncThinInstanceBuffers } from '../../mesh/thin-instance-gpu.js';
+import { _getStdExtsSorted, HAS_OPACITY_TEXTURE, NEEDS_UV, HAS_DIFFUSE_TEXTURE, DOUBLE_SIDED, NEEDS_UV2 } from './standard-flags.js';
+import { writeStdMaterialData } from './standard-pipeline.js';
+import { composeStandardGeometryShader } from './standard-geometry-output-shader.js';
+import { getSceneBindGroupLayout } from '../../render/scene-helpers.js';
+import { collectStdBoundTextures } from './collect-std-bound-textures.js';
+import { _computeMeshFeatures, MSH_HAS_THIN_INSTANCES, MSH_HAS_INSTANCE_COLOR } from '../mesh-features.js';
+
+let _standardGeometryGroupBuilder = null;
+function getStandardGeometryGroupBuilder() {
+  if (_standardGeometryGroupBuilder) {
+    return _standardGeometryGroupBuilder;
+  }
+  const builder = (async () => {
+    throw new Error("standard-geometry view does not support scene group building");
+  });
+  builder._materialFamily = "standard";
+  builder._rebuildSingle = (scene, mesh, materialOverride) => {
+    const view = materialOverride ?? mesh.material;
+    return buildStandardGeometryRenderable(scene, mesh, view);
+  };
+  return _standardGeometryGroupBuilder = builder;
+}
+function _variantKey(meshFeatures) {
+  let k = 0;
+  if (meshFeatures & MSH_HAS_THIN_INSTANCES) {
+    k |= 1;
+  }
+  if (meshFeatures & MSH_HAS_INSTANCE_COLOR) {
+    k |= 2;
+  }
+  return k;
+}
+function buildStandardGeometryRenderable(scene, mesh, view) {
+  const engine = scene.surface.engine;
+  const device = engine._device;
+  const source = view.source;
+  const meshFeatures = _computeMeshFeatures(mesh, false);
+  const variantKey = _variantKey(meshFeatures);
+  const res = _ensureViewResources(view, engine, meshFeatures, variantKey);
+  const features = res._features;
+  const meshUboData = new F32(res._composed._meshUboSpec._totalBytes / 4);
+  meshUboData.set(mesh.worldMatrix, 0);
+  writeMeshLightSelection(mesh, scene.lights, meshUboData);
+  const meshUBO = createUniformBuffer(engine, meshUboData);
+  const bg = _createGeometryMeshBindGroup(engine, view, res, mesh, meshUBO);
+  const boundTextures = collectStdBoundTextures(source);
+  for (const t of boundTextures) {
+    acquireTexture(t);
+  }
+  const prevDisposables = scene._meshDisposables.get(mesh) ?? [];
+  scene._meshDisposables.set(mesh, [
+    ...prevDisposables,
+    () => {
+      for (const t of boundTextures) {
+        releaseTexture(t);
+      }
+    }
+  ]);
+  let _lastWorldVersion = mesh.worldMatrixVersion;
+  let _lastLightsCount = scene.lights.length;
+  const needsUV = (features & NEEDS_UV) !== 0;
+  const needsUV2 = (features & NEEDS_UV2) !== 0;
+  const isAlphaBlend = res._alphaBlend;
+  const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
+  const hasInstanceColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
+  const sortCenter = [mesh.worldMatrix[12], mesh.worldMatrix[13], mesh.worldMatrix[14]];
+  const update = () => {
+    if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount) {
+      sortCenter[0] = mesh.worldMatrix[12];
+      sortCenter[1] = mesh.worldMatrix[13];
+      sortCenter[2] = mesh.worldMatrix[14];
+      meshUboData.set(mesh.worldMatrix, 0);
+      writeMeshLightSelection(mesh, scene.lights, meshUboData);
+      device.queue.writeBuffer(meshUBO, 0, meshUboData);
+      _lastWorldVersion = mesh.worldMatrixVersion;
+      _lastLightsCount = scene.lights.length;
+    }
+    if (source._uboVersion !== res._lastUboVersion) {
+      res._lastUboVersion = source._uboVersion;
+      const textureLevel = (features & HAS_DIFFUSE_TEXTURE) !== 0 ? 1 : 0;
+      res._matData.fill(0);
+      writeStdMaterialData(res._matData, source, textureLevel);
+      device.queue.writeBuffer(res._matUBO, 0, res._matData.buffer, 0, 96);
+    }
+  };
+  const draw = (pass) => {
+    if (mesh.visible === false) {
+      return 0;
+    }
+    pass.setBindGroup(1, bg);
+    const g = mesh._gpu;
+    let slot = 0;
+    pass.setVertexBuffer(slot++, g.positionBuffer);
+    pass.setVertexBuffer(slot++, g.normalBuffer);
+    if (needsUV && g.uvBuffer) {
+      pass.setVertexBuffer(slot++, g.uvBuffer);
+    }
+    if (needsUV2 && g.uv2Buffer) {
+      pass.setVertexBuffer(slot++, g.uv2Buffer);
+    }
+    const ti = hasThinInstances ? mesh.thinInstances : null;
+    if (ti) {
+      slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasInstanceColor);
+    }
+    pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
+    if (ti && ti.count > 0) {
+      pass.drawIndexed(g.indexCount, ti.count);
+    } else {
+      pass.drawIndexed(g.indexCount);
+    }
+    return 1;
+  };
+  const r = {
+    order: mesh.renderOrder ?? (isAlphaBlend ? 200 : 100),
+    isTransparent: isAlphaBlend,
+    mesh,
+    bind(eng, sig) {
+      return {
+        renderable: r,
+        pipeline: _getOrCreateGeometryPipeline(eng, sig, view, res),
+        update,
+        draw
+      };
+    }
+  };
+  r._worldCenter = sortCenter;
+  return r;
+}
+function _ensureViewResources(view, engine, meshFeatures, variantKey) {
+  let cache = view._geometry;
+  if (!cache) {
+    cache = /* @__PURE__ */ new Map();
+    Object.defineProperty(view, "_geometry", { value: cache, enumerable: false, configurable: true });
+  }
+  const cached = cache.get(variantKey);
+  if (cached) {
+    return cached;
+  }
+  const source = view.source;
+  const features = view._renderFeatures.features;
+  const sortedExts = _getStdExtsSorted();
+  const frags = [];
+  const usedExts = [];
+  for (const ext of sortedExts) {
+    if (features & ext._feature) {
+      const f = ext._frag(features);
+      if (f) {
+        frags.push(f);
+        usedExts.push({ _ext: ext });
+      }
+    }
+  }
+  if (meshFeatures & MSH_HAS_THIN_INSTANCES) {
+    const hasColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
+    const tiFrag = createThinInstanceFragment(hasColor);
+    if (hasColor) {
+      const { _fragmentSlots: _drop, ...rest } = tiFrag;
+      frags.push({
+        ...rest,
+        _fragmentSlots: {
+          BC: `color = vec4<f32>(color.rgb * input.vInstanceColor.rgb, color.a * input.vInstanceColor.a);`
+        }
+      });
+    } else {
+      frags.push(tiFrag);
+    }
+  }
+  const composed = composeStandardGeometryShader(features, meshFeatures, frags, view._geometryAttachments, "", view._emitColor);
+  const device = engine._device;
+  const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
+  const sceneBGL = getSceneBindGroupLayout(engine);
+  const pipelineLayout = device.createPipelineLayout({
+    bindGroupLayouts: [sceneBGL, meshBGL]
+  });
+  const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
+  const fragModule = device.createShaderModule({ code: composed._fragmentWGSL });
+  const alphaBlend = source.alpha < 1 || (features & HAS_OPACITY_TEXTURE) !== 0;
+  const matData = new F32(24);
+  const textureLevel = (features & HAS_DIFFUSE_TEXTURE) !== 0 ? 1 : 0;
+  writeStdMaterialData(matData, source, textureLevel);
+  const matUBO = createUniformBuffer(engine, matData);
+  let upUBO = null;
+  if ((features & NEEDS_UV) !== 0) {
+    const uvData = new F32(4);
+    let scaleX = 1;
+    let scaleY = 1;
+    let offsetY = 0;
+    if ((features & HAS_DIFFUSE_TEXTURE) !== 0 && source.diffuseTexture) {
+      scaleX = source.uvScale[0];
+      scaleY = source.uvScale[1];
+      if (source.diffuseTexture.invertY) {
+        offsetY = scaleY;
+        scaleY = -scaleY;
+      }
+    } else if ((features & HAS_OPACITY_TEXTURE) !== 0 && source.opacityTexture?.invertY) {
+      offsetY = 1;
+      scaleY = -1;
+    } else if (source.bumpTexture?.invertY) {
+      offsetY = 1;
+      scaleY = -1;
+    }
+    uvData[0] = scaleX;
+    uvData[1] = scaleY;
+    uvData[2] = 0;
+    uvData[3] = offsetY;
+    upUBO = createUniformBuffer(engine, uvData);
+  }
+  const res = {
+    _composed: composed,
+    _features: features,
+    _meshBGL: meshBGL,
+    _pipelineLayout: pipelineLayout,
+    _vertModule: vertModule,
+    _fragModule: fragModule,
+    _pipelines: /* @__PURE__ */ new Map(),
+    _extFragments: usedExts,
+    _alphaBlend: alphaBlend,
+    _matUBO: matUBO,
+    _matData: matData,
+    _lastUboVersion: source._uboVersion,
+    _upUBO: upUBO
+  };
+  cache.set(variantKey, res);
+  return res;
+}
+function _createGeometryMeshBindGroup(engine, view, res, _mesh, meshUBO) {
+  const source = view.source;
+  const features = res._features;
+  let nextBinding = 0;
+  const entries = [
+    { binding: nextBinding++, resource: { buffer: meshUBO } },
+    { binding: nextBinding++, resource: { buffer: res._matUBO } }
+  ];
+  if ((features & HAS_DIFFUSE_TEXTURE) !== 0 && source.diffuseTexture) {
+    const tex = source.diffuseTexture;
+    entries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
+  }
+  if ((features & NEEDS_UV) !== 0 && res._upUBO) {
+    entries.push({ binding: nextBinding++, resource: { buffer: res._upUBO } });
+  }
+  for (const used of res._extFragments) {
+    if (used._ext._bind) {
+      nextBinding = used._ext._bind(source, entries, nextBinding);
+    }
+  }
+  if (view._gpUBO) {
+    entries.push({ binding: nextBinding++, resource: { buffer: view._gpUBO } });
+  }
+  return engine._device.createBindGroup({ layout: res._meshBGL, entries });
+}
+function _getOrCreateGeometryPipeline(engine, sig, view, res) {
+  const key = targetSignatureKey(sig);
+  const cached = res._pipelines.get(key);
+  if (cached) {
+    return cached;
+  }
+  const device = engine._device;
+  const formats = sig._colorFormats ?? (sig._colorFormat ? [sig._colorFormat] : []);
+  if (formats.length === 0) {
+    throw new Error("standard-geometry: render target has no color attachments");
+  }
+  const alphaBlend = res._alphaBlend;
+  const blendState = alphaBlend ? {
+    color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+    alpha: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" }
+  } : void 0;
+  const colorTargets = formats.map((fmt) => blendState ? { format: fmt, blend: blendState } : { format: fmt });
+  const cullMode = (res._features & DOUBLE_SIDED) !== 0 ? "none" : view._reverseCulling ? "front" : "back";
+  const pipeline = device.createRenderPipeline({
+    layout: res._pipelineLayout,
+    vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
+    fragment: { module: res._fragModule, entryPoint: "main", targets: colorTargets },
+    depthStencil: sig._depthStencilFormat ? {
+      format: sig._depthStencilFormat,
+      depthCompare: sig._depthCompare ?? "greater-equal",
+      // BJS disables depth-write for transparent/opacity meshes in the
+      // geometry pass so background depth survives partially-transparent pixels.
+      depthWriteEnabled: !alphaBlend
+    } : void 0,
+    multisample: { count: sig._sampleCount },
+    // Geometry MRT renders to offscreen targets, so it needs the same
+    // Render upright — front face is always "ccw".
+    primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" }
+  });
+  res._pipelines.set(key, pipeline);
+  return pipeline;
+}
+
+export { buildStandardGeometryRenderable, getStandardGeometryGroupBuilder };
+//# sourceMappingURL=standard-geometry-renderable.js.map

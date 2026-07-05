@@ -1,0 +1,159 @@
+import { U8 } from '../engine/typed-arrays.js';
+import { BU, SS } from '../engine/gpu-flags.js';
+import { disposeRenderTarget, buildRenderTarget, targetSignatureKey } from '../engine/render-target.js';
+
+const DEFAULT_VERTEX_WGSL = `struct EffectVertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>};
+@vertex fn effectFullscreenVertex(@builtin(vertex_index) vertexIndex:u32)->EffectVertexOutput{var positions=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));let p=positions[vertexIndex];var out:EffectVertexOutput;out.position=vec4<f32>(p,0.0,1.0);out.uv=p*0.5+vec2<f32>(0.5,0.5);return out;}`;
+function createUniformEffectWrapper(engine, options) {
+  const eng = engine;
+  const byteLength = align4(options.uniformByteLength);
+  return {
+    name: options.name ?? "uniform-effect-wrapper",
+    options,
+    _engine: eng,
+    _shader: null,
+    _bindGroupLayout: null,
+    _pipelineLayout: null,
+    _bindGroup: null,
+    _uniformBuffer: eng._device.createBuffer({
+      label: `${options.name ?? "uniform-effect-wrapper"}-ubo`,
+      size: byteLength,
+      usage: BU.UNIFORM | BU.COPY_DST
+    }),
+    _uniformByteLength: byteLength
+  };
+}
+function setUniformEffectUniforms(wrapper, data) {
+  const internal = wrapper;
+  const bytes = toBytes(data);
+  if (bytes.byteLength > internal._uniformByteLength) {
+    throw new Error(`setUniformEffectUniforms: ${bytes.byteLength} bytes exceeds uniform size ${internal._uniformByteLength}.`);
+  }
+  internal._engine._device.queue.writeBuffer(internal._uniformBuffer, 0, bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+function createUniformEffectRenderTask(config, engine, scene) {
+  const eng = engine;
+  const effect = config.effect;
+  const rt = config.target;
+  config.clearColor ??= { r: 0, g: 0, b: 0, a: 1 };
+  const sampleCount = rt._descriptor.samples ?? 1;
+  const targetSignature = {
+    _colorFormat: rt._descriptor.format,
+    _sampleCount: sampleCount
+  };
+  const colorAttachment = { loadOp: "clear", storeOp: "store" };
+  const task = {
+    name: config.name,
+    _config: config,
+    engine: eng,
+    scene,
+    _passes: [],
+    _rt: rt,
+    _targetSignature: targetSignature,
+    _renderPassDescriptor: { label: config.name, colorAttachments: [colorAttachment] },
+    _colorAttachment: colorAttachment,
+    _pipeline: null,
+    record() {
+      buildRenderTarget(rt, eng);
+      task._pipeline = getUniformEffectPipeline(effect, task._targetSignature);
+    },
+    execute() {
+      const pipeline = task._pipeline;
+      if (!pipeline) {
+        throw new Error(`UniformEffectRenderTask "${task.name}" executed before record().`);
+      }
+      applyColorAttachmentState(task._colorAttachment, rt, task._config.clear !== false, task._config.clearColor);
+      const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, getUniformEffectBindGroup(effect));
+      pass.draw(3);
+      pass.end();
+      return 1;
+    },
+    dispose() {
+      task._passes.length = 0;
+      disposeRenderTarget(task._rt);
+      task._pipeline = null;
+    }
+  };
+  return task;
+}
+function disposeUniformEffectWrapper(wrapper) {
+  const internal = wrapper;
+  internal._uniformBuffer.destroy();
+  internal._shader = null;
+  internal._bindGroupLayout = null;
+  internal._pipelineLayout = null;
+  internal._bindGroup = null;
+}
+function applyColorAttachmentState(att, rt, clear, clearColor) {
+  att.clearValue = clearColor;
+  att.loadOp = clear ? "clear" : "load";
+  att.view = rt._colorView;
+  att.resolveTarget = void 0;
+}
+function getUniformEffectPipeline(wrapper, targetSignature) {
+  const device = wrapper._engine._device;
+  return device.createRenderPipeline({
+    label: `${wrapper.name}-${targetSignatureKey(targetSignature)}`,
+    layout: getPipelineLayout(wrapper),
+    vertex: { module: getShaderModule(wrapper), entryPoint: "effectFullscreenVertex" },
+    fragment: {
+      module: getShaderModule(wrapper),
+      entryPoint: "effectFragment",
+      targets: [{ format: targetSignature._colorFormat }]
+    },
+    primitive: { topology: "triangle-list" },
+    multisample: { count: targetSignature._sampleCount }
+  });
+}
+function getShaderModule(wrapper) {
+  if (!wrapper._shader) {
+    wrapper._shader = wrapper._engine._device.createShaderModule({
+      label: wrapper.name,
+      code: `${wrapper.options.vertexWGSL ?? DEFAULT_VERTEX_WGSL}
+${wrapper.options.fragmentWGSL}`
+    });
+  }
+  return wrapper._shader;
+}
+function getPipelineLayout(wrapper) {
+  if (!wrapper._pipelineLayout) {
+    wrapper._pipelineLayout = wrapper._engine._device.createPipelineLayout({
+      label: `${wrapper.name}-pipeline-layout`,
+      bindGroupLayouts: [getBindGroupLayout(wrapper)]
+    });
+  }
+  return wrapper._pipelineLayout;
+}
+function getBindGroupLayout(wrapper) {
+  if (!wrapper._bindGroupLayout) {
+    wrapper._bindGroupLayout = wrapper._engine._device.createBindGroupLayout({
+      label: `${wrapper.name}-bgl`,
+      entries: [{ binding: 0, visibility: SS.FRAGMENT, buffer: { type: "uniform" } }]
+    });
+  }
+  return wrapper._bindGroupLayout;
+}
+function getUniformEffectBindGroup(wrapper) {
+  if (!wrapper._bindGroup) {
+    wrapper._bindGroup = wrapper._engine._device.createBindGroup({
+      label: `${wrapper.name}-bg`,
+      layout: getBindGroupLayout(wrapper),
+      entries: [{ binding: 0, resource: { buffer: wrapper._uniformBuffer, size: wrapper._uniformByteLength } }]
+    });
+  }
+  return wrapper._bindGroup;
+}
+function toBytes(data) {
+  if (data instanceof ArrayBuffer) {
+    return new U8(data);
+  }
+  return new U8(data.buffer, data.byteOffset, data.byteLength);
+}
+function align4(value) {
+  return value + 3 & -4;
+}
+
+export { createUniformEffectRenderTask, createUniformEffectWrapper, disposeUniformEffectWrapper, setUniformEffectUniforms };
+//# sourceMappingURL=uniform-effect-renderer.js.map

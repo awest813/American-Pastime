@@ -1,0 +1,2 @@
+export { addAgent, addBoxObstacle, addCylinderObstacle, agentGoto, computePath, createDebugNavMeshGeometry, createNavCrowd, createNavMesh, createNavMeshFromSources, createNavigationPluginAsync, disposeNavigationPlugin, findRandomPoint, findRandomPointAroundCircle, getAgentPosition, getAgentVelocity, getClosestPoint, getNavigationRandomSeed, raycast, removeObstacle, setNavigationRandomSeed, updateNavCrowd, updateNavMeshObstacles } from './navigation.js';
+//# sourceMappingURL=index.js.map

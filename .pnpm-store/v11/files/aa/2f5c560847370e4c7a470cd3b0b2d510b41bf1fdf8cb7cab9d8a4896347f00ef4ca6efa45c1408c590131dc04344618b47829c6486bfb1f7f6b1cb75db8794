@@ -1,0 +1,152 @@
+import { setMeshesMaterial } from './gizmo-core.js';
+import { attachAxisDragGizmoToNode, createAxisDragGizmo, disposeAxisDragGizmo } from './axis-drag-gizmo.js';
+import { attachPlaneDragGizmoToNode, createPlaneDragGizmo, disposePlaneDragGizmo } from './plane-drag-gizmo.js';
+import { attachPlaneRotationGizmoToNode, createPlaneRotationGizmo, disposePlaneRotationGizmo } from './plane-rotation-gizmo.js';
+import { attachAxisScaleGizmoToNode, createAxisScaleGizmo, disposeAxisScaleGizmo } from './axis-scale-gizmo.js';
+
+function wireCrossAxisDisable(gizmos) {
+  for (const g of gizmos) {
+    g.drag.onDragStart.add(() => {
+      for (const other of gizmos) {
+        if (other !== g) {
+          setMeshesMaterial(other._visibleMeshes, other.materials.disabled);
+        }
+      }
+    });
+    g.drag.onDragEnd.add(() => {
+      for (const other of gizmos) {
+        if (other !== g) {
+          setMeshesMaterial(other._visibleMeshes, other.drag.enabled ? other.materials.colored : other.materials.disabled);
+        }
+      }
+    });
+  }
+}
+function createPositionGizmo(engine, layer, options = {}) {
+  const thickness = options.thickness ?? 1;
+  const planarEnabled = options.planarEnabled ?? false;
+  const xGizmo = createAxisDragGizmo(engine, layer, { dragAxis: { x: 1, y: 0, z: 0 }, color: [0.5, 0, 0], thickness });
+  const yGizmo = createAxisDragGizmo(engine, layer, { dragAxis: { x: 0, y: 1, z: 0 }, color: [0, 0.5, 0], thickness });
+  const zGizmo = createAxisDragGizmo(engine, layer, { dragAxis: { x: 0, y: 0, z: 1 }, color: [0, 0, 0.5], thickness });
+  const xPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 1, y: 0, z: 0 }, color: [0.5, 0, 0] }) : null;
+  const yPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 0, y: 1, z: 0 }, color: [0, 0.5, 0] }) : null;
+  const zPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 0, y: 0, z: 1 }, color: [0, 0, 0.5] }) : null;
+  wireCrossAxisDisable([xGizmo, yGizmo, zGizmo, ...xPlaneGizmo ? [xPlaneGizmo] : [], ...yPlaneGizmo ? [yPlaneGizmo] : [], ...zPlaneGizmo ? [zPlaneGizmo] : []]);
+  return {
+    xGizmo,
+    yGizmo,
+    zGizmo,
+    xPlaneGizmo,
+    yPlaneGizmo,
+    zPlaneGizmo,
+    attachedNode: null
+  };
+}
+function attachPositionGizmoToNode(gizmo, node) {
+  gizmo.attachedNode = node;
+  attachAxisDragGizmoToNode(gizmo.xGizmo, node);
+  attachAxisDragGizmoToNode(gizmo.yGizmo, node);
+  attachAxisDragGizmoToNode(gizmo.zGizmo, node);
+  if (gizmo.xPlaneGizmo) {
+    attachPlaneDragGizmoToNode(gizmo.xPlaneGizmo, node);
+  }
+  if (gizmo.yPlaneGizmo) {
+    attachPlaneDragGizmoToNode(gizmo.yPlaneGizmo, node);
+  }
+  if (gizmo.zPlaneGizmo) {
+    attachPlaneDragGizmoToNode(gizmo.zPlaneGizmo, node);
+  }
+}
+function setPositionGizmoLocalCoordinates(gizmo, useLocal) {
+  gizmo.xGizmo.useLocalCoordinates = useLocal;
+  gizmo.yGizmo.useLocalCoordinates = useLocal;
+  gizmo.zGizmo.useLocalCoordinates = useLocal;
+  if (gizmo.xPlaneGizmo) {
+    gizmo.xPlaneGizmo.useLocalCoordinates = useLocal;
+  }
+  if (gizmo.yPlaneGizmo) {
+    gizmo.yPlaneGizmo.useLocalCoordinates = useLocal;
+  }
+  if (gizmo.zPlaneGizmo) {
+    gizmo.zPlaneGizmo.useLocalCoordinates = useLocal;
+  }
+}
+function disposePositionGizmo(gizmo, layer) {
+  disposeAxisDragGizmo(gizmo.xGizmo, layer);
+  disposeAxisDragGizmo(gizmo.yGizmo, layer);
+  disposeAxisDragGizmo(gizmo.zGizmo, layer);
+  if (gizmo.xPlaneGizmo) {
+    disposePlaneDragGizmo(gizmo.xPlaneGizmo, layer);
+  }
+  if (gizmo.yPlaneGizmo) {
+    disposePlaneDragGizmo(gizmo.yPlaneGizmo, layer);
+  }
+  if (gizmo.zPlaneGizmo) {
+    disposePlaneDragGizmo(gizmo.zPlaneGizmo, layer);
+  }
+}
+function createRotationGizmo(engine, layer, options = {}) {
+  const tessellation = options.tessellation ?? 32;
+  const thickness = options.thickness ?? 1;
+  const xGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 1, y: 0, z: 0 }, color: [0.5, 0, 0], tessellation, thickness });
+  const yGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 0, y: 1, z: 0 }, color: [0, 0.5, 0], tessellation, thickness });
+  const zGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 0, y: 0, z: 1 }, color: [0, 0, 0.5], tessellation, thickness });
+  wireCrossAxisDisable([xGizmo, yGizmo, zGizmo]);
+  return { xGizmo, yGizmo, zGizmo, attachedNode: null };
+}
+function attachRotationGizmoToNode(gizmo, node) {
+  gizmo.attachedNode = node;
+  attachPlaneRotationGizmoToNode(gizmo.xGizmo, node);
+  attachPlaneRotationGizmoToNode(gizmo.yGizmo, node);
+  attachPlaneRotationGizmoToNode(gizmo.zGizmo, node);
+}
+function setRotationGizmoLocalCoordinates(gizmo, useLocal) {
+  gizmo.xGizmo.useLocalCoordinates = useLocal;
+  gizmo.yGizmo.useLocalCoordinates = useLocal;
+  gizmo.zGizmo.useLocalCoordinates = useLocal;
+}
+function disposeRotationGizmo(gizmo, layer) {
+  disposePlaneRotationGizmo(gizmo.xGizmo, layer);
+  disposePlaneRotationGizmo(gizmo.yGizmo, layer);
+  disposePlaneRotationGizmo(gizmo.zGizmo, layer);
+}
+function createScaleGizmo(engine, layer, options = {}) {
+  const thickness = options.thickness ?? 1;
+  const xGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 1, y: 0, z: 0 }, color: [0.5, 0, 0], thickness });
+  const yGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 0, y: 1, z: 0 }, color: [0, 0.5, 0], thickness });
+  const zGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 0, y: 0, z: 1 }, color: [0, 0, 0.5], thickness });
+  const uniformScaleGizmo = createAxisScaleGizmo(engine, layer, {
+    dragAxis: { x: 0, y: 1, z: 0 },
+    // BJS uses Color3.Gray().scale(0.5) = (0.25, 0.25, 0.25) for the central
+    // uniform-scale handle; combined with the utility-layer hemispheric light
+    // (intensity 2, gray ground) this renders as ~light gray, not white.
+    color: [0.25, 0.25, 0.25],
+    uniformScaling: true
+  });
+  xGizmo.useLocalCoordinates = true;
+  yGizmo.useLocalCoordinates = true;
+  zGizmo.useLocalCoordinates = true;
+  wireCrossAxisDisable([xGizmo, yGizmo, zGizmo, uniformScaleGizmo]);
+  return { xGizmo, yGizmo, zGizmo, uniformScaleGizmo, attachedNode: null };
+}
+function attachScaleGizmoToNode(gizmo, node) {
+  gizmo.attachedNode = node;
+  attachAxisScaleGizmoToNode(gizmo.xGizmo, node);
+  attachAxisScaleGizmoToNode(gizmo.yGizmo, node);
+  attachAxisScaleGizmoToNode(gizmo.zGizmo, node);
+  attachAxisScaleGizmoToNode(gizmo.uniformScaleGizmo, node);
+}
+function setScaleGizmoLocalCoordinates(gizmo, useLocal) {
+  gizmo.xGizmo.useLocalCoordinates = useLocal;
+  gizmo.yGizmo.useLocalCoordinates = useLocal;
+  gizmo.zGizmo.useLocalCoordinates = useLocal;
+}
+function disposeScaleGizmo(gizmo, layer) {
+  disposeAxisScaleGizmo(gizmo.xGizmo, layer);
+  disposeAxisScaleGizmo(gizmo.yGizmo, layer);
+  disposeAxisScaleGizmo(gizmo.zGizmo, layer);
+  disposeAxisScaleGizmo(gizmo.uniformScaleGizmo, layer);
+}
+
+export { attachPositionGizmoToNode, attachRotationGizmoToNode, attachScaleGizmoToNode, createPositionGizmo, createRotationGizmo, createScaleGizmo, disposePositionGizmo, disposeRotationGizmo, disposeScaleGizmo, setPositionGizmoLocalCoordinates, setRotationGizmoLocalCoordinates, setScaleGizmoLocalCoordinates };
+//# sourceMappingURL=composite-gizmos.js.map

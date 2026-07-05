@@ -1,0 +1,56 @@
+/**
+ * Color constants for the curve editor
+ * These colors are used consistently across the curve editor UI for
+ * representing different animation channels and UI elements.
+ */
+/**
+ * Channel colors for multi-component animations (vectors, colors, quaternions)
+ */
+export declare const ChannelColors: {
+    /** Red channel / X component */
+    readonly X: "#DB3E3E";
+    /** Green channel / Y component */
+    readonly Y: "#51E22D";
+    /** Blue channel / Z component */
+    readonly Z: "#00A3FF";
+    /** W component (quaternions) */
+    readonly W: "#8700FF";
+    /** Alpha channel */
+    readonly ALPHA: "#FFFFFF";
+};
+/**
+ * Aliases for color channels (R, G, B map to X, Y, Z)
+ */
+export declare const ColorChannelColors: {
+    /** Red channel */
+    readonly R: "#DB3E3E";
+    /** Green channel */
+    readonly G: "#51E22D";
+    /** Blue channel */
+    readonly B: "#00A3FF";
+    /** Alpha channel */
+    readonly A: "#FFFFFF";
+};
+/**
+ * Default curve color for single-component (float) animations
+ */
+export declare const DefaultCurveColor = "#ffffff";
+/**
+ * Graph UI colors
+ */
+export declare const GraphColors: {
+    /** Zero line color */
+    readonly zeroLine: "#666666";
+    /** Selection rectangle stroke */
+    readonly selectionStroke: "#ffffff";
+    /** Value axis label color */
+    readonly valueAxisLabel: "#555555";
+    /** Value axis background */
+    readonly valueAxisBackground: "#111111";
+    /** Selected keypoint color (gold) */
+    readonly selectedKeypoint: "#FFD700";
+    /** Default keypoint stroke color */
+    readonly keypointStroke: "#ffffff";
+    /** Tangent handle color */
+    readonly tangentHandle: "#FFD700";
+};

@@ -1,0 +1,5 @@
+import { type FunctionComponent } from "react";
+import { type SSAORenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssaoRenderingPipeline.js";
+export declare const SSAORenderingPipelineProperties: FunctionComponent<{
+    pipeline: SSAORenderingPipeline;
+}>;

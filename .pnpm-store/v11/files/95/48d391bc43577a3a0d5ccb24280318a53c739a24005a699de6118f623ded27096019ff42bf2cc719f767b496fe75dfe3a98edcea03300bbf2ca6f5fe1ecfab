@@ -1,0 +1,169 @@
+import { U8 } from '../../engine/typed-arrays.js';
+import { createTexture2DFromPixels } from '../../texture/pixels-texture.js';
+
+function shelfPack(sources, padding, maxWidth, maxHeight, startPenX, startPenY, startShelfHeight, fnLabel) {
+  const xs = new Array(sources.length);
+  const ys = new Array(sources.length);
+  let penX = startPenX;
+  let penY = startPenY;
+  let shelfHeight = startShelfHeight;
+  let contentWidth = 0;
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
+    if (s.width < 1 || s.height < 1) {
+      throw new Error(`${fnLabel}: frame ${i} has non-positive size ${s.width}x${s.height}.`);
+    }
+    const srcX = s.srcX ?? 0;
+    const srcY = s.srcY ?? 0;
+    const srcStride = s.srcStrideBytes ?? s.width * 4;
+    if (srcX < 0 || srcY < 0) {
+      throw new Error(`${fnLabel}: frame ${i} has negative sub-rect origin (srcX=${srcX}, srcY=${srcY}).`);
+    }
+    if ((srcX + s.width) * 4 > srcStride) {
+      throw new Error(
+        `${fnLabel}: frame ${i} sub-rect row extent (srcX + width) * 4 = ${(srcX + s.width) * 4} exceeds srcStrideBytes ${srcStride} (would spill into next row).`
+      );
+    }
+    const requiredBytes = (srcY + s.height - 1) * srcStride + (srcX + s.width) * 4;
+    if (s.pixels.length < requiredBytes) {
+      throw new Error(
+        `${fnLabel}: frame ${i} pixel buffer too short — need ${requiredBytes} bytes (srcX=${srcX}, srcY=${srcY}, srcStride=${srcStride}, w=${s.width}, h=${s.height}), got ${s.pixels.length}.`
+      );
+    }
+    if (penX > 0 && penX + s.width > maxWidth) {
+      penY += shelfHeight + padding;
+      penX = 0;
+      shelfHeight = 0;
+    }
+    if (s.width > maxWidth) {
+      throw new Error(`${fnLabel}: frame ${i} width ${s.width} exceeds shelf max width ${maxWidth}.`);
+    }
+    if (penY + s.height > maxHeight) {
+      throw new Error(`${fnLabel}: cannot fit frame ${i} (${s.width}x${s.height}) — atlas height capacity ${maxHeight} exhausted at y=${penY}.`);
+    }
+    xs[i] = penX;
+    ys[i] = penY;
+    const rightEdge = penX + s.width;
+    if (rightEdge > contentWidth) {
+      contentWidth = rightEdge;
+    }
+    penX = rightEdge + padding;
+    if (s.height > shelfHeight) {
+      shelfHeight = s.height;
+    }
+  }
+  const contentHeight = sources.length === 0 ? startPenY : penY + shelfHeight;
+  return { xs, ys, penX, penY, shelfHeight, contentWidth, contentHeight };
+}
+function createSpriteAtlasFromFrames(engine, sources, options = {}) {
+  const padding = options.paddingPx ?? 1;
+  const requestedMaxWidth = options.maxWidthPx ?? 1024;
+  if (sources.length === 0 && !options.capacityPx) {
+    throw new Error(
+      "createSpriteAtlasFromFrames: at least one frame is required, or pass options.capacityPx to create an empty atlas with reserved capacity for appendSpriteAtlasFrames."
+    );
+  }
+  const maxWidth = options.capacityPx ? Math.min(requestedMaxWidth, options.capacityPx[0]) : requestedMaxWidth;
+  const placement = shelfPack(sources, padding, maxWidth, Number.MAX_SAFE_INTEGER, 0, 0, 0, "createSpriteAtlasFromFrames");
+  const atlasWidth = options.capacityPx ? options.capacityPx[0] : Math.max(1, placement.contentWidth);
+  const atlasHeight = options.capacityPx ? options.capacityPx[1] : Math.max(1, placement.contentHeight);
+  if (atlasWidth < 1 || atlasHeight < 1) {
+    throw new Error(`createSpriteAtlasFromFrames: atlas dimensions must be >= 1 (got ${atlasWidth}x${atlasHeight}).`);
+  }
+  if (placement.contentWidth > atlasWidth || placement.contentHeight > atlasHeight) {
+    throw new Error(`createSpriteAtlasFromFrames: capacityPx ${atlasWidth}x${atlasHeight} too small for initial content ${placement.contentWidth}x${placement.contentHeight}.`);
+  }
+  const data = new U8(atlasWidth * atlasHeight * 4);
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
+    const srcX = s.srcX ?? 0;
+    const srcY = s.srcY ?? 0;
+    const srcStride = s.srcStrideBytes ?? s.width * 4;
+    const rowBytes = s.width * 4;
+    for (let row = 0; row < s.height; row++) {
+      const srcOffset = (srcY + row) * srcStride + srcX * 4;
+      const dstOffset = ((placement.ys[i] + row) * atlasWidth + placement.xs[i]) * 4;
+      data.set(s.pixels.subarray(srcOffset, srcOffset + rowBytes), dstOffset);
+    }
+  }
+  const sampling = options.sampling ?? "nearest";
+  const texture = createTexture2DFromPixels(engine, data, atlasWidth, atlasHeight, {
+    minFilter: sampling,
+    magFilter: sampling,
+    srgb: options.srgb ?? false
+  });
+  const frames = new Array(sources.length);
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
+    frames[i] = {
+      name: s.name,
+      uvMin: [placement.xs[i] / atlasWidth, placement.ys[i] / atlasHeight],
+      uvMax: [(placement.xs[i] + s.width) / atlasWidth, (placement.ys[i] + s.height) / atlasHeight],
+      sourceSizePx: [s.width, s.height],
+      pivot: s.pivot ?? [0.5, 0.5]
+    };
+  }
+  const packState = {
+    penX: placement.penX,
+    penY: placement.penY,
+    shelfHeight: placement.shelfHeight,
+    maxWidth,
+    padding
+  };
+  return {
+    texture,
+    textureSizePx: [atlasWidth, atlasHeight],
+    frames,
+    premultipliedAlpha: options.premultipliedAlpha ?? false,
+    _packState: packState,
+    _frames: frames
+  };
+}
+function appendSpriteAtlasFrames(engine, atlas, sources) {
+  if (sources.length === 0) {
+    return [];
+  }
+  const state = atlas._packState;
+  const framesOut = atlas._frames;
+  if (!state || !framesOut) {
+    throw new Error("appendSpriteAtlasFrames: atlas was not built by createSpriteAtlasFromFrames (no packer state).");
+  }
+  const [atlasW, atlasH] = atlas.textureSizePx;
+  const shelfMaxWidth = Math.min(state.maxWidth, atlasW);
+  const placement = shelfPack(sources, state.padding, shelfMaxWidth, atlasH, state.penX, state.penY, state.shelfHeight, "appendSpriteAtlasFrames");
+  const device = engine._device;
+  const texture = atlas.texture.texture;
+  const baseIndex = framesOut.length;
+  const newIndices = new Array(sources.length);
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
+    const srcX = s.srcX ?? 0;
+    const srcY = s.srcY ?? 0;
+    const srcStride = s.srcStrideBytes ?? s.width * 4;
+    const dataOffset = srcY * srcStride + srcX * 4;
+    device.queue.writeTexture(
+      { texture, origin: { x: placement.xs[i], y: placement.ys[i] } },
+      // Cast `Uint8Array<ArrayBufferLike>` → `Uint8Array<ArrayBuffer>` so the WebGPU
+      // `GPUAllowSharedBufferSource` overload accepts it. `pixels` is supplied by the caller
+      // as plain bytes (we never construct it from a `SharedArrayBuffer`), so this is sound.
+      s.pixels,
+      { offset: dataOffset, bytesPerRow: srcStride, rowsPerImage: s.height },
+      { width: s.width, height: s.height }
+    );
+    newIndices[i] = baseIndex + i;
+    framesOut.push({
+      name: s.name,
+      uvMin: [placement.xs[i] / atlasW, placement.ys[i] / atlasH],
+      uvMax: [(placement.xs[i] + s.width) / atlasW, (placement.ys[i] + s.height) / atlasH],
+      sourceSizePx: [s.width, s.height],
+      pivot: s.pivot ?? [0.5, 0.5]
+    });
+  }
+  state.penX = placement.penX;
+  state.penY = placement.penY;
+  state.shelfHeight = placement.shelfHeight;
+  return newIndices;
+}
+
+export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames };
+//# sourceMappingURL=sprite-atlas-packer.js.map

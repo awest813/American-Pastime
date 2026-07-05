@@ -1,0 +1,21 @@
+'use client';
+import { makeStyles, mergeClasses } from '@griffel/react';
+export const carouselViewportClassNames = {
+    root: 'fui-CarouselViewport'
+};
+/**
+ * Styles for the root slot
+ */ const useStyles = makeStyles({
+    root: {
+        maxWidth: '100%',
+        width: 'auto'
+    }
+});
+/**
+ * Apply styling to the CarouselViewport slots based on the state
+ */ export const useCarouselViewportStyles_unstable = (state)=>{
+    const styles = useStyles();
+    // eslint-disable-next-line react-hooks/immutability
+    state.root.className = mergeClasses(carouselViewportClassNames.root, styles.root, state.root.className);
+    return state;
+};

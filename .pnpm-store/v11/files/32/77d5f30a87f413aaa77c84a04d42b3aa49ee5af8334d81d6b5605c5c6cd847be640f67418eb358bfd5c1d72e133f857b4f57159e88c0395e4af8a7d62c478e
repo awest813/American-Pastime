@@ -1,0 +1,46 @@
+const TYPE_INFO = {
+  f32: { align: 4, size: 4 },
+  u32: { align: 4, size: 4 },
+  i32: { align: 4, size: 4 },
+  "vec2<f32>": { align: 8, size: 8 },
+  "vec3<f32>": { align: 16, size: 12 },
+  "vec4<f32>": { align: 16, size: 16 },
+  "vec4<u32>": { align: 16, size: 16 },
+  "mat4x4<f32>": { align: 16, size: 64 }
+};
+function alignUp(offset, alignment) {
+  return offset + alignment - 1 & ~(alignment - 1);
+}
+function typeInfo(type) {
+  const info = TYPE_INFO[type];
+  if (info) {
+    return info;
+  }
+  const m = /^array<vec4<u32>,\s*(\d+)>$/.exec(type);
+  if (m) {
+    return { align: 16, size: Number(m[1]) * 16 };
+  }
+  throw new Error(`Unknown UBO field type: ${type}`);
+}
+function computeUboLayout(fields) {
+  const _offsets = /* @__PURE__ */ new Map();
+  const lines = [];
+  let cursor = 0;
+  for (const field of fields) {
+    const info = typeInfo(field._type);
+    cursor = alignUp(cursor, info.align);
+    _offsets.set(field._name, cursor);
+    lines.push(`${field._name}: ${field._type},`);
+    cursor += info.size;
+  }
+  const _totalBytes = fields.length > 0 ? alignUp(cursor, 16) : 0;
+  const _structBody = lines.join("\n");
+  return {
+    _totalBytes,
+    _offsets,
+    _structBody
+  };
+}
+
+export { computeUboLayout };
+//# sourceMappingURL=ubo-layout.js.map

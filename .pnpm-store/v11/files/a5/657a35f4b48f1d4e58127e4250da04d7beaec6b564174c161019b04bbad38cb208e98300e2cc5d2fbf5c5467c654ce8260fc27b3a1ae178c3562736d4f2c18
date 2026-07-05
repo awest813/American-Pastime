@@ -1,0 +1,121 @@
+import { U8 } from '../engine/typed-arrays.js';
+import { cloneTexture2D } from '../texture/texture-2d.js';
+import { getPbrGroupBuilder } from '../material/pbr/pbr-material.js';
+import { linearToSrgbByte } from '../math/color.js';
+import { uploadTex } from './gltf-pbr-builder.js';
+
+function wrapTexCoord(tex, texInfo) {
+  if (!texInfo) {
+    return tex;
+  }
+  if (tex._texCoord === 1) {
+    return tex;
+  }
+  const ti = texInfo;
+  const tc = ti.extensions?.KHR_texture_transform?.texCoord ?? ti.texCoord;
+  return tc === 1 ? cloneTexture2D(tex, { _texCoord: 1 }) : tex;
+}
+function occlusionNeedsSplit(raw) {
+  const occ = raw.occlusionTexture;
+  const mr = raw.pbrMetallicRoughness?.metallicRoughnessTexture;
+  if (!occ || !mr) {
+    return false;
+  }
+  return occ.index !== mr.index || occ.extensions?.KHR_texture_transform != null;
+}
+function buildDefaultPbrTexturesExt(engine, mat, sampler, generateMipmaps, getCachedTex, wrapTex, samplerFor) {
+  const wrap = (tex, ti) => wrapTexCoord(wrapTex(tex, ti), ti);
+  const _localCache = samplerFor ? /* @__PURE__ */ new Map() : null;
+  const _ids = samplerFor ? /* @__PURE__ */ new Map() : null;
+  let _nextId = 0;
+  const pickTex = (image, srgb, texInfo) => {
+    if (!samplerFor) {
+      return getCachedTex(image, srgb);
+    }
+    const s = samplerFor(texInfo);
+    let bySampler = _localCache.get(s);
+    if (!bySampler) {
+      _localCache.set(s, bySampler = /* @__PURE__ */ new Map());
+    }
+    let id = _ids.get(image);
+    if (id === void 0) {
+      _ids.set(image, id = _nextId++);
+    }
+    const key = id * 2 + (srgb ? 1 : 0);
+    let tex = bySampler.get(key);
+    if (!tex) {
+      tex = uploadTex(engine, image, srgb, s, generateMipmaps);
+      bySampler.set(key, tex);
+    }
+    return tex;
+  };
+  const raw = mat._rawMatDef ?? {};
+  const pbr = raw.pbrMetallicRoughness ?? {};
+  const baseColorTexture = mat._baseColorImage ? wrap(pickTex(mat._baseColorImage, true, pbr.baseColorTexture), pbr.baseColorTexture) : (() => {
+    const f = mat._baseColorFactor;
+    return uploadTex(
+      engine,
+      null,
+      true,
+      sampler,
+      generateMipmaps,
+      new U8([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
+    );
+  })();
+  const normalTexture = mat._normalImage ? wrap(pickTex(mat._normalImage, false, raw.normalTexture), raw.normalTexture) : void 0;
+  const emissiveTexture = mat._emissiveImage ? wrap(pickTex(mat._emissiveImage, true, raw.emissiveTexture), raw.emissiveTexture) : void 0;
+  const occlusionOnUv2 = mat._occlusionTexCoord !== 0 && mat._occlusionImage && !mat._metallicRoughnessImage;
+  let occlusionTexture;
+  const single = mat._metallicRoughnessImage ?? (occlusionOnUv2 ? null : mat._occlusionImage);
+  let ormTexture;
+  if (occlusionOnUv2) {
+    const clamp = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+    ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+    occlusionTexture = wrap(pickTex(mat._occlusionImage, false, raw.occlusionTexture), raw.occlusionTexture);
+  } else if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
+    const ormTi = mat._metallicRoughnessImage ? pbr.metallicRoughnessTexture : raw.occlusionTexture;
+    ormTexture = wrap(pickTex(single, false, ormTi), ormTi);
+  } else if (!single) {
+    const clamp = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+    ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+  } else {
+    ormTexture = wrap(pickTex(mat._metallicRoughnessImage, false, pbr.metallicRoughnessTexture), pbr.metallicRoughnessTexture);
+  }
+  if (!occlusionTexture && mat._occlusionImage && mat._occlusionImage === mat._metallicRoughnessImage && occlusionNeedsSplit(raw)) {
+    occlusionTexture = wrap(pickTex(mat._occlusionImage, false, raw.occlusionTexture), raw.occlusionTexture);
+  }
+  return { baseColorTexture, ormTexture, normalTexture, emissiveTexture, occlusionTexture };
+}
+function assemblePbrPropsExt(mat, tex, extLayers) {
+  const ef = mat._emissiveFactor;
+  const defaultFactor = ef[0] === 0 && ef[1] === 0 && ef[2] === 0 || !!tex.emissiveTexture && ef[0] === 1 && ef[1] === 1 && ef[2] === 1;
+  const hasAnyUvTx = !!tex.baseColorTexture._hasTx || !!tex.normalTexture?._hasTx || !!tex.ormTexture._hasTx || !!tex.emissiveTexture?._hasTx || !!tex.occlusionTexture?._hasTx;
+  return {
+    baseColorTexture: tex.baseColorTexture,
+    normalTexture: tex.normalTexture,
+    ormTexture: tex.ormTexture,
+    emissiveTexture: tex.emissiveTexture,
+    ...mat._baseColorImage && !isDefaultBaseColorFactor(mat._baseColorFactor) ? { baseColorFactor: mat._baseColorFactor } : void 0,
+    doubleSided: mat._doubleSided,
+    occlusionStrength: mat._occlusionImage ? 1 : 0,
+    ...mat._occlusionTexCoord ? { occlusionTexCoord: mat._occlusionTexCoord } : void 0,
+    ...tex.occlusionTexture ? { occlusionTexture: tex.occlusionTexture } : void 0,
+    ...mat._normalScale !== 1 ? { normalTextureScale: mat._normalScale } : void 0,
+    ...mat._metallicRoughnessImage ? { metallicFactor: mat._metallicFactor, roughnessFactor: mat._roughnessFactor } : void 0,
+    ...!defaultFactor ? { emissiveColor: [ef[0], ef[1], ef[2]] } : void 0,
+    enableSpecularAA: true,
+    ...mat._alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat._baseColorFactor[3] } : void 0,
+    ...mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3], alphaCutOff: mat._alphaCutoff } : void 0,
+    ...hasAnyUvTx ? { _hasUvTx: true } : void 0,
+    ...mat._rawMatDef?.name ? { name: mat._rawMatDef.name } : void 0,
+    ...extLayers,
+    _buildGroup: getPbrGroupBuilder(),
+    _uboVersion: 0
+  };
+}
+function isDefaultBaseColorFactor(f) {
+  return f[0] === 1 && f[1] === 1 && f[2] === 1 && f[3] === 1;
+}
+
+export { assemblePbrPropsExt, buildDefaultPbrTexturesExt };
+//# sourceMappingURL=gltf-pbr-builder-ext.js.map

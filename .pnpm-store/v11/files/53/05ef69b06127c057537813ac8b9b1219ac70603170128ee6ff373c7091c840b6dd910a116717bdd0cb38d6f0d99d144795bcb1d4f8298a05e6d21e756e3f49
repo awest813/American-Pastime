@@ -1,0 +1,13 @@
+import { _resolveStencil } from './stencil-state.js';
+import { _installPbrStencilResolver } from './pbr/pbr-pipeline.js';
+import { _installStandardStencilResolver } from './standard/standard-pipeline.js';
+import { _installShaderStencilResolver } from './shader/shader-pipeline.js';
+
+function enableMaterialStencil() {
+  _installPbrStencilResolver(_resolveStencil);
+  _installStandardStencilResolver(_resolveStencil);
+  _installShaderStencilResolver(_resolveStencil);
+}
+
+export { enableMaterialStencil };
+//# sourceMappingURL=enable-material-stencil.js.map

@@ -1,0 +1,3 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type IToolsService } from "../../toolsService";
+export declare const GLTFAnimationImportServiceDefinition: ServiceDefinition<[], [IToolsService]>;

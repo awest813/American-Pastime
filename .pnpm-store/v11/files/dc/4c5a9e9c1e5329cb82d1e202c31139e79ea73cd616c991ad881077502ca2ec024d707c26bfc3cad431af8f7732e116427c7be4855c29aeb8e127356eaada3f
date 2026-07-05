@@ -1,0 +1,33 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { BU } from '../engine/gpu-flags.js';
+import { loadCubeTexture } from '../texture/cube-texture.js';
+import { createBoxData } from '../mesh/create-box.js';
+import { createMappedBuffer } from '../resource/gpu-buffers.js';
+
+async function loadSkybox(scene, baseUrl, ext, size = 100) {
+  const eng = scene.surface.engine;
+  const cubeTex = await loadCubeTexture(eng, baseUrl, ext);
+  const boxData = createBoxData(size);
+  const posBuffer = createMappedBuffer(eng, boxData.positions, BU.VERTEX);
+  const normBuffer = createMappedBuffer(eng, boxData.normals, BU.VERTEX);
+  const idxBuffer = createMappedBuffer(eng, boxData.indices, BU.INDEX);
+  const world = new F32(16);
+  world[0] = 1;
+  world[5] = 1;
+  world[10] = 1;
+  world[15] = 1;
+  const skyboxData = {
+    cubeView: cubeTex.view,
+    cubeSampler: cubeTex.sampler,
+    posBuffer,
+    normBuffer,
+    idxBuffer,
+    idxCount: boxData.indices.length,
+    worldMatrix: world
+  };
+  const { buildSkyboxRenderable } = await import('./skybox-renderable.js');
+  scene._renderables.push(buildSkyboxRenderable(scene, skyboxData));
+}
+
+export { loadSkybox };
+//# sourceMappingURL=load-skybox.js.map

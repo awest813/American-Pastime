@@ -1,0 +1,26 @@
+import { type ITextureInfo } from "babylonjs-gltf2interface";
+import { type Texture } from "@babylonjs/core/Materials/Textures/texture.pure.js";
+import { type IGLTFExporterExtensionV2 } from "../glTFExporterExtension.js";
+/**
+ * @internal
+ */
+export declare class KHR_texture_transform implements IGLTFExporterExtensionV2 {
+    /** Name of this extension */
+    readonly name = "KHR_texture_transform";
+    /** Defines whether this extension is enabled */
+    enabled: boolean;
+    /** Defines whether this extension is required */
+    required: boolean;
+    /** Reference to the glTF exporter */
+    private _wasUsed;
+    constructor();
+    dispose(): void;
+    /** @internal */
+    get wasUsed(): boolean;
+    postExportTexture?(context: string, textureInfo: ITextureInfo, babylonTexture: Texture): void;
+}
+/**
+ * Registers the KHR_texture_transform glTF serializer extension with the {@link GLTFExporter}.
+ * Safe to call multiple times; only the first call has an effect.
+ */
+export declare function RegisterKHR_texture_transform(): void;

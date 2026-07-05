@@ -1,0 +1,222 @@
+import { WGSL } from './node-types.js';
+
+function newStageState() {
+  return {
+    helpers: /* @__PURE__ */ new Map(),
+    body: [],
+    memo: /* @__PURE__ */ new Map()
+  };
+}
+function createBuildState() {
+  return {
+    vertex: newStageState(),
+    fragment: newStageState(),
+    vertexAttributes: [],
+    varyings: [],
+    nodeUboFields: [],
+    bindings: [],
+    textures: [],
+    pbrMrHelperRequests: [],
+    loopVariables: /* @__PURE__ */ new Map(),
+    nextTemp: 0,
+    usesLightsUbo: false,
+    usesScreenSize: false,
+    usesFragDepth: false,
+    usesClipPlanes: false,
+    usesMeshAttributeExists: false,
+    usesMorphTargets: false,
+    usesEnv: false,
+    usesClearcoat: false,
+    usesSheen: false,
+    usesAnisotropy: false,
+    usesIridescence: false,
+    usesSubsurface: false,
+    shadowLights: [],
+    hasSkeleton: false,
+    hasInstances: false
+  };
+}
+function memoKey(blockId, outputName) {
+  return `${blockId}|${outputName}`;
+}
+function stageOf(state, stage) {
+  return stage === "vertex" ? state.vertex : state.fragment;
+}
+function mintTemp(state, prefix = "t") {
+  const id = state.nextTemp++;
+  return `_${prefix}${id}`;
+}
+function castExpr(value, target) {
+  if (value.type === target) {
+    return value;
+  }
+  const t = WGSL[target];
+  if (value.type === "vec4f" && target === "vec3f") {
+    return { expr: `(${value.expr}).xyz`, type: target };
+  }
+  if (value.type === "vec4f" && target === "vec2f") {
+    return { expr: `(${value.expr}).xy`, type: target };
+  }
+  if (value.type === "vec3f" && target === "vec2f") {
+    return { expr: `(${value.expr}).xy`, type: target };
+  }
+  if ((value.type === "vec4f" || value.type === "vec3f" || value.type === "vec2f") && target === "f32") {
+    return { expr: `(${value.expr}).x`, type: target };
+  }
+  if (value.type === "f32" && (target === "vec2f" || target === "vec3f" || target === "vec4f")) {
+    return { expr: `${t}(${value.expr})`, type: target };
+  }
+  if (value.type === "vec3f" && target === "vec4f") {
+    return { expr: `vec4<f32>(${value.expr}, 1.0)`, type: target };
+  }
+  if (value.type === "vec2f" && target === "vec4f") {
+    return { expr: `vec4<f32>(${value.expr}, 0.0, 1.0)`, type: target };
+  }
+  if (value.type === "vec2f" && target === "vec3f") {
+    return { expr: `vec3<f32>(${value.expr}, 0.0)`, type: target };
+  }
+  throw new Error(`NodeMaterial: cannot cast ${value.type} to ${target} for expression \`${value.expr}\``);
+}
+function makeContext(graph, loadedEmitters) {
+  const ctx = {
+    graph,
+    _loadedEmitters: loadedEmitters,
+    temp: (state, prefix) => mintTemp(state, prefix),
+    cast: castExpr,
+    resolve: (block, inputName, stage, state) => {
+      const input = block.inputs.get(inputName);
+      if (!input) {
+        throw new Error(`NodeMaterial: block "${block.className}" (id=${block.id}) has no input "${inputName}"`);
+      }
+      if (!input.source) {
+        throw new Error(`NodeMaterial: block "${block.className}" (id=${block.id}) input "${inputName}" is not connected`);
+      }
+      const producer = graph.blocks.get(input.source.blockId);
+      if (!producer) {
+        throw new Error(`NodeMaterial: dangling connection ${block.id}.${inputName} -> block ${input.source.blockId}`);
+      }
+      return ctx.resolveOutput(producer, input.source.outputName, stage, state);
+    },
+    resolveOutput: (producer, outputName, stage, state) => {
+      const stageState = stageOf(state, stage);
+      const key = memoKey(producer.id, outputName);
+      const existing = stageState.memo.get(key);
+      if (existing) {
+        return existing;
+      }
+      const emitter = loadedEmitters.get(producer.className);
+      if (!emitter) {
+        throw new Error(`NodeMaterial: no emitter loaded for block "${producer.className}"`);
+      }
+      const targetStage = emitter.stage ?? stage;
+      const result = emitter.emit(producer, outputName, targetStage, state, ctx);
+      if (targetStage !== stage) {
+        const vname = `v_${producer.id}_${outputName}`;
+        bridgeVarying(state, vname, result, targetStage, stage);
+        const bridged = { expr: `in.${vname}`, type: result.type };
+        stageState.memo.set(key, bridged);
+        return bridged;
+      }
+      stageState.memo.set(key, result);
+      return result;
+    }
+  };
+  return ctx;
+}
+function bridgeVarying(state, varyingName, value, from, to) {
+  if (from !== "vertex" || to !== "fragment") {
+    throw new Error("NodeMaterial: only vertex->fragment varyings are supported");
+  }
+  const already = state.varyings.find((v) => v._name === varyingName);
+  if (!already) {
+    state.varyings.push({ _name: varyingName, _type: WGSL[value.type] });
+    state.vertex.body.push(`out.${varyingName} = ${value.expr};`);
+  }
+}
+let defaultRegistry = null;
+async function defaultBlockLoader(className) {
+  defaultRegistry ??= import('./node-registry.js');
+  return (await defaultRegistry).loadBlockEmitter(className);
+}
+function pbrMrBlockNeedsFullEmitter(block) {
+  return block.serialized.enableSpecularAntiAliasing === true || !!block.inputs.get("clearcoat")?.source || !!block.inputs.get("sheen")?.source || !!block.inputs.get("subsurface")?.source || !!block.inputs.get("anisotropy")?.source || !!block.inputs.get("iridescence")?.source;
+}
+function graphNeedsFullPbrMrEmitter(graph) {
+  for (const block of graph.blocks.values()) {
+    if (block.className === "PBRMetallicRoughnessBlock" && pbrMrBlockNeedsFullEmitter(block)) {
+      return true;
+    }
+  }
+  return false;
+}
+async function loadGraphEmitters(graph, blockLoader = defaultBlockLoader) {
+  const classNames = /* @__PURE__ */ new Set();
+  for (const b of graph.blocks.values()) {
+    classNames.add(b.className);
+  }
+  const map = /* @__PURE__ */ new Map();
+  const useFullPbrMrEmitter = blockLoader === defaultBlockLoader && graphNeedsFullPbrMrEmitter(graph);
+  await Promise.all(
+    Array.from(classNames).map(async (className) => {
+      const loaderKey = className === "PBRMetallicRoughnessBlock" && useFullPbrMrEmitter ? "PBRMetallicRoughnessBlock__full" : className;
+      const e = await blockLoader(loaderKey);
+      map.set(className, e);
+    })
+  );
+  return map;
+}
+function emitGraph(graph, loadedEmitters, fragmentRootId, vertexRootId, shadowLights, meshCaps) {
+  const state = createBuildState();
+  if (shadowLights) {
+    for (const sl of shadowLights) {
+      state.shadowLights.push(sl);
+    }
+  }
+  if (meshCaps) {
+    if (meshCaps.hasSkeleton) {
+      state.hasSkeleton = true;
+    }
+    if (meshCaps.hasInstances) {
+      state.hasInstances = true;
+    }
+  }
+  const ctx = makeContext(graph, loadedEmitters);
+  const fragRoot = graph.blocks.get(fragmentRootId);
+  if (!fragRoot) {
+    throw new Error(`NodeMaterial: fragment root block ${fragmentRootId} not found`);
+  }
+  const fragEmitter = loadedEmitters.get(fragRoot.className);
+  if (!fragEmitter) {
+    throw new Error(`NodeMaterial: no emitter for fragment root "${fragRoot.className}"`);
+  }
+  fragEmitter.emit(fragRoot, "", "fragment", state, ctx);
+  if (vertexRootId !== null) {
+    const vertRoot = graph.blocks.get(vertexRootId);
+    if (!vertRoot) {
+      throw new Error(`NodeMaterial: vertex root block ${vertexRootId} not found`);
+    }
+    const vertEmitter = loadedEmitters.get(vertRoot.className);
+    if (!vertEmitter) {
+      throw new Error(`NodeMaterial: no emitter for vertex root "${vertRoot.className}"`);
+    }
+    vertEmitter.emit(vertRoot, "", "vertex", state, ctx);
+  }
+  for (const block of graph.blocks.values()) {
+    const e = loadedEmitters.get(block.className);
+    if (e?.sideEffect) {
+      e.emit(block, "", e.stage ?? "fragment", state, ctx);
+    }
+  }
+  return {
+    vertexWgsl: composeStage(state, "vertex"),
+    fragmentWgsl: composeStage(state, "fragment"),
+    state
+  };
+}
+function composeStage(state, stage) {
+  const s = stageOf(state, stage);
+  return s.body.join("\n");
+}
+
+export { castExpr, createBuildState, emitGraph, loadGraphEmitters, mintTemp };
+//# sourceMappingURL=node-emitter.js.map

@@ -1,0 +1,15 @@
+function captureScreenshot(surface) {
+  const promise = new Promise((resolve, reject) => {
+    (surface._captureQueue ??= []).push({ resolve, reject });
+  });
+  if (!surface._captureService) {
+    void import('./screenshot-readback.js').then(({ createCaptureService, createCapturePreFrame }) => {
+      surface._captureService ??= createCaptureService();
+      surface._capturePreFrame ??= createCapturePreFrame();
+    });
+  }
+  return promise;
+}
+
+export { captureScreenshot };
+//# sourceMappingURL=screenshot.js.map

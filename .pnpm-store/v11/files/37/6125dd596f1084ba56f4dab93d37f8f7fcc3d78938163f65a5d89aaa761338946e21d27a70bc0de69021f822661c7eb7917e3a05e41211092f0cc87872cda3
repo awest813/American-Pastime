@@ -1,0 +1,7 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ISceneContext } from "../sceneContext";
+import { type IBridgeCommandRegistry } from "@babylonjs/shared-ui-components/modularTool/services/cli/bridgeCommandRegistry.js";
+/**
+ * Service that registers a CLI command for retrieving compiled shader code from a material.
+ */
+export declare const ShaderCommandServiceDefinition: ServiceDefinition<[], [IBridgeCommandRegistry, ISceneContext]>;

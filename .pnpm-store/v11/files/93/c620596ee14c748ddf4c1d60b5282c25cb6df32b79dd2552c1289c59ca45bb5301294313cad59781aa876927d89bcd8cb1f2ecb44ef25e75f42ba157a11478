@@ -1,0 +1,14 @@
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type FunctionComponent } from "react";
+import { type ISelectionService } from "../../services/selectionService";
+type FrameGraphsContentProps = {
+    scene: Scene;
+    selectionService: ISelectionService;
+};
+/**
+ * Frame Graphs content component
+ * @param props - Component props
+ * @returns React component
+ */
+export declare const FrameGraphsContent: FunctionComponent<FrameGraphsContentProps>;
+export {};

@@ -1,0 +1,31 @@
+import { type FunctionComponent } from "react";
+import { type Nullable } from "@babylonjs/core/types.js";
+import { type Animation } from "@babylonjs/core/Animations/animation.js";
+import { type TargetedAnimation, type AnimationGroup } from "@babylonjs/core/Animations/animationGroup.js";
+import { type Scene } from "@babylonjs/core/scene.js";
+import { type IAnimatable } from "@babylonjs/core/Animations/animatable.interface.js";
+/**
+ * Props for the CurveEditorButton component
+ */
+export type CurveEditorButtonProps = {
+    /** The scene */
+    scene: Scene;
+    /** Target animatable */
+    target: Nullable<IAnimatable>;
+    /** Animations to edit */
+    animations: Nullable<Animation[] | TargetedAnimation[]>;
+    /** Root animation group if any */
+    rootAnimationGroup?: Nullable<AnimationGroup>;
+    /** Editor title */
+    title?: string;
+    /** Whether using targeted animations */
+    useTargetAnimations?: boolean;
+    /** Button label */
+    label?: string;
+};
+/**
+ * Button component that opens the Animation Curve Editor in a popup window
+ * @param props - The component props
+ * @returns The button component
+ */
+export declare const CurveEditorButton: FunctionComponent<CurveEditorButtonProps>;

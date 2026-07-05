@@ -1,0 +1,74 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "useKeyboardHandler", {
+    enumerable: true,
+    get: function() {
+        return useKeyboardHandler;
+    }
+});
+const _interop_require_wildcard = require("@swc/helpers/_/_interop_require_wildcard");
+const _reactcomponents = require("@fluentui/react-components");
+const _react = /*#__PURE__*/ _interop_require_wildcard._(require("react"));
+const _types = require("../types");
+const multipliers = {
+    end: {
+        ArrowRight: 1,
+        ArrowLeft: -1
+    },
+    start: {
+        ArrowRight: -1,
+        ArrowLeft: 1
+    },
+    up: {
+        ArrowUp: 1,
+        ArrowDown: -1
+    },
+    down: {
+        ArrowUp: -1,
+        ArrowDown: 1
+    }
+};
+function isSupportedKey(growDirection, key) {
+    return Object.prototype.hasOwnProperty.call(multipliers, growDirection) && Object.prototype.hasOwnProperty.call(multipliers[growDirection], key);
+}
+const useKeyboardHandler = (options)=>{
+    const { onValueChange, growDirection, getCurrentValue, unitHandle } = options;
+    const { dir } = (0, _reactcomponents.useFluent)();
+    const onKeyDown = (0, _reactcomponents.useEventCallback)((event)=>{
+        if (!isSupportedKey(growDirection, event.key)) {
+            return;
+        }
+        const currentValue = getCurrentValue();
+        var _multipliers_growDirection_event_key;
+        const multiplier = (_multipliers_growDirection_event_key = multipliers[growDirection][event.key]) != null ? _multipliers_growDirection_event_key : 1;
+        const directionMultiplier = dir === 'rtl' && [
+            'start',
+            'end'
+        ].includes(growDirection) ? -1 : 1;
+        const offset = multiplier * unitHandle.getOffsetStep() * directionMultiplier;
+        onValueChange(event, {
+            event,
+            value: unitHandle.roundValue(currentValue + offset),
+            type: _types.EVENTS.keyboard,
+            unit: unitHandle.name
+        });
+    });
+    const attachHandlers = _react.useCallback((node)=>{
+        node.addEventListener('keydown', onKeyDown);
+    }, [
+        onKeyDown
+    ]);
+    const detachHandlers = _react.useCallback((node)=>{
+        node.removeEventListener('keydown', onKeyDown);
+    }, [
+        onKeyDown
+    ]);
+    return {
+        attachHandlers,
+        detachHandlers
+    };
+};
+
+//# sourceMappingURL=useKeyboardHandler.js.map

@@ -1,0 +1,6 @@
+function subVec3(a, b) {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+export { subVec3 };
+//# sourceMappingURL=sub-vec3.js.map

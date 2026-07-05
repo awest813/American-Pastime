@@ -1,0 +1,21 @@
+import { createMaterialView } from '../material-view.js';
+
+function buildNormalFragment(varying, location, space, distRange) {
+  const nExpr = space === "world" ? "nW" : "normalize((scene.view * vec4<f32>(nW, 0.0)).xyz)";
+  const aExpr = distRange != null ? `clamp((scene.view * vec4<f32>(input.${varying}, 1.0)).z / ${distRange.toFixed(1)}, 0.0, 1.0)` : "1.0";
+  return `struct CavityNormalIn { @location(${location}) ${varying}: vec3<f32>, };
+@fragment fn mainFragment(input: CavityNormalIn) -> @location(0) vec4<f32> {
+  let nW = normalize(cross(dpdx(input.${varying}), dpdy(input.${varying})));
+  let n = ${nExpr};
+  return vec4<f32>(n * 0.5 + vec3<f32>(0.5), ${aExpr});
+}`;
+}
+function createShaderNormalMaterialView(source, config = {}) {
+  const view = createMaterialView(source, { features: 0 });
+  const frag = buildNormalFragment(config.worldPosVarying ?? "vWorldPos", config.worldPosLocation ?? 0, config.space ?? "view", config.distanceEncodeRange);
+  Object.defineProperty(view, "fragmentSource", { value: frag, enumerable: true, configurable: true });
+  return view;
+}
+
+export { createShaderNormalMaterialView };
+//# sourceMappingURL=normal-view.js.map

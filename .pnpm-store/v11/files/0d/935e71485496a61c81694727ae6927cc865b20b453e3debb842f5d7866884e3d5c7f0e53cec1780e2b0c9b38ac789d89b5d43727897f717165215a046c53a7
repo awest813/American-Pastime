@@ -1,0 +1,18 @@
+import { type FunctionComponent } from "react";
+import { type Material } from "@babylonjs/core/Materials/material.js";
+import { type BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture.js";
+import { type Nullable } from "@babylonjs/core/types.js";
+import { type PropertyLineProps } from "@babylonjs/shared-ui-components/fluent/hoc/propertyLines/propertyLine.js";
+import { type TextureSelectorProps } from "@babylonjs/shared-ui-components/fluent/primitives/textureSelector.js";
+type MaterialTextureDebugPropertyLineProps = PropertyLineProps<Nullable<BaseTexture>> & TextureSelectorProps & {
+    material: Material;
+};
+/**
+ * A texture selector property line with material texture debug capability.
+ * Displays a debug toggle in expanded content to render the selected texture as emissive on the material.
+ * Enabling debug on one texture for a given material disables it for any other texture on that material.
+ * @param props - The texture selector property line props plus material reference
+ * @returns The property line element with debug toggle
+ */
+export declare const MaterialTextureDebugPropertyLine: FunctionComponent<MaterialTextureDebugPropertyLineProps>;
+export {};

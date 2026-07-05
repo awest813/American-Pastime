@@ -1,0 +1,80 @@
+import { _computeStandardMaterialFeatures } from '../standard/standard-material.js';
+import { createUniformBuffer } from '../../resource/gpu-buffers.js';
+import { enabledPlugins, bindPluginTextures, pluginSignature, buildPluginFragment, writePluginUbo } from './plugin-bridge-shared.js';
+import { getStandardGroupBuilder } from '../standard/standard-group-builder.js';
+
+const PLUGIN_INDEX_SHIFT = 24;
+const PLUGIN_INDEX_MASK = 127;
+let _sigToIndex = null;
+let _indexToEntry = null;
+let _counter = 0;
+function _resetState() {
+  _sigToIndex = /* @__PURE__ */ new Map();
+  _indexToEntry = /* @__PURE__ */ new Map();
+  _counter = 0;
+}
+function _indexFor(plugins, engine) {
+  const sig = pluginSignature(plugins);
+  const map = _sigToIndex ??= /* @__PURE__ */ new Map();
+  let idx = map.get(sig);
+  if (idx === void 0) {
+    idx = ++_counter;
+    map.set(sig, idx);
+    const built = buildPluginFragment(plugins, idx, true);
+    let uboBuffer = null;
+    if (built._stdUboSpec && built._stdUboSpec._totalBytes > 0) {
+      const data = new Float32Array(built._stdUboSpec._totalBytes / 4);
+      writePluginUbo(plugins, data, built._stdUboSpec._offsets);
+      uboBuffer = createUniformBuffer(engine, data, "plugin-ubo");
+    }
+    (_indexToEntry ??= /* @__PURE__ */ new Map()).set(idx, { _plugins: plugins, _fragment: built._fragment, _uboBuffer: uboBuffer });
+  }
+  return idx;
+}
+function _entryFor(plugins) {
+  const idx = _sigToIndex?.get(pluginSignature(plugins));
+  return idx ? _indexToEntry?.get(idx) : void 0;
+}
+const stdPluginExt = {
+  _id: "plugin",
+  _phase: "mesh",
+  _feature: PLUGIN_INDEX_MASK << PLUGIN_INDEX_SHIFT,
+  _frag(features) {
+    const idx = features >>> PLUGIN_INDEX_SHIFT & PLUGIN_INDEX_MASK;
+    return _indexToEntry?.get(idx)?._fragment ?? { _id: "plugin-0" };
+  },
+  _bind(mat, entries, b) {
+    const plugins = mat.plugins;
+    if (!plugins?.length) {
+      return b;
+    }
+    const entry = _entryFor(plugins);
+    if (entry?._uboBuffer) {
+      entries.push({ binding: b++, resource: { buffer: entry._uboBuffer } });
+    }
+    return bindPluginTextures(plugins, entries, b);
+  },
+  _textures(mat, out) {
+    const plugins = mat.plugins;
+    if (!plugins?.length) {
+      return;
+    }
+    for (const p of enabledPlugins(plugins)) {
+      p.getActiveTextures?.(out);
+    }
+  }
+};
+function registerStdPlugins(meshes, engine, register) {
+  _resetState();
+  register(stdPluginExt);
+  for (const m of meshes) {
+    const mat = m.material;
+    if (mat?.plugins?.length && mat._buildGroup === getStandardGroupBuilder()) {
+      const idx = _indexFor(mat.plugins, engine);
+      mat._renderFeatures = { features: _computeStandardMaterialFeatures(mat) | idx << PLUGIN_INDEX_SHIFT };
+    }
+  }
+}
+
+export { registerStdPlugins };
+//# sourceMappingURL=std-plugin-bridge.js.map

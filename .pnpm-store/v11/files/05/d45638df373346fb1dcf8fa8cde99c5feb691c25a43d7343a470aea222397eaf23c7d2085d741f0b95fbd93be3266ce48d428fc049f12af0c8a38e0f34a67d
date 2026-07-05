@@ -1,0 +1,12 @@
+import { _registerPbrExt } from '../pbr/pbr-flags.js';
+import { _registerStdExt } from '../standard/standard-flags.js';
+import { registerPbrPlugins } from './pbr-plugin-bridge.js';
+import { registerStdPlugins } from './std-plugin-bridge.js';
+
+function enableMaterialPlugins(scene) {
+  registerPbrPlugins(_registerPbrExt);
+  registerStdPlugins(scene.meshes, scene.surface.engine, _registerStdExt);
+}
+
+export { enableMaterialPlugins };
+//# sourceMappingURL=enable-material-plugins.js.map

@@ -1,0 +1,47 @@
+function writeFogUbo(data, scene) {
+  const fog = scene.fog;
+  if (fog) {
+    data[80] = fog.mode;
+    data[81] = fog.start;
+    data[82] = fog.end;
+    data[83] = fog.density;
+    data[84] = fog.color[0];
+    data[85] = fog.color[1];
+    data[86] = fog.color[2];
+  }
+}
+function writeClipPlaneUbo(data, scene) {
+  const clipPlane = scene.clipPlane;
+  if (clipPlane) {
+    data[88] = clipPlane[0];
+    data[89] = clipPlane[1];
+    data[90] = clipPlane[2];
+    data[91] = clipPlane[3];
+  }
+}
+function writeEnvShUbo(data, scene) {
+  const sh = scene._envTextures?.sphericalHarmonics;
+  if (sh) {
+    data.set(sh, 40);
+  }
+}
+function registerContributor(scene, contributor) {
+  const list = scene._sceneUboContributors ??= [];
+  if (!list.includes(contributor)) {
+    list.push(contributor);
+  }
+}
+function setFog(scene, config) {
+  scene.fog = config;
+  registerContributor(scene, writeFogUbo);
+}
+function setClipPlane(scene, plane) {
+  scene.clipPlane = plane;
+  registerContributor(scene, writeClipPlaneUbo);
+}
+function registerEnvSceneUniforms(scene) {
+  registerContributor(scene, writeEnvShUbo);
+}
+
+export { registerEnvSceneUniforms, setClipPlane, setFog };
+//# sourceMappingURL=scene-ubo-extras.js.map

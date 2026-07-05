@@ -1,0 +1,77 @@
+import { createShadowParamsUBO } from './shadow-base.js';
+import { createUniformBuffer } from '../resource/gpu-buffers.js';
+import { preloadCsmShadowTaskState, ensureCsmShadowTaskState, renderCsmShadowMap } from './csm-shadow-task-hooks.js';
+import { setCsmStdReceiverFactory, setCsmPbrReceiverFactory } from './csm-receiver-registry.js';
+import { createStdCsmShadowFragment } from '../material/standard/fragments/std-csm-shadow-fragment.js';
+import { createPbrCsmShadowFragment } from '../material/pbr/fragments/pbr-csm-shadow-fragment.js';
+
+function createCsmDirectionalShadowGenerator(engine, _light, cfg = {}) {
+  setCsmStdReceiverFactory(createStdCsmShadowFragment);
+  setCsmPbrReceiverFactory(createPbrCsmShadowFragment);
+  const device = engine._device;
+  const mapSize = cfg.mapSize ?? 1024;
+  const numCascades = Math.min(cfg.numCascades ?? 4, 4);
+  const bias = cfg.bias ?? 5e-5;
+  const darkness = cfg.darkness ?? 0;
+  const frustumEdgeFalloff = cfg.frustumEdgeFalloff ?? 0;
+  const csmCfg = {
+    _numCascades: numCascades,
+    _lambda: cfg.lambda ?? 0.5,
+    _cascadeBlendPercentage: cfg.cascadeBlendPercentage ?? 0.1,
+    _stabilizeCascades: cfg.stabilizeCascades ?? false,
+    _shadowMaxZ: cfg.shadowMaxZ ?? null,
+    _bias: bias,
+    _darkness: darkness,
+    _frustumEdgeFalloff: frustumEdgeFalloff,
+    _mapSize: mapSize,
+    _forceRefreshEveryFrame: cfg.forceRefreshEveryFrame ?? false
+  };
+  const depthTexture = device.createTexture({
+    size: { width: mapSize, height: mapSize, depthOrArrayLayers: numCascades },
+    format: "depth32float",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+  });
+  const _shadowsInfo = new Float32Array([darkness, mapSize, 1 / mapSize, frustumEdgeFalloff]);
+  const sg = {
+    _shadowType: "csm",
+    _light,
+    _depthTexture: depthTexture,
+    _depthSampler: device.createSampler({ compare: "less", magFilter: "linear", minFilter: "linear" }),
+    _lightMatrix: new Float32Array(16),
+    _shadowsInfo,
+    _depthValues: new Float32Array([0, 1]),
+    _shadowParamsUBO: createShadowParamsUBO(engine, bias, 1 / mapSize),
+    _shadowUBO: createUniformBuffer(engine, new Float32Array(80)),
+    _config: {
+      _mapSize: mapSize,
+      _bias: bias,
+      _forceRefreshEveryFrame: csmCfg._forceRefreshEveryFrame
+    },
+    _version: 0,
+    _csmCascadeCount: numCascades
+  };
+  sg._preloadShadowTask = preloadCsmShadowTaskState;
+  sg._ensureShadowTaskState = (eng, scene, casterMeshes) => {
+    const state = ensureCsmShadowTaskState(eng, scene, sg, csmCfg, casterMeshes, sg._shadowTaskState ?? null);
+    sg._shadowTaskState = state;
+    return state;
+  };
+  sg._renderShadowMap = (eng, state) => renderCsmShadowMap(eng, sg, state, csmCfg);
+  return sg;
+}
+function onCsmReceiverUpdate(sg, cb) {
+  (sg._onReceiverData ??= []).push(cb);
+  return () => {
+    const list = sg._onReceiverData;
+    if (!list) {
+      return;
+    }
+    const i = list.indexOf(cb);
+    if (i >= 0) {
+      list.splice(i, 1);
+    }
+  };
+}
+
+export { createCsmDirectionalShadowGenerator, onCsmReceiverUpdate };
+//# sourceMappingURL=csm-directional-shadow-generator.js.map

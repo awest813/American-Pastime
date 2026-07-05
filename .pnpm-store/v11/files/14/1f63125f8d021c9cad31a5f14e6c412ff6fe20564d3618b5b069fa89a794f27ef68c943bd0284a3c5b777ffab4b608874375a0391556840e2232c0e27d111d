@@ -1,0 +1,6 @@
+import { binaryEmitter } from './_math-factory.js';
+
+const emitter = binaryEmitter("MinBlock", (l, r) => `min(${l}, ${r})`);
+
+export { emitter };
+//# sourceMappingURL=min-block.js.map

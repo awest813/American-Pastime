@@ -1,0 +1,4 @@
+import { type ServiceDefinition } from "@babylonjs/shared-ui-components/modularTool/modularity/serviceDefinition.js";
+import { type ICliConnectionStatus } from "@babylonjs/shared-ui-components/modularTool/services/cli/bridgeConnectionStatus.js";
+import { type IShellService } from "@babylonjs/shared-ui-components/modularTool/services/shellService.js";
+export declare const CliConnectionStatusServiceDefinition: ServiceDefinition<[], [IShellService, ICliConnectionStatus]>;

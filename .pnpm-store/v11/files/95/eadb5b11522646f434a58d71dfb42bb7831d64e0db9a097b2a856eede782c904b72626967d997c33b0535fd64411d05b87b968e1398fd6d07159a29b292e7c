@@ -1,0 +1,105 @@
+/** This file must only contain pure code and pure imports */
+import { __decorate } from "../../../tslib.es6.js";
+import { FrameGraphLightingVolumeTask } from "../../Tasks/Misc/lightingVolumeTask.js";
+import { editableInPropertyPage } from "../../../Decorators/nodeDecorator.js";
+import { NodeRenderGraphBlock } from "../nodeRenderGraphBlock.js";
+import { NodeRenderGraphBlockConnectionPointTypes } from "../Types/nodeRenderGraphTypes.js";
+import { RegisterClass } from "../../../Misc/typeStore.js";
+/**
+ * Block that implements the lighting volume
+ */
+export class NodeRenderGraphLightingVolumeBlock extends NodeRenderGraphBlock {
+    /**
+     * Gets the frame graph task associated with this block
+     */
+    get task() {
+        return this._frameGraphTask;
+    }
+    /**
+     * Create a new NodeRenderGraphLightingVolumeBlock
+     * @param name defines the block name
+     * @param frameGraph defines the hosting frame graph
+     * @param scene defines the hosting scene
+     */
+    constructor(name, frameGraph, scene) {
+        super(name, frameGraph, scene);
+        this.registerInput("shadowGenerator", NodeRenderGraphBlockConnectionPointTypes.ShadowGenerator);
+        this._addDependenciesInput();
+        this.registerOutput("output", NodeRenderGraphBlockConnectionPointTypes.ObjectList);
+        this._frameGraphTask = new FrameGraphLightingVolumeTask(name, frameGraph);
+    }
+    /** Gets or sets the tesselation parameter */
+    get tesselation() {
+        return this._frameGraphTask.lightingVolume.tesselation;
+    }
+    set tesselation(value) {
+        this._frameGraphTask.lightingVolume.tesselation = value;
+    }
+    /** Gets or sets the refresh frequency parameter */
+    get frequency() {
+        return this._frameGraphTask.lightingVolume.frequency;
+    }
+    set frequency(value) {
+        this._frameGraphTask.lightingVolume.frequency = value;
+    }
+    /**
+     * Gets the current class name
+     * @returns the class name
+     */
+    getClassName() {
+        return "NodeRenderGraphLightingVolumeBlock";
+    }
+    /**
+     * Gets the shadow generator input component
+     */
+    get shadowGenerator() {
+        return this._inputs[0];
+    }
+    /**
+     * Gets the output component
+     */
+    get output() {
+        return this._outputs[0];
+    }
+    _buildBlock(state) {
+        super._buildBlock(state);
+        this.output.value = this._frameGraphTask.outputMeshLightingVolume;
+        this._frameGraphTask.shadowGenerator = this.shadowGenerator.connectedPoint?.value;
+    }
+    _dumpPropertiesCode() {
+        const codes = [];
+        codes.push(`${this._codeVariableName}.tesselation = ${this.tesselation};`);
+        codes.push(`${this._codeVariableName}.frequency = ${this.frequency};`);
+        return super._dumpPropertiesCode() + codes.join("\n");
+    }
+    serialize() {
+        const serializationObject = super.serialize();
+        serializationObject.tesselation = this.tesselation;
+        serializationObject.frequency = this.frequency;
+        return serializationObject;
+    }
+    _deserialize(serializationObject) {
+        super._deserialize(serializationObject);
+        this.tesselation = serializationObject.tesselation;
+        this.frequency = serializationObject.frequency;
+    }
+}
+__decorate([
+    editableInPropertyPage("Tesselation", 2 /* PropertyTypeForEdition.Int */, "PROPERTIES", { min: 1, max: 4096 })
+], NodeRenderGraphLightingVolumeBlock.prototype, "tesselation", null);
+__decorate([
+    editableInPropertyPage("Refresh frequency", 2 /* PropertyTypeForEdition.Int */, "PROPERTIES")
+], NodeRenderGraphLightingVolumeBlock.prototype, "frequency", null);
+let _Registered = false;
+/**
+ * Register side effects for lightingVolumeBlock.
+ * Safe to call multiple times; only the first call has an effect.
+ */
+export function RegisterLightingVolumeBlock() {
+    if (_Registered) {
+        return;
+    }
+    _Registered = true;
+    RegisterClass("BABYLON.NodeRenderGraphLightingVolumeBlock", NodeRenderGraphLightingVolumeBlock);
+}
+//# sourceMappingURL=lightingVolumeBlock.pure.js.map

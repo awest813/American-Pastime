@@ -1,0 +1,27 @@
+import { playSpriteTargetAnimation } from './sprite-animation.js';
+import { removeBillboardSpriteIndex, setBillboardSpriteFrameIndex } from './billboard-sprite.js';
+
+function playBillboardSpriteIndexAnimation(manager, system, index, from, to, loop, delayMs, options) {
+  return playSpriteTargetAnimation(
+    manager,
+    {
+      setFrame(frame) {
+        setBillboardSpriteFrameIndex(system, index, frame);
+      },
+      remove() {
+        removeBillboardSpriteIndex(system, index);
+      },
+      isAlive() {
+        return index >= 0 && index < system.count;
+      }
+    },
+    from,
+    to,
+    loop,
+    delayMs,
+    options
+  );
+}
+
+export { playBillboardSpriteIndexAnimation };
+//# sourceMappingURL=billboard-sprite-index-animation.js.map

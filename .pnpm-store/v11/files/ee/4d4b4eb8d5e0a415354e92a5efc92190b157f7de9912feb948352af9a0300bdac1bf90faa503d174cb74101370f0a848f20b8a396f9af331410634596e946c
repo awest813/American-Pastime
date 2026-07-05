@@ -1,0 +1,37 @@
+import { U8 } from '../engine/typed-arrays.js';
+import { BU } from '../engine/gpu-flags.js';
+
+function align(n, to) {
+  return n + to - 1 & ~(to - 1);
+}
+function createUniformBuffer(engine, data, label) {
+  const device = engine._device;
+  const buf = device.createBuffer({
+    label,
+    size: align(data.byteLength, 16),
+    usage: BU.UNIFORM | BU.COPY_DST
+  });
+  device.queue.writeBuffer(buf, 0, data.buffer, data.byteOffset, data.byteLength);
+  return buf;
+}
+function createEmptyUniformBuffer(engine, byteLength, label) {
+  return engine._device.createBuffer({
+    label,
+    size: align(byteLength, 16),
+    usage: BU.UNIFORM | BU.COPY_DST
+  });
+}
+function createMappedBuffer(engine, data, usage) {
+  const size = align(Math.max(data.byteLength, 4), 4);
+  const buf = engine._device.createBuffer({
+    size,
+    usage: usage | BU.COPY_DST,
+    mappedAtCreation: true
+  });
+  new U8(buf.getMappedRange()).set(new U8(data.buffer, data.byteOffset, data.byteLength));
+  buf.unmap();
+  return buf;
+}
+
+export { align, createEmptyUniformBuffer, createMappedBuffer, createUniformBuffer };
+//# sourceMappingURL=gpu-buffers.js.map

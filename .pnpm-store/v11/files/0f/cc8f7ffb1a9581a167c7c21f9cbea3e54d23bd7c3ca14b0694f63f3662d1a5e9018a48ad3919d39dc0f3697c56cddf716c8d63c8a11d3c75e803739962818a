@@ -1,0 +1,363 @@
+import { F32 } from '../engine/typed-arrays.js';
+import { _vis } from '../engine/engine.js';
+import { disposeRenderTarget, buildRenderTarget } from '../engine/render-target.js';
+import { getViewMatrix } from '../camera/camera.js';
+import { getSceneBindGroupLayout } from '../render/scene-helpers.js';
+import { _packSceneUniforms } from './scene-uniforms-pack.js';
+import { createEmptyUniformBuffer } from '../resource/gpu-buffers.js';
+import { SCENE_UBO_BYTES } from '../shader/scene-uniforms-size.js';
+import { ensureSceneLightState, refreshSceneLightsUBO } from '../render/lights-ubo.js';
+
+function createRenderTask(config, engine, scene) {
+  const sc = scene;
+  config.clrColor ??= { r: 0.2, g: 0.2, b: 0.3, a: 1 };
+  config.clr ??= true;
+  const desc = config.rt._descriptor;
+  const targetSignature = {
+    _colorFormat: desc.format,
+    _depthStencilFormat: config.depth?._descriptor.dFormat ?? desc.dFormat,
+    _depthCompare: desc._depthCompare,
+    _sampleCount: desc.samples ?? 1
+  };
+  const sceneBGL = getSceneBindGroupLayout(engine);
+  const sceneUBO = createEmptyUniformBuffer(engine, SCENE_UBO_BYTES);
+  const lightsUBO = ensureSceneLightState(engine, sc)._buffer;
+  const sceneBG = engine._device.createBindGroup({
+    layout: sceneBGL,
+    entries: [
+      { binding: 0, resource: { buffer: sceneUBO } },
+      { binding: 1, resource: { buffer: lightsUBO } }
+    ]
+  });
+  const colorAttachment = { loadOp: "clear", storeOp: "store" };
+  const updateContext = { targetWidth: 0, targetHeight: 0 };
+  const task = {
+    name: config.name,
+    _config: config,
+    engine,
+    scene: sc,
+    _passes: [],
+    _autoFromScene: false,
+    _renderables: [],
+    _opaqueBindings: [],
+    _directBindings: [],
+    _transparentBindings: [],
+    _opaqueBundles: [],
+    _lastVersion: -1,
+    _lastVis: 0,
+    _renderPassDescriptor: { colorAttachments: [colorAttachment] },
+    _colorAttachment: colorAttachment,
+    _depthSrc: config.depth,
+    _depthLoadOp: config.depth ? config.depth._eager ? "load" : "clear" : void 0,
+    _sceneUBO: sceneUBO,
+    _sceneBG: sceneBG,
+    _lightsUBO: lightsUBO,
+    _suData: new F32(SCENE_UBO_BYTES / 4),
+    _su: [],
+    _targetSignature: targetSignature,
+    _pendingMeshes: [],
+    addMesh(mesh, opts) {
+      const material = opts?.material ?? mesh.material;
+      if (!material) {
+        return;
+      }
+      task._pendingMeshes.push({ mesh, material });
+    },
+    record() {
+      if (task._autoFromScene) {
+        task._renderables.length = 0;
+      }
+      resolvePendingMeshes(task, sc);
+      task._autoFromScene = task._renderables.length === 0;
+      if (task._autoFromScene) {
+        task._renderables.push(...sc._renderables);
+      }
+      const rt = config.rt;
+      buildRenderTarget(rt, engine);
+      if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
+        buildRenderTarget(config.rst, engine);
+      }
+      if (config.depth && !config.depth._eager) {
+        buildRenderTarget(config.depth, engine);
+      }
+      updateContext.targetWidth = rt._width;
+      updateContext.targetHeight = rt._height;
+      refreshTaskSceneBindGroup(task, engine);
+      buildBindings(task, engine, targetSignature);
+      buildRenderPassDescriptor(task, rt);
+    },
+    execute() {
+      return executePass(task, engine, targetSignature, updateContext);
+    },
+    dispose() {
+      task._passes.length = 0;
+      disposeRenderTarget(config.rt);
+      disposeRenderTarget(config.rst);
+      disposeRenderTarget(config.depth);
+      task._opaqueBindings.length = 0;
+      task._directBindings.length = 0;
+      task._transparentBindings.length = 0;
+      task._renderables.length = 0;
+      task._opaqueBundles.length = 0;
+      task._sceneUBO.destroy();
+    }
+  };
+  return task;
+}
+function removeMeshFromTask(task, mesh) {
+  if (!task._renderables) {
+    return;
+  }
+  let removed = false;
+  for (let i = task._renderables.length - 1; i >= 0; i--) {
+    if (task._renderables[i].mesh === mesh) {
+      task._renderables.splice(i, 1);
+      removed = true;
+    }
+  }
+  for (const arr of [task._opaqueBindings, task._directBindings, task._transparentBindings]) {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (arr[i].renderable.mesh === mesh) {
+        arr.splice(i, 1);
+        removed = true;
+      }
+    }
+  }
+  if (removed) {
+    task._opaqueBundles.length = 0;
+    task._lastVersion = -1;
+  }
+}
+function resolvePendingMeshes(task, sc) {
+  if (task._pendingMeshes.length === 0) {
+    return;
+  }
+  for (const { mesh, material } of task._pendingMeshes) {
+    const rebuild = material._buildGroup?._rebuildSingle;
+    if (!rebuild) {
+      throw new Error();
+    }
+    const renderable = rebuild(sc, mesh, material);
+    if (!task._renderables.includes(renderable)) {
+      task._renderables.push(renderable);
+    }
+  }
+  task._pendingMeshes.length = 0;
+}
+function sortTransparentBindings(task, camera) {
+  const arr = task._transparentBindings;
+  if (arr.length <= 1 || !camera) {
+    return;
+  }
+  const v = getViewMatrix(camera);
+  for (const b of arr) {
+    const wc = b.renderable._worldCenter;
+    b._sortDistance = wc ? wc[0] * v[2] + wc[1] * v[6] + wc[2] * v[10] + v[14] : 0;
+  }
+  arr.sort((a, b) => b._sortDistance - a._sortDistance || a.renderable.order - b.renderable.order);
+}
+function buildBindings(task, eng, targetSignature) {
+  const opaque = task._opaqueBindings;
+  const direct = task._directBindings;
+  const transparent = task._transparentBindings;
+  opaque.length = 0;
+  direct.length = 0;
+  transparent.length = 0;
+  for (const r of task._renderables) {
+    const binding = r.bind(eng, targetSignature);
+    if (r.isTransparent || r._transmissive) {
+      transparent.push(binding);
+    } else if (r._direct) {
+      direct.push(binding);
+    } else {
+      opaque.push(binding);
+    }
+  }
+  opaque.sort((a, b) => a.renderable.order - b.renderable.order);
+  direct.sort((a, b) => a.renderable.order - b.renderable.order);
+  task._opaqueBundles.length = 0;
+  task._lastVersion = task.scene._renderableVersion;
+}
+function buildRenderPassDescriptor(task, rt) {
+  const att = task._colorAttachment;
+  att.view = rt._colorView;
+  att.resolveTarget = task._config.rst?._colorView ?? void 0;
+  task._renderPassDescriptor.colorAttachments = rt._colorView ? [att] : [];
+  const depthSrc = task._depthSrc ?? rt;
+  const depthView = depthSrc._depthView;
+  let depthAttachment;
+  if (depthView) {
+    const dd = depthSrc._descriptor;
+    const loadOp = task._depthLoadOp ?? "clear";
+    depthAttachment = {
+      view: depthView,
+      depthClearValue: dd._depthClearValue ?? 0,
+      depthLoadOp: loadOp,
+      depthStoreOp: "store"
+    };
+    if (dd.dFormat?.includes("stencil")) {
+      depthAttachment.stencilClearValue = 0;
+      depthAttachment.stencilLoadOp = loadOp;
+      depthAttachment.stencilStoreOp = "store";
+    }
+  }
+  task._renderPassDescriptor.depthStencilAttachment = depthAttachment;
+}
+function prepareRenderTaskPass(task, eng, targetSignature, context) {
+  const sc = task.scene;
+  if (task._autoFromScene && task._lastVersion !== sc._renderableVersion) {
+    task._renderables.length = 0;
+    task._renderables.push(...sc._renderables);
+    buildBindings(task, eng, targetSignature);
+  }
+  refreshTaskSceneBindGroup(task, eng);
+  const camera = task._config.cam ?? sc.camera;
+  sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
+  writePassSceneUBO(task, eng, sc, camera);
+  refreshSceneLightsUBO(eng, sc);
+  context._camera = camera;
+  updateBindings(task._opaqueBindings, context);
+  updateBindings(task._directBindings, context);
+  updateBindings(task._transparentBindings, context);
+  sortTransparentBindings(task, camera);
+}
+function executePass(task, eng, targetSignature, context) {
+  const sc = task.scene;
+  const sampleCount = targetSignature._sampleCount;
+  prepareRenderTaskPass(task, eng, targetSignature, context);
+  const att = task._colorAttachment;
+  const cfg = task._config;
+  if (cfg.rt._colorView) {
+    if (cfg.rt === eng.scRT) {
+      att.view = cfg.rt._colorView;
+    }
+    att.resolveTarget = cfg.rst?._colorView ?? void 0;
+    att.clearValue = task._autoFromScene ? sc.clearColor : cfg.clrColor;
+    att.loadOp = cfg.clr ? "clear" : "load";
+  }
+  if (task._executeWithTransmission) {
+    return task._executeWithTransmission(sampleCount);
+  }
+  const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+  const draws = executePassBody(task, pass);
+  pass.end();
+  return draws;
+}
+function executePassBody(task, pass) {
+  const eng = task.engine;
+  const cfg = task._config;
+  const rt = cfg.rt;
+  const scene = task.scene;
+  const opaqueBindings = task._opaqueBindings;
+  const opaqueBundles = task._opaqueBundles;
+  const sceneBG = task._sceneBG;
+  const camera = cfg.cam ?? scene.camera;
+  const v = camera?.viewport;
+  if (v) {
+    const rw = rt._width;
+    const rh = rt._height;
+    const x = Math.floor(v.x * rw);
+    const y = Math.floor((1 - v.y - v.height) * rh);
+    const w = Math.ceil((v.x + v.width) * rw) - x;
+    const h = Math.ceil((1 - v.y) * rh) - y;
+    pass.setViewport(x, y, w, h, 0, 1);
+    pass.setScissorRect(x, y, w, h);
+  }
+  pass.setBindGroup(0, sceneBG);
+  if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
+    const desc = rt._descriptor;
+    const be = eng._device.createRenderBundleEncoder({
+      colorFormats: desc.format ? [desc.format] : [],
+      // Use the task's target signature, not the RT descriptor: a depth
+      // override (config.depth) supplies the depth format externally, so
+      // the cached opaque pipelines are built with it while the colour RT
+      // carries no depthStencilFormat of its own. The bundle encoder's
+      // attachment state must match those pipelines exactly.
+      depthStencilFormat: task._targetSignature._depthStencilFormat,
+      sampleCount: desc.samples ?? 1
+    });
+    be.setBindGroup(0, sceneBG);
+    drawList(be, opaqueBindings, eng);
+    opaqueBundles[0] = be.finish();
+    task._lastVersion = scene._renderableVersion;
+    task._lastVis = _vis;
+  }
+  let draws = opaqueBindings.length;
+  pass.executeBundles(opaqueBundles);
+  pass.setBindGroup(0, sceneBG);
+  draws += drawList(pass, task._directBindings, eng);
+  draws += drawList(pass, task._transparentBindings, eng);
+  return draws;
+}
+function refreshTaskSceneBindGroup(task, eng) {
+  const lightsUBO = ensureSceneLightState(eng, task.scene)._buffer;
+  if (lightsUBO === task._lightsUBO) {
+    return;
+  }
+  task._lightsUBO = lightsUBO;
+  task._sceneBG = eng._device.createBindGroup({
+    layout: getSceneBindGroupLayout(eng),
+    entries: [
+      { binding: 0, resource: { buffer: task._sceneUBO } },
+      { binding: 1, resource: { buffer: lightsUBO } }
+    ]
+  });
+  task._opaqueBundles.length = 0;
+  task._lastVersion = -1;
+}
+function writePassSceneUBO(task, eng, scene, camera) {
+  if (!camera) {
+    return;
+  }
+  const v = camera.viewport;
+  const rt = task._config.rt;
+  const aspect = (task._config.cs ? eng.canvas.width / eng.canvas.height : rt._width / rt._height) * (v ? v.width / v.height : 1);
+  const fog = scene.fog;
+  const img = scene.imageProcessing;
+  const envRotationY = scene.envRotationY || 0;
+  const wv = camera.worldMatrixVersion;
+  const s = task._su;
+  if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast) {
+    return;
+  }
+  s[0] = camera;
+  s[1] = fog;
+  s[2] = wv;
+  s[3] = aspect;
+  s[4] = envRotationY;
+  s[5] = img.exposure;
+  s[6] = img.contrast;
+  const data = task._suData;
+  _packSceneUniforms(data, eng, scene, camera, aspect);
+  const contribs = scene._sceneUboContributors;
+  if (contribs) {
+    for (const c of contribs) {
+      c(data, scene);
+    }
+  }
+  eng._device.queue.writeBuffer(task._sceneUBO, 0, data);
+}
+function updateBindings(list, context) {
+  for (const b of list) {
+    b.update?.(context);
+  }
+}
+function drawList(enc, list, engine) {
+  let lp = null;
+  let draws = 0;
+  for (const b of list) {
+    const mesh = b.renderable.mesh;
+    if (mesh && mesh.visible === false) {
+      continue;
+    }
+    if (b.pipeline !== lp) {
+      enc.setPipeline(b.pipeline);
+      lp = b.pipeline;
+    }
+    draws += b.draw(enc, engine);
+  }
+  return draws;
+}
+
+export { createRenderTask, removeMeshFromTask };
+//# sourceMappingURL=render-task.js.map

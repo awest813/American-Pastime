@@ -1,0 +1,11 @@
+import { type FunctionComponent } from "react";
+import { type IblShadowsRenderPipeline } from "@babylonjs/core/Rendering/IBLShadows/iblShadowsRenderPipeline.js";
+export declare const IblShadowsRenderPipelineVoxelProperties: FunctionComponent<{
+    pipeline: IblShadowsRenderPipeline;
+}>;
+export declare const IblShadowsRenderPipelineScreenspaceProperties: FunctionComponent<{
+    pipeline: IblShadowsRenderPipeline;
+}>;
+export declare const IblShadowsRenderPipelineDebugProperties: FunctionComponent<{
+    pipeline: IblShadowsRenderPipeline;
+}>;

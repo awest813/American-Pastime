@@ -1,0 +1,10 @@
+import { type FunctionComponent } from "react";
+import { Camera } from "@babylonjs/core/Cameras/camera.js";
+/**
+ * The general properties component for a camera.
+ * @param props - The component props containing the camera and settings context.
+ * @returns JSX.Element
+ */
+export declare const CameraGeneralProperties: FunctionComponent<{
+    camera: Camera;
+}>;

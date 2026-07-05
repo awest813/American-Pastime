@@ -1,0 +1,187 @@
+import { type ComponentType, type FunctionComponent } from "react";
+import { type IDisposable, type IReadonlyObservable, type Nullable, type Scene } from "@babylonjs/core/index.js";
+/**
+ * Information about how to display an entity in the Scene Explorer tree.
+ */
+export type EntityDisplayInfo = Partial<IDisposable> & Readonly<{
+    /**
+     * The name of the entity to display in the Scene Explorer tree.
+     */
+    name: string;
+    /**
+     * An observable that notifies when the display info (such as the name) changes.
+     */
+    onChange?: IReadonlyObservable<void>;
+    /**
+     * An optional validation error message for this entity. When present, the entity's
+     * icon is replaced with a warning icon whose tooltip displays this message.
+     */
+    validationError?: string;
+}>;
+/**
+ * Configuration for drag-and-drop behavior within a section.
+ */
+export type SceneExplorerDragDropConfig<T> = Readonly<{
+    /**
+     * Determines whether an entity can be dragged.
+     * @param entity The entity to check.
+     * @returns True if the entity can be dragged, false otherwise.
+     */
+    canDrag: (entity: T) => boolean;
+    /**
+     * Determines whether an entity can be dropped onto a target.
+     * @param draggedEntity The entity being dragged.
+     * @param targetEntity The potential drop target entity, or null if dropping onto the section root.
+     * @returns True if the drop is allowed, false otherwise.
+     */
+    canDrop: (draggedEntity: T, targetEntity: T | null) => boolean;
+    /**
+     * Called when a drag-and-drop operation completes.
+     * @param draggedEntity The entity that was dragged.
+     * @param targetEntity The entity it was dropped onto, or null if dropped onto the section root.
+     */
+    onDrop: (draggedEntity: T, targetEntity: T | null) => void;
+}>;
+/**
+ * Describes a section in the Scene Explorer (e.g. "Nodes", "Materials", etc.).
+ */
+export type SceneExplorerSection<T extends object> = Readonly<{
+    /**
+     * The display name of the section (e.g. "Nodes", "Materials", etc.).
+     */
+    displayName: string;
+    /**
+     * An optional order for the section, relative to other sections.
+     * Defaults to 0.
+     */
+    order?: number;
+    /**
+     * A function that returns the root entities for this section.
+     */
+    getRootEntities: () => readonly T[];
+    /**
+     * An optional function that returns the children of a given entity.
+     */
+    getEntityChildren?: (entity: T) => readonly T[];
+    /**
+     * Gets the display information for a given entity.
+     * This is ideally "live" display info (e.g. updates to the display info are taken into account and communicated via the observable).
+     * This means in many cases the display info will need to be disposed when it is no longer needed so observable registrations can be removed.
+     */
+    getEntityDisplayInfo: (entity: T) => EntityDisplayInfo;
+    /**
+     * An optional icon component to render for the entity.
+     */
+    entityIcon?: ComponentType<{
+        entity: T;
+    }>;
+    /**
+     * A function that returns an array of observables for when entities are added to the scene.
+     */
+    getEntityAddedObservables: () => readonly IReadonlyObservable<T>[];
+    /**
+     * A function that returns an array of observables for when entities are removed from the scene.
+     */
+    getEntityRemovedObservables: () => readonly IReadonlyObservable<T>[];
+    /**
+     * A function that returns an array of observables for when entities are moved (e.g. re-parented) within the scene.
+     */
+    getEntityMovedObservables?: () => readonly IReadonlyObservable<T>[];
+    /**
+     * Optional configuration for drag-and-drop behavior within this section.
+     * If not provided, drag-and-drop is disabled for this section.
+     */
+    dragDropConfig?: SceneExplorerDragDropConfig<T>;
+}>;
+type InlineCommand = {
+    /**
+     * An icon component to render for the command. Required for inline commands.
+     */
+    icon: ComponentType;
+    /**
+     * The mode of the command. Inline commands are shown directly in the tree item layout. Inline by default.
+     */
+    mode?: "inline";
+};
+type ContextMenuCommand = {
+    /**
+     * An icon component to render for the command. Optional for context menu commands.
+     */
+    icon?: ComponentType;
+    /**
+     * The mode of the command. Context menu commands are shown in the context menu for the tree item.
+     */
+    mode: "contextMenu";
+};
+type CommandMode = NonNullable<(InlineCommand | ContextMenuCommand)["mode"]>;
+type ActionCommand = {
+    readonly type: "action";
+    /**
+     * The function that executes the command.
+     */
+    execute(): unknown | Promise<unknown>;
+};
+type ToggleCommand = {
+    readonly type: "toggle";
+    /**
+     * A boolean indicating if the command is enabled.
+     */
+    isEnabled: boolean;
+};
+type CommandType = (ActionCommand | ToggleCommand)["type"];
+/**
+ * Describes a command that can be executed on entities or sections in the Scene Explorer.
+ */
+export type SceneExplorerCommand<ModeT extends CommandMode = CommandMode, TypeT extends CommandType = CommandType> = Partial<IDisposable> & Readonly<{
+    /**
+     * The display name of the command (e.g. "Delete", "Rename", etc.).
+     */
+    displayName: string;
+    /**
+     * An optional array of hotkeys that trigger the command.
+     */
+    hotKey?: {
+        keyCode: string;
+        control?: boolean;
+        alt?: boolean;
+        shift?: boolean;
+        meta?: boolean;
+    };
+    /**
+     * An observable that notifies when the command state changes.
+     */
+    onChange?: IReadonlyObservable<unknown>;
+}> & (ModeT extends "inline" ? InlineCommand : ContextMenuCommand) & (TypeT extends "action" ? ActionCommand : ToggleCommand);
+/**
+ * Provides a command for a specific entity or section context in the Scene Explorer.
+ */
+export type SceneExplorerCommandProvider<ContextT, ModeT extends CommandMode = CommandMode, TypeT extends CommandType = CommandType> = Readonly<{
+    /**
+     * An optional order for the section, relative to other commands.
+     * Defaults to 0.
+     */
+    order?: number;
+    /**
+     * A predicate function that determines if the command is applicable to the given context.
+     */
+    predicate: (context: unknown) => context is ContextT;
+    /**
+     * Gets the command information for the given context.
+     */
+    getCommand: (context: ContextT) => SceneExplorerCommand<ModeT, TypeT>;
+}>;
+declare const ActionCommand: FunctionComponent<{
+    command: SceneExplorerCommand<"inline", "action">;
+}>;
+declare const ToggleCommand: FunctionComponent<{
+    command: SceneExplorerCommand<"inline", "toggle">;
+}>;
+export declare const SceneExplorer: FunctionComponent<{
+    sections: readonly SceneExplorerSection<object>[];
+    entityCommandProviders: readonly SceneExplorerCommandProvider<object>[];
+    sectionCommandProviders: readonly SceneExplorerCommandProvider<string, "contextMenu">[];
+    scene: Scene;
+    selectedEntity?: Nullable<object>;
+    setSelectedEntity?: (entity: Nullable<object>) => void;
+}>;
+export {};

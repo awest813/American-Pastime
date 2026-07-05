@@ -1,0 +1,41 @@
+import { GEO_EPSILON } from './geospatial-limits.js';
+
+const REFERENCE_FRAME_RATE = 60;
+const REFERENCE_FRAME_MS = 1e3 / REFERENCE_FRAME_RATE;
+function frameDecay(inertia, effMs, referenceFrameMs = REFERENCE_FRAME_MS) {
+  return Math.pow(inertia, effMs / referenceFrameMs);
+}
+function integrateInertialVelocity(velocity, pixelDelta, inertia, effMs, hasActiveInput) {
+  if (effMs === 0) {
+    return velocity;
+  }
+  const decay = frameDecay(inertia, effMs);
+  let v = velocity * decay;
+  if (pixelDelta !== 0 || hasActiveInput) {
+    const oneMinus = 1 - inertia;
+    const inputScale = oneMinus > 0 ? (1 - decay) / oneMinus : 1;
+    v += pixelDelta / effMs * inputScale;
+  } else if (Math.abs(v) < 1e-6) {
+    v = 0;
+  }
+  return v;
+}
+function clamp01(v) {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+function computePanSpeedMultiplier(center, position) {
+  const centerRadius = Math.hypot(center.x, center.y, center.z);
+  const currentRadius = Math.hypot(position.x, position.y, position.z);
+  const sinLat = centerRadius > 0 ? center.z / centerRadius : 0;
+  const cosLat = Math.sqrt(1 - Math.min(1, sinLat * sinLat));
+  const latDamp = Math.sqrt(Math.abs(cosLat));
+  const height = Math.max(currentRadius - centerRadius, GEO_EPSILON);
+  const altitudeScale = Math.max(1, centerRadius / height);
+  return clamp01(altitudeScale * latDamp);
+}
+function computeZoomSpeedMultiplier(distanceToTarget) {
+  return distanceToTarget * 0.01;
+}
+
+export { REFERENCE_FRAME_RATE, computePanSpeedMultiplier, computeZoomSpeedMultiplier, frameDecay, integrateInertialVelocity };
+//# sourceMappingURL=geospatial-movement.js.map

@@ -1,0 +1,18 @@
+import { F32 } from '../engine/typed-arrays.js';
+
+function _defaultAllocate() {
+  return new F32(16);
+}
+let _allocate;
+function allocateMat4() {
+  return (_allocate ?? _defaultAllocate)();
+}
+function _setHpmAllocator(allocate) {
+  _allocate = allocate;
+}
+function _resetMatrixAllocatorForTests() {
+  _allocate = void 0;
+}
+
+export { _resetMatrixAllocatorForTests, _setHpmAllocator, allocateMat4 };
+//# sourceMappingURL=_matrix-allocator.js.map

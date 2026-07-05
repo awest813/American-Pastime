@@ -1,0 +1,11 @@
+import { type FunctionComponent } from "react";
+import { type Nullable, type Quaternion, type Vector3 } from "@babylonjs/core/index.js";
+export type Transform = {
+    position: Vector3;
+    rotation: Vector3;
+    rotationQuaternion: Nullable<Quaternion>;
+    scaling: Vector3;
+};
+export declare const TransformProperties: FunctionComponent<{
+    transform: Transform;
+}>;

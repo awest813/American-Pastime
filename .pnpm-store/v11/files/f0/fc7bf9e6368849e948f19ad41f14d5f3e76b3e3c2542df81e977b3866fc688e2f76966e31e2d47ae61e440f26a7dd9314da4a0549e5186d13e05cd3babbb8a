@@ -1,0 +1,10 @@
+import { createMaterialView } from '../material-view.js';
+import { NO_COLOR_OUTPUT } from './standard-flags.js';
+
+function createStandardNoColorMaterialView(source) {
+  const features = source._renderFeatures ?? { features: 0 };
+  return createMaterialView(source, { features: features.features | NO_COLOR_OUTPUT });
+}
+
+export { createStandardNoColorMaterialView };
+//# sourceMappingURL=no-color-view.js.map
