@@ -169,9 +169,10 @@ export class MenuPanel {
     const rules = makeText(
       [
         "THE AT-BAT — Draw 8 cards and choose up to 5.",
-        "Pick Swing, Small Ball, or Take before you commit.",
-        "Small Ball moves runners before two outs; after that, hit away.",
-        "The preview shows outcome, runs, outs, and bases.",
+        "Pick Swing, Bunt, Take, or Steal before you commit.",
+        "Counts matter: 3-1 is hitter-friendly; 0-2 is danger.",
+        "Bunts move named runners before two outs; Steal sends the lead runner.",
+        "The preview shows outcome, runs, outs, runners, and bases.",
         "",
         "THE INNING — Beat the target before 3 outs or 4 at-bats.",
         "Discards swap unwanted cards without spending a play.",

@@ -4,7 +4,23 @@ import stadiumsJson from "../content/cards.stadiums.json";
 import pitchesJson from "../content/pitches.json";
 import combosJson from "../content/combos.json";
 import bossesJson from "../content/bosses.json";
-import { RARITY_LADDER, type BaseState, type BossCard, type ComboMeta, type EquipmentCard, type PitchCard, type PlayerCard, type Position, type Rarity, type StadiumCard, type Stat } from "./types";
+import {
+  RARITY_LADDER,
+  type BaseRunner,
+  type BaseState,
+  type BossCard,
+  type ComboMeta,
+  type CountState,
+  type EquipmentCard,
+  type PitchCard,
+  type PlayerCard,
+  type Position,
+  type Rarity,
+  type RunnerState,
+  type ScorecardEntry,
+  type StadiumCard,
+  type Stat,
+} from "./types";
 import { Random, type RandomSnapshot } from "../utils/Random";
 
 /**
@@ -21,6 +37,9 @@ export interface RunState {
   runs: number;
   outs: number;
   bases: BaseState;
+  runners?: RunnerState;
+  count?: CountState;
+  scorecard?: ScorecardEntry[];
   playsLeft: number;
   discardsLeft: number;
   cash: number;
@@ -38,6 +57,22 @@ export interface RunState {
 /** Price of promoting a card, keyed by the tier it is promoted TO. */
 const UPGRADE_COST: Partial<Record<Rarity, number>> = { Starter: 3, AllStar: 5, Legend: 8 };
 const STAT_ORDER: Stat[] = ["power", "contact", "speed", "discipline", "defense"];
+const EMPTY_RUNNERS: RunnerState = { first: null, second: null, third: null };
+const DEFAULT_COUNT: CountState = { balls: 0, strikes: 0 };
+const COUNT_POOL: CountState[] = [
+  { balls: 0, strikes: 0 },
+  { balls: 0, strikes: 0 },
+  { balls: 1, strikes: 0 },
+  { balls: 1, strikes: 0 },
+  { balls: 2, strikes: 0 },
+  { balls: 2, strikes: 1 },
+  { balls: 3, strikes: 1 },
+  { balls: 0, strikes: 1 },
+  { balls: 0, strikes: 2 },
+  { balls: 1, strikes: 2 },
+  { balls: 2, strikes: 2 },
+  { balls: 3, strikes: 2 },
+];
 
 export const RULES = {
   handSize: 8,
@@ -78,6 +113,9 @@ export class RunSystem {
   runs = 0;
   outs = 0;
   bases: BaseState = { first: false, second: false, third: false };
+  runners: RunnerState = { ...EMPTY_RUNNERS };
+  count: CountState = { ...DEFAULT_COUNT };
+  scorecard: ScorecardEntry[] = [];
   playsLeft: number = RULES.playsPerInning;
   discardsLeft: number = RULES.discardsPerInning;
   cash: number = RULES.startingCash;
@@ -113,9 +151,12 @@ export class RunSystem {
     this.runs = 0;
     this.outs = 0;
     this.bases = { first: false, second: false, third: false };
+    this.runners = { ...EMPTY_RUNNERS };
+    this.scorecard = [];
     this.playsLeft = RULES.playsPerInning;
     this.discardsLeft = RULES.discardsPerInning;
     this.pitch = this.rng.pick(this.pitches);
+    this.count = this.rollCount();
     this.boss = this.inning % RULES.bossEvery === 0 ? this.pickBoss() : null;
     this.umpireTarget = null;
     if (this.boss?.id === "umpire") {
@@ -137,11 +178,69 @@ export class RunSystem {
     return boss;
   }
 
-  recordPlay(runsScored: number, playCost = 1, outsMade = 0, bases: BaseState = this.bases): void {
+  private cloneRunner(runner: BaseRunner | null | undefined, fallbackId: string): BaseRunner | null {
+    if (!runner) return null;
+    return {
+      id: runner.id || fallbackId,
+      name: runner.name || "Runner",
+      speed: typeof runner.speed === "number" ? runner.speed : 5,
+    };
+  }
+
+  private cloneRunners(runners: RunnerState | undefined, bases: BaseState): RunnerState {
+    return {
+      first: bases.first ? this.cloneRunner(runners?.first, "legacy-first") ?? { id: "legacy-first", name: "Runner", speed: 5 } : null,
+      second: bases.second ? this.cloneRunner(runners?.second, "legacy-second") ?? { id: "legacy-second", name: "Runner", speed: 5 } : null,
+      third: bases.third ? this.cloneRunner(runners?.third, "legacy-third") ?? { id: "legacy-third", name: "Runner", speed: 5 } : null,
+    };
+  }
+
+  private cloneCount(count: CountState | undefined): CountState {
+    return {
+      balls: Math.max(0, Math.min(3, Math.trunc(count?.balls ?? DEFAULT_COUNT.balls))),
+      strikes: Math.max(0, Math.min(2, Math.trunc(count?.strikes ?? DEFAULT_COUNT.strikes))),
+    };
+  }
+
+  private cloneScorecardEntry(entry: ScorecardEntry | undefined, fallbackInning = this.inning): ScorecardEntry | null {
+    if (!entry) return null;
+    const summary = typeof entry.summary === "string" && entry.summary.length > 0 ? entry.summary : "At-bat";
+    const detail = typeof entry.detail === "string" && entry.detail.length > 0 ? entry.detail : summary;
+    return {
+      inning: Math.max(1, Math.trunc(entry.inning || fallbackInning)),
+      count: this.cloneCount(entry.count),
+      summary,
+      detail,
+      runs: Math.max(0, Math.trunc(entry.runs || 0)),
+      outs: Math.max(0, Math.trunc(entry.outs || 0)),
+    };
+  }
+
+  private cloneScorecard(entries: ScorecardEntry[] | undefined): ScorecardEntry[] {
+    if (!Array.isArray(entries)) return [];
+    return entries
+      .map((entry) => this.cloneScorecardEntry(entry))
+      .filter((entry): entry is ScorecardEntry => entry !== null)
+      .slice(0, 5);
+  }
+
+  private rollCount(): CountState {
+    return this.cloneCount(this.rng.pick(COUNT_POOL));
+  }
+
+  recordScorecard(entry: ScorecardEntry): void {
+    const normalized = this.cloneScorecardEntry(entry);
+    if (!normalized) return;
+    this.scorecard = [normalized, ...this.scorecard].slice(0, 5);
+  }
+
+  recordPlay(runsScored: number, playCost = 1, outsMade = 0, bases: BaseState = this.bases, runners?: RunnerState): void {
     this.runs += runsScored;
     this.outs = Math.min(RULES.outsPerInning, this.outs + outsMade);
     this.bases = { ...bases };
+    this.runners = this.cloneRunners(runners, this.bases);
     this.playsLeft = Math.max(0, this.playsLeft - playCost);
+    if (!this.inningWon && !this.inningLost) this.count = this.rollCount();
   }
 
   recordDiscard(): void {
@@ -241,6 +340,9 @@ export class RunSystem {
       runs: this.runs,
       outs: this.outs,
       bases: { ...this.bases },
+      runners: this.cloneRunners(this.runners, this.bases),
+      count: this.cloneCount(this.count),
+      scorecard: this.cloneScorecard(this.scorecard),
       playsLeft: this.playsLeft,
       discardsLeft: this.discardsLeft,
       cash: this.cash,
@@ -303,6 +405,9 @@ export class RunSystem {
       second: Boolean(state.bases?.second),
       third: Boolean(state.bases?.third),
     };
+    this.runners = this.cloneRunners(state.runners, this.bases);
+    this.count = this.cloneCount(state.count);
+    this.scorecard = this.cloneScorecard(state.scorecard);
     this.playsLeft = state.playsLeft;
     this.discardsLeft = state.discardsLeft;
     this.cash = state.cash;

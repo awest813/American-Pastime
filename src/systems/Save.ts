@@ -36,7 +36,7 @@ function isResumablePhase(phase: RunPhase): boolean {
 }
 
 function isBattingApproach(value: unknown): value is BattingApproach {
-  return value === "swing" || value === "small_ball" || value === "take";
+  return value === "swing" || value === "small_ball" || value === "take" || value === "steal";
 }
 
 /** Lightweight structural check so a corrupt or foreign blob never reaches the

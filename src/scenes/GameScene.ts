@@ -547,6 +547,8 @@ export class GameScene {
       target: this.run.target,
       outs: this.run.outs,
       bases: this.run.bases,
+      runners: this.run.runners,
+      count: this.run.count,
       approach: this.approach,
       boss: this.run.boss,
       umpireTarget: this.run.umpireTarget,
@@ -592,6 +594,28 @@ export class GameScene {
       .sort((a, b) => b.score - a.score || b.deltaQuality - a.deltaQuality || a.cardName.localeCompare(b.cardName))
       .slice(0, 3)
       .map(({ cardName, combos, deltaQuality }) => ({ cardName, combos, deltaQuality }));
+  }
+
+  private scorecardSummary(result: ScoreResult): string {
+    const suffix = result.runs > 0 ? ` +${result.runs}R` : result.outs > 0 ? ` ${result.outs} OUT` : " SAFE";
+    return `${result.outcome}${suffix}`;
+  }
+
+  private scorecardDetail(result: ScoreResult): string {
+    const primary = result.playByPlay[0] ?? result.outcome;
+    const runnerNote = result.playByPlay.find((line) => /scores|takes|moves|steals|thrown out/i.test(line));
+    return runnerNote && runnerNote !== primary ? `${primary} / ${runnerNote}` : primary;
+  }
+
+  private recordScorecard(result: ScoreResult): void {
+    this.run.recordScorecard({
+      inning: this.run.inning,
+      count: result.count,
+      summary: this.scorecardSummary(result),
+      detail: this.scorecardDetail(result),
+      runs: result.runs,
+      outs: result.outs,
+    });
   }
 
   private async playSelection(): Promise<void> {
@@ -646,7 +670,8 @@ export class GameScene {
     if (result.runs > 0) this.audio.play("runs");
     await this.countUpBoard(runsBefore, runsBefore + result.runs);
 
-    this.run.recordPlay(result.runs, result.playCost, result.outs, result.basesAfter);
+    this.recordScorecard(result);
+    this.run.recordPlay(result.runs, result.playCost, result.outs, result.basesAfter, result.runnersAfter);
 
     await this.tweens.delay(350);
     for (const card3d of played) card3d.dispose();
@@ -835,6 +860,10 @@ export class GameScene {
         }
         if (key.toLowerCase() === "e") {
           this.setApproach("take");
+          return;
+        }
+        if (key.toLowerCase() === "a") {
+          this.setApproach("steal");
           return;
         }
         if (key >= "1" && key <= "8") {

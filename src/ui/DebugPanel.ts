@@ -94,7 +94,7 @@ export class DebugPanel {
       `seed: ${run.rng.seed}`,
       `phase: ${run.phase}`,
       `inning ${run.inning}  target ${run.target}  runs ${run.runs}`,
-      `outs ${run.outs}/${RULES.outsPerInning}  bases ${run.bases.first ? "1" : "-"}${run.bases.second ? "2" : "-"}${run.bases.third ? "3" : "-"}`,
+      `outs ${run.outs}/${RULES.outsPerInning}  count ${run.count.balls}-${run.count.strikes}  bases ${run.bases.first ? "1" : "-"}${run.bases.second ? "2" : "-"}${run.bases.third ? "3" : "-"}`,
       `at-bats ${run.playsLeft}  discards ${run.discardsLeft}  cash $${run.cash}`,
       `deck: ${deckCount}`,
       `pitch: ${run.pitch.id}  stadium: ${run.stadium?.id ?? "-"}`,

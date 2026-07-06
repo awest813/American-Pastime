@@ -2,7 +2,7 @@ import { Control, Ellipse, Rectangle, TextBlock, type AdvancedDynamicTexture, ty
 import type { Button } from "@babylonjs/gui/2D";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { RULES, type RunSystem } from "../systems/RunSystem";
-import type { BaseState, BattingApproach, DetectedCombo, ScoreLine, ScoreResult } from "../systems/types";
+import type { BaseState, BattingApproach, CountState, DetectedCombo, RunnerState, ScoreLine, ScoreResult, ScorecardEntry } from "../systems/types";
 import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeText, setButtonBackground, topLeft, topRight } from "./kit";
 import { Tweens } from "../utils/Tweens";
 
@@ -22,8 +22,9 @@ export interface ComboSuggestion {
 const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const APPROACH_LABEL: Record<BattingApproach, string> = {
   swing: "Q: SWING",
-  small_ball: "W: SMALL BALL",
+  small_ball: "W: BUNT",
   take: "E: TAKE",
+  steal: "A: STEAL",
 };
 const PITCH_HINT: Record<string, string> = {
   fastball: "Power up. Contact down.",
@@ -95,8 +96,14 @@ export class GameHud {
   private baseTitle: TextBlock;
   private baseIcons: Record<keyof BaseState, Rectangle>;
   private baseIconLabels: Record<keyof BaseState, TextBlock>;
+  private baseRunnersText: TextBlock;
+  private scorecardTitle: TextBlock;
+  private scorecardText: TextBlock;
   private currentBases: BaseState = { first: false, second: false, third: false };
   private previewBases: BaseState | null = null;
+  private currentRunners: RunnerState = { first: null, second: null, third: null };
+  private previewRunners: RunnerState | null = null;
+  private currentCount: CountState = { balls: 0, strikes: 0 };
   private statusLine: TextBlock;
   private previewPanel: Rectangle;
   private previewTitle: TextBlock;
@@ -189,7 +196,7 @@ export class GameHud {
     pinPanelText(this.equipmentText, "270px", "170px");
     gearPanel.addControl(this.equipmentText);
 
-    this.basePanel = makePanel("160px", "92px");
+    this.basePanel = makePanel("236px", "220px");
     this.basePanel.background = "rgba(16, 20, 24, 0.74)";
     this.basePanel.thickness = 1;
     this.basePanel.isPointerBlocker = false;
@@ -218,6 +225,36 @@ export class GameHud {
       this.basePanel.addControl(this.baseIcons[key]);
       this.basePanel.addControl(this.baseIconLabels[key]);
     }
+    this.baseRunnersText = makeText("", 12, UI.cream);
+    this.baseRunnersText.fontFamily = UI.mono;
+    this.baseRunnersText.height = "34px";
+    this.baseRunnersText.top = "78px";
+    this.baseRunnersText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.baseRunnersText.textWrapping = true;
+    this.baseRunnersText.isPointerBlocker = false;
+    this.basePanel.addControl(this.baseRunnersText);
+
+    this.scorecardTitle = makeText("SCORECARD", 12, UI.green);
+    this.scorecardTitle.fontFamily = UI.mono;
+    this.scorecardTitle.fontWeight = "bold";
+    this.scorecardTitle.height = "18px";
+    this.scorecardTitle.top = "120px";
+    this.scorecardTitle.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.scorecardTitle.isPointerBlocker = false;
+    this.basePanel.addControl(this.scorecardTitle);
+    this.scorecardText = makeText("", 12, UI.cream);
+    this.scorecardText.fontFamily = UI.mono;
+    this.scorecardText.width = "212px";
+    this.scorecardText.height = "66px";
+    this.scorecardText.left = "12px";
+    this.scorecardText.top = "144px";
+    this.scorecardText.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    this.scorecardText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.scorecardText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    this.scorecardText.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.scorecardText.textWrapping = true;
+    this.scorecardText.isPointerBlocker = false;
+    this.basePanel.addControl(this.scorecardText);
 
     // Right-side score preview
     this.previewPanel = makePanel("380px", "500px");
@@ -295,11 +332,12 @@ export class GameHud {
     this.approachStack.height = "44px";
     this.root.addControl(this.approachStack);
     this.approachButtons = {
-      swing: makeButton("approachSwing", APPROACH_LABEL.swing, UI.gold, "142px", "38px"),
-      small_ball: makeButton("approachSmallBall", APPROACH_LABEL.small_ball, UI.cream, "184px", "38px"),
-      take: makeButton("approachTake", APPROACH_LABEL.take, UI.cream, "128px", "38px"),
+      swing: makeButton("approachSwing", APPROACH_LABEL.swing, UI.gold, "128px", "38px"),
+      small_ball: makeButton("approachSmallBall", APPROACH_LABEL.small_ball, UI.cream, "120px", "38px"),
+      take: makeButton("approachTake", APPROACH_LABEL.take, UI.cream, "112px", "38px"),
+      steal: makeButton("approachSteal", APPROACH_LABEL.steal, UI.cream, "120px", "38px"),
     };
-    for (const approach of ["swing", "small_ball", "take"] as const) {
+    for (const approach of ["swing", "small_ball", "take", "steal"] as const) {
       const button = this.approachButtons[approach];
       button.fontSize = 15;
       button.onPointerUpObservable.add(() => callbacks.onApproach(approach));
@@ -417,11 +455,38 @@ export class GameHud {
     return text;
   }
 
+  private compactRunnerName(name: string): string {
+    const cleaned = name.replace(/\s*'[^']+'\s*/g, " ").replace(/\s+/g, " ").trim();
+    const parts = cleaned.split(" ");
+    return parts.length > 1 ? parts[parts.length - 1] : cleaned;
+  }
+
+  private runnerSummary(runners: RunnerState): string {
+    const labels = [
+      runners.first ? `1B ${this.compactRunnerName(runners.first.name)}` : "",
+      runners.second ? `2B ${this.compactRunnerName(runners.second.name)}` : "",
+      runners.third ? `3B ${this.compactRunnerName(runners.third.name)}` : "",
+    ].filter(Boolean);
+    return labels.length > 0 ? labels.join(" · ") : "bases empty";
+  }
+
+  private countString(count: CountState): string {
+    return `${count.balls}-${count.strikes}`;
+  }
+
+  private scorecardLine(entry: ScorecardEntry): string {
+    const suffix = entry.runs > 0 ? ` +${entry.runs}R` : entry.outs > 0 ? ` ${entry.outs}O` : " SAFE";
+    return `${this.countString(entry.count)} ${truncate(entry.detail || entry.summary, 24)}${suffix}`;
+  }
+
   private updateBaseIcons(): void {
     const previewing = this.previewBases !== null;
     const bases = this.previewBases ?? this.currentBases;
+    const runners = this.previewRunners ?? this.currentRunners;
     this.baseTitle.text = previewing ? "AFTER PLAY" : "ON BASE";
     this.baseTitle.color = previewing ? UI.gold : UI.green;
+    this.baseRunnersText.text = this.runnerSummary(runners);
+    this.baseRunnersText.color = previewing ? UI.gold : UI.cream;
 
     for (const key of ["first", "second", "third"] as const) {
       const occupied = bases[key];
@@ -476,9 +541,27 @@ export class GameHud {
 
     const inningActive = run.phase === "inning";
     this.currentBases = { ...run.bases };
-    if (selectionCount === 0) this.previewBases = null;
+    this.currentCount = { ...run.count };
+    this.currentRunners = {
+      first: run.runners.first ? { ...run.runners.first } : null,
+      second: run.runners.second ? { ...run.runners.second } : null,
+      third: run.runners.third ? { ...run.runners.third } : null,
+    };
+    if (selectionCount === 0) {
+      this.previewBases = null;
+      this.previewRunners = null;
+    }
     this.previewPanel.isVisible = inningActive;
     this.basePanel.isVisible = inningActive;
+    this.scorecardTitle.text = `SCORECARD · ${run.runs}/${run.target}`;
+    this.scorecardTitle.color = run.inningWon ? UI.gold : UI.green;
+    this.scorecardText.text =
+      run.scorecard.length > 0
+        ? run.scorecard
+            .slice(0, 2)
+            .map((entry) => this.scorecardLine(entry))
+            .join("\n")
+        : "Awaiting first pitch.";
     this.approachStack.isVisible = inningActive;
     this.actionStack.isVisible = inningActive;
     this.updateBaseIcons();
@@ -498,9 +581,10 @@ export class GameHud {
   }
 
   updatePreview(result: ScoreResult | null, selectedCount: number, leadoffName: string | null, suggestions: ComboSuggestion[]): void {
-    this.previewTitle.text = `SCORE PREVIEW · ${selectedCount}/5`;
+    this.previewTitle.text = `SCORE PREVIEW · ${this.countString(result?.count ?? this.currentCount)} · ${selectedCount}/5`;
     if (!result || selectedCount === 0) {
       this.previewBases = null;
+      this.previewRunners = null;
       this.updateBaseIcons();
       this.leadoffText.text = "";
       this.previewComboTitle.text = suggestions.length > 0 ? "COMBO HUB · STARTERS" : "COMBO HUB";
@@ -514,16 +598,21 @@ export class GameHud {
           : "Build stat spikes, team sets, or position groups.";
       this.previewLabels.width = "336px";
       this.previewLabels.textWrapping = true;
-      this.previewLabels.text = "Pick cards to preview.\n\nQ Swing: bases\nW Small Ball: runners\nE Take: walks";
+      this.previewLabels.text = "Pick cards to preview.\n\nQ Swing: hit counts\nW Bunt: move runners\nE Take: walks\nA Steal: send runner";
       this.previewValues.text = "";
       this.previewTotal.text = "";
       return;
     }
     this.previewBases = { ...result.basesAfter };
+    this.previewRunners = {
+      first: result.runnersAfter.first ? { ...result.runnersAfter.first } : null,
+      second: result.runnersAfter.second ? { ...result.runnersAfter.second } : null,
+      third: result.runnersAfter.third ? { ...result.runnersAfter.third } : null,
+    };
     this.updateBaseIcons();
     this.previewLabels.width = "214px";
     this.previewLabels.textWrapping = false;
-    this.leadoffText.text = `Leadoff: ${truncate(leadoffName ?? "", 30)}`;
+    this.leadoffText.text = result.playByPlay[0] ? truncate(result.playByPlay[0], 42) : `Leadoff: ${truncate(leadoffName ?? "", 30)}`;
     const labels: string[] = [];
     const values: string[] = [];
     this.previewComboTitle.text = result.combos.length > 0 ? `COMBO HUB · ${result.combos.length}` : "COMBO HUB · 0";
