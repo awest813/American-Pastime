@@ -19,6 +19,9 @@ const TEAM_COLORS: Record<string, string> = {
 export const CARD_WIDTH = 1.5;
 export const CARD_HEIGHT = 2.1;
 
+const OUTFIELD_POSITIONS = new Set(["LF", "CF", "RF"]);
+const INFIELD_POSITIONS = new Set(["1B", "2B", "3B", "SS"]);
+
 /**
  * A 3D baseball card: a double-sided plane whose face is painted onto a
  * DynamicTexture in a vintage card-stock style. Selection and hover are
@@ -93,6 +96,8 @@ export class Card3D {
     ctx.font = "italic 26px Georgia";
     ctx.fillText(c.team, 256, 200);
 
+    this.drawComboTags(ctx, c, teamColor);
+
     // Stat rows
     const stats: Array<[string, number]> = [
       ["POWER", c.power],
@@ -101,19 +106,20 @@ export class Card3D {
       ["DISCIPLINE", c.discipline],
       ["DEFENSE", c.defense],
     ];
-    let y = 250;
+    let y = 262;
     for (const [label, value] of stats) {
+      const comboReady = this.statHasComboHook(c, label, value);
       ctx.textAlign = "left";
-      ctx.fillStyle = "#3b352b";
+      ctx.fillStyle = comboReady ? "#8c6d1f" : "#3b352b";
       ctx.font = "bold 28px 'Courier New', monospace";
       ctx.fillText(label, 48, y + 24);
       // Stat pips
       for (let i = 0; i < 9; i++) {
-        ctx.fillStyle = i < value ? teamColor : "#d8cfba";
+        ctx.fillStyle = i < value ? (comboReady && i >= value - 1 ? "#d4a017" : teamColor) : "#d8cfba";
         ctx.fillRect(240 + i * 22, y + 4, 16, 22);
       }
       ctx.textAlign = "right";
-      ctx.fillStyle = "#3b352b";
+      ctx.fillStyle = comboReady ? "#8c6d1f" : "#3b352b";
       ctx.fillText(String(value), 472, y + 24);
       y += 56;
     }
@@ -141,6 +147,78 @@ export class Card3D {
     ctx.fillText(`— ${rarityName}${stars} —`, 256, 692);
 
     tex.update();
+  }
+
+  private comboTags(c: PlayerCard): string[] {
+    const tags: string[] = [];
+    if (c.contact >= 7) tags.push("CON 7+");
+    if (c.power >= 8) tags.push("POWER BAT");
+    else if (c.era === "Modern" && c.power >= 6) tags.push("MOD PWR");
+    if (c.speed >= 7) tags.push("SPD 7+");
+    if (c.discipline >= 7 || c.contact >= 8) tags.push("SETTER");
+    if (c.side !== "R") tags.push("L/S BAT");
+    if (c.position === "P" || c.position === "C") tags.push("BATTERY");
+    else if (OUTFIELD_POSITIONS.has(c.position)) tags.push("OUTFIELD");
+    else if (INFIELD_POSITIONS.has(c.position)) tags.push("INFIELD");
+    if (c.era === "Vintage") tags.push("VINTAGE");
+    return [...new Set(tags)].slice(0, 3);
+  }
+
+  private drawComboTags(ctx: CanvasRenderingContext2D, card: PlayerCard, teamColor: string): void {
+    const tags = this.comboTags(card);
+    if (tags.length === 0) return;
+
+    ctx.font = "bold 17px 'Courier New', monospace";
+    const widths = tags.map((tag) => Math.min(136, Math.max(76, ctx.measureText(tag).width + 22)));
+    const gap = 8;
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0) + gap * (widths.length - 1);
+    let x = 256 - totalWidth / 2;
+
+    for (const [i, tag] of tags.entries()) {
+      const width = widths[i];
+      this.roundRect(ctx, x, 216, width, 30, 10);
+      ctx.fillStyle = "#efe3c5";
+      ctx.fill();
+      ctx.strokeStyle = teamColor;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = "#3b352b";
+      ctx.textAlign = "center";
+      ctx.fillText(tag, x + width / 2, 237);
+      x += width + gap;
+    }
+  }
+
+  private statHasComboHook(card: PlayerCard, label: string, value: number): boolean {
+    switch (label) {
+      case "POWER":
+        return value >= 8 || (card.era === "Modern" && value >= 6);
+      case "CONTACT":
+        return value >= 7;
+      case "SPEED":
+        return value >= 7;
+      case "DISCIPLINE":
+        return value >= 7;
+      case "DEFENSE":
+        return card.traitId === "iron_glove";
+      default:
+        return false;
+    }
+  }
+
+  private roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    ctx.lineTo(x + r, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
   }
 
   private wrapText(

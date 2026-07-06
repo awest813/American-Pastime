@@ -17,11 +17,11 @@ import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
 import { clearSave, createSaveData, decodeRunCode, encodeRunCode, isRunCode, loadSave, persistSave, summarize, type SaveData } from "../systems/Save";
 import { SPEED_SCALE, settings } from "../systems/Settings";
-import type { BattingApproach, PlayerCard, ScoreResult } from "../systems/types";
+import type { BattingApproach, DetectedCombo, PlayerCard, ScoreResult } from "../systems/types";
 import { ComboBook } from "../ui/ComboBook";
 import { DebugPanel } from "../ui/DebugPanel";
 import { EndPanel } from "../ui/EndPanel";
-import { GameHud } from "../ui/GameHud";
+import { GameHud, type ComboSuggestion } from "../ui/GameHud";
 import { MenuPanel } from "../ui/MenuPanel";
 import { PausePanel } from "../ui/PausePanel";
 import { SettingsPanel } from "../ui/SettingsPanel";
@@ -425,6 +425,7 @@ export class GameScene {
     this.comboBook.setVisible(false);
     this.end.setVisible(false);
     this.shop.setVisible(false);
+    this.debug.setVisible(false);
     this.hud.setVisible(false);
     this.clearHand(false);
     this.audio.stopAmbience();
@@ -435,6 +436,7 @@ export class GameScene {
   }
 
   private endRun(victory: boolean): void {
+    this.debug.setVisible(false);
     this.hud.setVisible(false);
     this.clearHand(false); // leftover cards shouldn't linger behind the end panel
     clearSave(); // the run is over; nothing left to resume
@@ -557,6 +559,41 @@ export class GameScene {
     return this.score.evaluate(this.selection.map((c) => c.card), this.scoreContext());
   }
 
+  private comboKey(combo: DetectedCombo): string {
+    return `${combo.id}:${combo.kind}:${combo.value}:${combo.detail}`;
+  }
+
+  private comboSuggestions(result: ScoreResult | null): ComboSuggestion[] {
+    if (this.selection.length >= RULES.maxCardsPerPlay) return [];
+
+    const selectedCards = this.selection.map((c) => c.card);
+    const selectedSet = new Set(this.selection);
+    const currentCombos = new Set((result?.combos ?? []).map((combo) => this.comboKey(combo)));
+    const currentQuality = result?.quality ?? 0;
+    const currentRuns = result?.runs ?? 0;
+    const ctx = this.scoreContext();
+
+    return this.hand
+      .filter((card3d) => !selectedSet.has(card3d))
+      .map((card3d) => {
+        const next = this.score.evaluate([...selectedCards, card3d.card], ctx);
+        const newCombos = next.combos.filter((combo) => !currentCombos.has(this.comboKey(combo)));
+        if (newCombos.length === 0) return null;
+        const deltaQuality = Math.max(0, next.quality - currentQuality);
+        const deltaRuns = Math.max(0, next.runs - currentRuns);
+        return {
+          cardName: card3d.card.name,
+          combos: newCombos.map((combo) => combo.name),
+          deltaQuality,
+          score: newCombos.length * 1000 + deltaRuns * 100 + deltaQuality,
+        };
+      })
+      .filter((suggestion): suggestion is ComboSuggestion & { score: number } => suggestion !== null)
+      .sort((a, b) => b.score - a.score || b.deltaQuality - a.deltaQuality || a.cardName.localeCompare(b.cardName))
+      .slice(0, 3)
+      .map(({ cardName, combos, deltaQuality }) => ({ cardName, combos, deltaQuality }));
+  }
+
   private async playSelection(): Promise<void> {
     if (this.busy || this.run.phase !== "inning" || this.run.playsLeft <= 0 || this.selection.length === 0) return;
     this.busy = true;
@@ -674,6 +711,7 @@ export class GameScene {
       this.endRun(true);
     } else {
       this.clearHand();
+      this.debug.setVisible(false);
       this.shop.refresh(this.run);
       this.shop.setVisible(true);
       this.refreshHud();
@@ -696,7 +734,8 @@ export class GameScene {
   }
 
   private refreshPreview(): void {
-    this.hud.updatePreview(this.previewResult(), this.selection.length, this.selection[0]?.card.name ?? null);
+    const result = this.previewResult();
+    this.hud.updatePreview(result, this.selection.length, this.selection[0]?.card.name ?? null, this.comboSuggestions(result));
     this.hud.setSelectionBadges(this.selection.map((c) => c.mesh));
     this.refreshHud();
   }

@@ -80,6 +80,10 @@ export class DebugPanel {
     this.root.isVisible = !this.root.isVisible;
   }
 
+  setVisible(visible: boolean): void {
+    this.root.isVisible = visible;
+  }
+
   get visible(): boolean {
     return this.root.isVisible;
   }

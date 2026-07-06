@@ -2,7 +2,7 @@ import { Control, Ellipse, Rectangle, TextBlock, type AdvancedDynamicTexture, ty
 import type { Button } from "@babylonjs/gui/2D";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { RULES, type RunSystem } from "../systems/RunSystem";
-import type { BattingApproach, DetectedCombo, ScoreLine, ScoreResult } from "../systems/types";
+import type { BaseState, BattingApproach, DetectedCombo, ScoreLine, ScoreResult } from "../systems/types";
 import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeText, setButtonBackground, topLeft, topRight } from "./kit";
 import { Tweens } from "../utils/Tweens";
 
@@ -11,6 +11,12 @@ export interface HudCallbacks {
   onDiscard: () => void;
   onComboBook: () => void;
   onApproach: (approach: BattingApproach) => void;
+}
+
+export interface ComboSuggestion {
+  cardName: string;
+  combos: string[];
+  deltaQuality: number;
 }
 
 const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
@@ -33,6 +39,18 @@ const STADIUM_HINT: Record<string, string> = {
   muddy_diamond: "+2 Power, -1 Speed.",
   friendly_confines: "+3 base score every play.",
 };
+const COMBO_SHORT: Record<string, string> = {
+  "Contact Hit": "Contact",
+  "Power Swing": "Power",
+  "Speed Steal": "Speed",
+  "Team Chemistry": "Team",
+  "Full Outfield": "Outfield",
+  "Around the Horn": "Infield",
+  Battery: "Battery",
+  "Lefty Advantage": "Lefty",
+  "Veteran Presence": "Veteran",
+  "Modern Sluggers": "Modern",
+};
 const comboReward = (combo: DetectedCombo): string => (combo.kind === "flat" ? `+${combo.value} base` : `x${combo.value}`);
 
 const compactPreviewLines = (result: ScoreResult): ScoreLine[] => {
@@ -40,6 +58,24 @@ const compactPreviewLines = (result: ScoreResult): ScoreLine[] => {
   const withoutCombos = result.lines.filter((line) => ![...comboLines].some((name) => line.label.startsWith(name)));
   if (withoutCombos.length <= 8) return withoutCombos;
   return [...withoutCombos.slice(0, 5), ...withoutCombos.slice(-3)];
+};
+
+const compactCardName = (name: string): string => {
+  const cleaned = name.replace(/\s*'[^']+'\s*/g, " ").replace(/\s+/g, " ").trim();
+  const parts = cleaned.split(" ");
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]}` : cleaned;
+};
+
+const formatSuggestion = (suggestion: ComboSuggestion, selectedCount: number): string => {
+  const prefix = selectedCount === 0 ? "" : "+ ";
+  const name = truncate(compactCardName(suggestion.cardName), 13);
+  const comboList = suggestion.combos
+    .slice(0, 2)
+    .map((combo) => COMBO_SHORT[combo] ?? combo)
+    .join("+");
+  const extra = suggestion.combos.length > 2 ? ` +${suggestion.combos.length - 2}` : "";
+  const lift = suggestion.deltaQuality > 0 ? ` +${suggestion.deltaQuality}q` : "";
+  return `${prefix}${name}: ${truncate(comboList + extra, 18)}${lift}`;
 };
 
 /**
@@ -55,6 +91,12 @@ export class GameHud {
   private bossText: TextBlock;
   private gearPanel: Rectangle;
   private equipmentText: TextBlock;
+  private basePanel: Rectangle;
+  private baseTitle: TextBlock;
+  private baseIcons: Record<keyof BaseState, Rectangle>;
+  private baseIconLabels: Record<keyof BaseState, TextBlock>;
+  private currentBases: BaseState = { first: false, second: false, third: false };
+  private previewBases: BaseState | null = null;
   private statusLine: TextBlock;
   private previewPanel: Rectangle;
   private previewTitle: TextBlock;
@@ -147,6 +189,36 @@ export class GameHud {
     pinPanelText(this.equipmentText, "270px", "170px");
     gearPanel.addControl(this.equipmentText);
 
+    this.basePanel = makePanel("160px", "92px");
+    this.basePanel.background = "rgba(16, 20, 24, 0.74)";
+    this.basePanel.thickness = 1;
+    this.basePanel.isPointerBlocker = false;
+    this.basePanel.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.basePanel.top = "190px";
+    this.root.addControl(this.basePanel);
+    this.baseTitle = makeText("ON BASE", 13, UI.green);
+    this.baseTitle.fontFamily = UI.mono;
+    this.baseTitle.fontWeight = "bold";
+    this.baseTitle.height = "20px";
+    this.baseTitle.top = "8px";
+    this.baseTitle.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.baseTitle.isPointerBlocker = false;
+    this.basePanel.addControl(this.baseTitle);
+    this.baseIcons = {
+      first: this.makeBaseIcon("baseIconFirst", 34, 18),
+      second: this.makeBaseIcon("baseIconSecond", 0, -10),
+      third: this.makeBaseIcon("baseIconThird", -34, 18),
+    };
+    this.baseIconLabels = {
+      first: this.makeBaseLabel("baseIconFirstLabel", "1B", 34, 18),
+      second: this.makeBaseLabel("baseIconSecondLabel", "2B", 0, -10),
+      third: this.makeBaseLabel("baseIconThirdLabel", "3B", -34, 18),
+    };
+    for (const key of ["first", "second", "third"] as const) {
+      this.basePanel.addControl(this.baseIcons[key]);
+      this.basePanel.addControl(this.baseIconLabels[key]);
+    }
+
     // Right-side score preview
     this.previewPanel = makePanel("380px", "500px");
     topRight(this.previewPanel);
@@ -210,14 +282,12 @@ export class GameHud {
     this.previewTotal.paddingTop = "6px";
     previewStack.addControl(this.previewTotal);
 
-    // Combo reference lives right under the preview it explains
-    const comboBookButton = makeButton("comboBookButton", "COMBO BOOK (H)", UI.cream, "200px", "40px");
-    comboBookButton.fontSize = 16;
-    topRight(comboBookButton);
-    comboBookButton.left = "-94px";
-    comboBookButton.top = "590px";
+    // Combo reference lives inside the preview panel so it never covers hand cards.
+    const comboBookButton = makeButton("comboBookButton", "COMBO BOOK (H)", UI.cream, "190px", "38px");
+    comboBookButton.fontSize = 15;
+    comboBookButton.paddingTop = "8px";
     comboBookButton.onPointerUpObservable.add(() => callbacks.onComboBook());
-    this.root.addControl(comboBookButton);
+    previewStack.addControl(comboBookButton);
 
     this.approachStack = makeStack(false);
     bottomCenter(this.approachStack);
@@ -319,6 +389,52 @@ export class GameHud {
     if (!visible) this.setSelectionBadges([]);
   }
 
+  private makeBaseIcon(name: string, left: number, top: number): Rectangle {
+    const icon = new Rectangle(name);
+    icon.width = "30px";
+    icon.height = "30px";
+    icon.left = `${left}px`;
+    icon.top = `${top}px`;
+    icon.rotation = Math.PI / 4;
+    icon.background = "rgba(244, 236, 216, 0.12)";
+    icon.color = UI.muted;
+    icon.thickness = 2;
+    icon.isPointerBlocker = false;
+    return icon;
+  }
+
+  private makeBaseLabel(name: string, label: string, left: number, top: number): TextBlock {
+    const text = new TextBlock(name, label);
+    text.width = "34px";
+    text.height = "24px";
+    text.left = `${left}px`;
+    text.top = `${top}px`;
+    text.color = UI.muted;
+    text.fontFamily = UI.mono;
+    text.fontSize = 13;
+    text.fontWeight = "bold";
+    text.isPointerBlocker = false;
+    return text;
+  }
+
+  private updateBaseIcons(): void {
+    const previewing = this.previewBases !== null;
+    const bases = this.previewBases ?? this.currentBases;
+    this.baseTitle.text = previewing ? "AFTER PLAY" : "ON BASE";
+    this.baseTitle.color = previewing ? UI.gold : UI.green;
+
+    for (const key of ["first", "second", "third"] as const) {
+      const occupied = bases[key];
+      const newlyOccupied = previewing && occupied && !this.currentBases[key];
+      const vacated = previewing && !occupied && this.currentBases[key];
+      this.baseIcons[key].background = occupied ? (newlyOccupied ? UI.green : UI.gold) : vacated ? "rgba(224, 122, 106, 0.22)" : "rgba(244, 236, 216, 0.12)";
+      this.baseIcons[key].color = occupied ? UI.cream : vacated ? UI.red : UI.muted;
+      this.baseIcons[key].alpha = occupied || vacated ? 1 : 0.72;
+      this.baseIconLabels[key].color = occupied ? UI.ink : vacated ? UI.red : UI.muted;
+      this.baseIconLabels[key].alpha = occupied || vacated ? 1 : 0.82;
+    }
+  }
+
   /** Pin numbered badges to the selected cards in click order; hide the rest.
    *  Called on every selection change. */
   setSelectionBadges(meshes: AbstractMesh[]): void {
@@ -356,13 +472,16 @@ export class GameHud {
             .map((e) => truncate(e.name, 18))
             .join(" · ");
     this.equipmentText.text = `STADIUM: ${run.stadium?.name ?? "-"}\n${stadiumHint}\n\nGEAR: ${gearText}`;
-    const bases = [run.bases.first ? "1B" : "", run.bases.second ? "2B" : "", run.bases.third ? "3B" : ""].filter(Boolean).join("+") || "empty";
-    this.statusLine.text = `Outs ${run.outs}/${RULES.outsPerInning} · Bases ${bases} · Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
+    this.statusLine.text = `Outs ${run.outs}/${RULES.outsPerInning} · Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
 
     const inningActive = run.phase === "inning";
+    this.currentBases = { ...run.bases };
+    if (selectionCount === 0) this.previewBases = null;
     this.previewPanel.isVisible = inningActive;
+    this.basePanel.isVisible = inningActive;
     this.approachStack.isVisible = inningActive;
     this.actionStack.isVisible = inningActive;
+    this.updateBaseIcons();
     for (const key of Object.keys(this.approachButtons) as BattingApproach[]) {
       const button = this.approachButtons[key];
       setButtonBackground(button, key === approach ? UI.gold : UI.cream);
@@ -378,13 +497,21 @@ export class GameHud {
     );
   }
 
-  updatePreview(result: ScoreResult | null, selectedCount: number, leadoffName: string | null): void {
+  updatePreview(result: ScoreResult | null, selectedCount: number, leadoffName: string | null, suggestions: ComboSuggestion[]): void {
     this.previewTitle.text = `SCORE PREVIEW · ${selectedCount}/5`;
     if (!result || selectedCount === 0) {
+      this.previewBases = null;
+      this.updateBaseIcons();
       this.leadoffText.text = "";
-      this.previewComboTitle.text = "COMBO WATCH";
-      this.previewComboText.color = UI.muted;
-      this.previewComboText.text = "Build stat spikes, team sets, or position groups.";
+      this.previewComboTitle.text = suggestions.length > 0 ? "COMBO HUB · STARTERS" : "COMBO HUB";
+      this.previewComboText.color = suggestions.length > 0 ? UI.gold : UI.muted;
+      this.previewComboText.text =
+        suggestions.length > 0
+          ? suggestions
+              .slice(0, 3)
+              .map((suggestion) => formatSuggestion(suggestion, selectedCount))
+              .join("\n")
+          : "Build stat spikes, team sets, or position groups.";
       this.previewLabels.width = "336px";
       this.previewLabels.textWrapping = true;
       this.previewLabels.text = "Pick cards to preview.\n\nQ Swing: bases\nW Small Ball: runners\nE Take: walks";
@@ -392,21 +519,30 @@ export class GameHud {
       this.previewTotal.text = "";
       return;
     }
+    this.previewBases = { ...result.basesAfter };
+    this.updateBaseIcons();
     this.previewLabels.width = "214px";
     this.previewLabels.textWrapping = false;
     this.leadoffText.text = `Leadoff: ${truncate(leadoffName ?? "", 30)}`;
     const labels: string[] = [];
     const values: string[] = [];
-    this.previewComboTitle.text = result.combos.length > 0 ? `COMBOS · ${result.combos.length}` : "COMBOS · 0";
-    this.previewComboText.color = result.combos.length > 0 ? UI.gold : UI.muted;
+    this.previewComboTitle.text = result.combos.length > 0 ? `COMBO HUB · ${result.combos.length}` : "COMBO HUB · 0";
+    this.previewComboText.color = result.combos.length > 0 || suggestions.length > 0 ? UI.gold : UI.muted;
     if (result.combos.length === 0) {
-      this.previewComboText.text = "No combo yet. Add a matching team, position chain, or stat spike.";
+      this.previewComboText.text =
+        suggestions.length > 0
+          ? suggestions
+              .slice(0, 3)
+              .map((suggestion) => formatSuggestion(suggestion, selectedCount))
+              .join("\n")
+          : "No combo yet. Add a matching team, position chain, or stat spike.";
     } else {
       const shown =
         result.combos.length === 1
           ? [`${result.combos[0].name}  ${comboReward(result.combos[0])}`, `  ${truncate(result.combos[0].detail, 34)}`]
           : result.combos.slice(0, 3).map((combo) => `${combo.name}  ${comboReward(combo)}`);
       if (result.combos.length > 3) shown.push(`+${result.combos.length - 3} more combo${result.combos.length - 3 === 1 ? "" : "s"}`);
+      if (suggestions.length > 0 && shown.length < 4) shown.push(formatSuggestion(suggestions[0], selectedCount));
       this.previewComboText.text = shown.join("\n");
     }
     for (const line of compactPreviewLines(result)) {

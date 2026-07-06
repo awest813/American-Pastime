@@ -48,7 +48,7 @@ export class ShopPanel {
     this.root.thickness = 0;
     adt.addControl(this.root);
 
-    const panel = makePanel("900px", "740px");
+    const panel = makePanel("900px", "830px");
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -85,13 +85,13 @@ export class ShopPanel {
     stack.addControl(upgradeTitle);
 
     this.upgradeRow = makeStack(false);
-    this.upgradeRow.height = "170px";
+    this.upgradeRow.height = "186px";
     this.upgradeRow.paddingTop = "8px";
     stack.addControl(this.upgradeRow);
 
     const buttonRow = makeStack(false);
-    buttonRow.paddingTop = "16px";
-    buttonRow.height = "78px";
+    buttonRow.paddingTop = "10px";
+    buttonRow.height = "68px";
     stack.addControl(buttonRow);
     this.rerollButton = makeButton("rerollButton", "REROLL  $1", UI.cream, "200px");
     this.rerollButton.onPointerUpObservable.add(() => this.callbacks.onReroll());
@@ -140,7 +140,7 @@ export class ShopPanel {
     const cost = run.upgradeCost(card) ?? 0;
     const gains = run.upgradeStatTargets(card).map((s) => `+1 ${STAT_SHORT[s]}`).join(" · ");
 
-    const panel = makePanel("266px", "160px");
+    const panel = makePanel("266px", "176px");
     panel.background = UI.field;
     panel.paddingLeft = "8px";
     panel.paddingRight = "8px";
