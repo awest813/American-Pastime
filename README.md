@@ -17,7 +17,8 @@ npm run dev        # opens on http://localhost:8088
 - **Enter** on the title screen starts a run with the current seed.
 - **H** opens the Combo Book (all ten combos + the run formula), **ESC** pauses (resume or abandon to the menu), **M** mutes.
 - Choose an **approach** before the at-bat: **Swing** (`Q`) chases extra bases, **Small Ball** (`W`) moves runners safely before two outs, and **Take** (`E`) leans on Discipline for walks.
-- **AT-BAT** commits the hand; the score preview on the right shows the exact combos, expected outcome, runs, outs, and bases before you commit.
+- **AT-BAT** commits the hand; the score preview on the right shows the exact combos, expected outcome, runs, outs, and bases before you commit. Its **quality meter** spells out the run formula in colored chips — base (cream) + bonuses (gold) × multipliers (red) ÷ pitch difficulty — over a threshold bar marking the chosen approach's outcome ladder (1B/2B/3B/HR when swinging; BB, SAC, SB rungs for the other approaches) and how much quality the next rung needs. On commit, each card pops its contribution as it lands, the quality tally counts up, then combos slam in one by one.
+- The **situation panel** under the scoreboard is a broadcast-style score bug: base diamond with runner names, ball-strike count, out pips (●●○), and the inning scorecard.
 - **DISCARD** dumps the selection and redraws (3 per inning).
 - Beat the target before 3 outs or 4 at-bats → collect cash ($3 + $1 per unused at-bat) → shop → next inning. Nine innings wins the run.
 - **Card upgrades**: each shop visit offers 3 deck cards for promotion up the `Rookie → Starter → All-Star → Legend` ladder ($3/$5/$8). Each tier adds +1 to the card's two best upgradeable stats; All-Stars add +2 base when played and Legends +5 ("Star power" in the preview). Upgraded cards get silver/gold frames and ★s. Upgrades are per-run copies — the base collection in the binder never changes.

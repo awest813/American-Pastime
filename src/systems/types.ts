@@ -114,6 +114,18 @@ export interface ScoreLine {
   value: string;
 }
 
+/** A quality threshold the current approach can reach (ascending). */
+export interface QualityTier {
+  label: string;
+  quality: number;
+}
+
+/** One played card's contribution to the base score, in play order. */
+export interface CardContribution {
+  name: string;
+  value: number;
+}
+
 export interface ScoreResult {
   base: number;
   flatBonus: number;
@@ -135,4 +147,9 @@ export interface ScoreResult {
   playCost: number;
   combos: DetectedCombo[];
   lines: ScoreLine[];
+  /** Per-card base contributions (effective Contact+Power+Speed), in play order. */
+  perCard: CardContribution[];
+  /** Quality thresholds for the chosen approach, ascending; empty when no
+   *  outcome ladder applies (e.g. steal with nobody on base). */
+  tiers: QualityTier[];
 }

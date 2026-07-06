@@ -640,9 +640,17 @@ export class GameScene {
         });
         await this.tweens.moveTo(card3d.mesh, slot, 340);
         this.effects.dustPuff(slot.add(new Vector3(0, 0.15, 0)));
+        // Each card's base contribution pops off it as it lands, pitch rising.
+        const contribution = result.perCard[i];
+        if (contribution) {
+          this.audio.play("tick", i);
+          this.hud.showScorePop(card3d.mesh, `+${contribution.value}`);
+        }
       });
     });
     await Promise.all(flights);
+    await this.tweens.delay(180); // let the last score pop breathe
+    await this.hud.showQualityTally(result.quality);
 
     const shownCombos = result.combos.slice(0, 4);
     for (const [i, combo] of shownCombos.entries()) {
