@@ -2,7 +2,7 @@ import { Control, Ellipse, Rectangle, TextBlock, type AdvancedDynamicTexture, ty
 import type { Button } from "@babylonjs/gui/2D";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { RULES, type RunSystem } from "../systems/RunSystem";
-import type { BattingApproach, ScoreResult } from "../systems/types";
+import type { BattingApproach, DetectedCombo, ScoreLine, ScoreResult } from "../systems/types";
 import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeText, setButtonBackground, topLeft, topRight } from "./kit";
 import { Tweens } from "../utils/Tweens";
 
@@ -33,6 +33,14 @@ const STADIUM_HINT: Record<string, string> = {
   muddy_diamond: "+2 Power, -1 Speed.",
   friendly_confines: "+3 base score every play.",
 };
+const comboReward = (combo: DetectedCombo): string => (combo.kind === "flat" ? `+${combo.value} base` : `x${combo.value}`);
+
+const compactPreviewLines = (result: ScoreResult): ScoreLine[] => {
+  const comboLines = new Set(result.combos.map((combo) => combo.name));
+  const withoutCombos = result.lines.filter((line) => ![...comboLines].some((name) => line.label.startsWith(name)));
+  if (withoutCombos.length <= 8) return withoutCombos;
+  return [...withoutCombos.slice(0, 5), ...withoutCombos.slice(-3)];
+};
 
 /**
  * The in-inning HUD. The 3D scoreboard owns the score itself; the HUD covers
@@ -51,6 +59,9 @@ export class GameHud {
   private previewPanel: Rectangle;
   private previewTitle: TextBlock;
   private leadoffText: TextBlock;
+  private previewComboPanel: Rectangle;
+  private previewComboTitle: TextBlock;
+  private previewComboText: TextBlock;
   private previewLabels: TextBlock;
   private previewValues: TextBlock;
   private previewTotal: TextBlock;
@@ -61,6 +72,11 @@ export class GameHud {
   private discardButton: Button;
   private popupText: TextBlock;
   private popupGeneration = 0;
+  private comboPopupPanel: Rectangle;
+  private comboPopupEyebrow: TextBlock;
+  private comboPopupTitle: TextBlock;
+  private comboPopupDetail: TextBlock;
+  private comboPopupGeneration = 0;
   /** Numbered badges that mark the batting order of the current selection. */
   private orderBadges: Ellipse[] = [];
 
@@ -80,6 +96,18 @@ export class GameHud {
       block.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
       block.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
       block.left = "14px";
+      block.top = top;
+      block.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      block.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    };
+    const pinTopText = (block: TextBlock, width: string, height: string, left: string, top: string) => {
+      block.textWrapping = true;
+      block.resizeToFit = false;
+      block.width = width;
+      block.height = height;
+      block.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      block.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      block.left = left;
       block.top = top;
       block.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
       block.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
@@ -109,21 +137,21 @@ export class GameHud {
     this.bossPanel.addControl(this.bossText);
 
     // Stadium + equipment, under the pitch card (drops below the boss card when one is up)
-    const gearPanel = makePanel("300px", "170px");
+    const gearPanel = makePanel("300px", "190px");
     topLeft(gearPanel);
     gearPanel.left = "32px";
     gearPanel.top = "158px";
     this.root.addControl(gearPanel);
     this.gearPanel = gearPanel;
     this.equipmentText = makeText("", 16);
-    pinPanelText(this.equipmentText, "270px", "150px");
+    pinPanelText(this.equipmentText, "270px", "170px");
     gearPanel.addControl(this.equipmentText);
 
     // Right-side score preview
-    this.previewPanel = makePanel("360px", "430px");
+    this.previewPanel = makePanel("380px", "500px");
     topRight(this.previewPanel);
     this.previewPanel.left = "-14px";
-    this.previewPanel.top = "110px";
+    this.previewPanel.top = "82px";
     this.root.addControl(this.previewPanel);
     const previewStack = makeStack();
     previewStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
@@ -136,26 +164,41 @@ export class GameHud {
     this.leadoffText.paddingTop = "4px";
     previewStack.addControl(this.leadoffText);
 
+    this.previewComboPanel = makePanel("356px", "132px");
+    this.previewComboPanel.background = "rgba(30, 40, 32, 0.78)";
+    this.previewComboPanel.thickness = 1;
+    this.previewComboPanel.paddingTop = "6px";
+    previewStack.addControl(this.previewComboPanel);
+    this.previewComboTitle = makeText("", 15, UI.green);
+    this.previewComboTitle.fontFamily = UI.mono;
+    this.previewComboTitle.fontWeight = "bold";
+    pinTopText(this.previewComboTitle, "332px", "22px", "12px", "8px");
+    this.previewComboPanel.addControl(this.previewComboTitle);
+    this.previewComboText = makeText("", 14, UI.cream);
+    this.previewComboText.lineSpacing = "2px";
+    pinTopText(this.previewComboText, "332px", "92px", "12px", "34px");
+    this.previewComboPanel.addControl(this.previewComboText);
+
     // Two synced columns: labels clip left, values align right, lines match 1:1.
     const columns = new Rectangle();
-    columns.width = "336px";
-    columns.height = "290px";
+    columns.width = "356px";
+    columns.height = "158px";
     columns.thickness = 0;
     previewStack.addControl(columns);
-    this.previewLabels = makeText("", 16);
+    this.previewLabels = makeText("", 15);
     this.previewLabels.textWrapping = false;
     this.previewLabels.resizeToFit = false;
-    this.previewLabels.width = "224px";
-    this.previewLabels.height = "290px";
+    this.previewLabels.width = "214px";
+    this.previewLabels.height = "158px";
     this.previewLabels.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     this.previewLabels.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.previewLabels.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     columns.addControl(this.previewLabels);
-    this.previewValues = makeText("", 16, UI.gold);
+    this.previewValues = makeText("", 15, UI.gold);
     this.previewValues.textWrapping = false;
     this.previewValues.resizeToFit = false;
-    this.previewValues.width = "108px";
-    this.previewValues.height = "290px";
+    this.previewValues.width = "136px";
+    this.previewValues.height = "158px";
     this.previewValues.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
     this.previewValues.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.previewValues.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
@@ -164,6 +207,7 @@ export class GameHud {
     this.previewTotal = makeText("", 30, UI.green);
     this.previewTotal.fontFamily = UI.mono;
     this.previewTotal.fontWeight = "bold";
+    this.previewTotal.paddingTop = "6px";
     previewStack.addControl(this.previewTotal);
 
     // Combo reference lives right under the preview it explains
@@ -171,7 +215,7 @@ export class GameHud {
     comboBookButton.fontSize = 16;
     topRight(comboBookButton);
     comboBookButton.left = "-94px";
-    comboBookButton.top = "552px";
+    comboBookButton.top = "590px";
     comboBookButton.onPointerUpObservable.add(() => callbacks.onComboBook());
     this.root.addControl(comboBookButton);
 
@@ -216,7 +260,29 @@ export class GameHud {
     this.statusLine.top = "-18px";
     this.root.addControl(this.statusLine);
 
-    // Big center popup for combos / runs
+    this.comboPopupPanel = makePanel("560px", "126px");
+    this.comboPopupPanel.background = "rgba(16, 20, 24, 0.96)";
+    this.comboPopupPanel.color = UI.gold;
+    this.comboPopupPanel.thickness = 2;
+    this.comboPopupPanel.top = "-178px";
+    this.comboPopupPanel.isVisible = false;
+    this.root.addControl(this.comboPopupPanel);
+    const comboPopupStack = makeStack();
+    comboPopupStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    comboPopupStack.paddingTop = "10px";
+    this.comboPopupPanel.addControl(comboPopupStack);
+    this.comboPopupEyebrow = makeText("", 16, UI.green);
+    this.comboPopupEyebrow.fontFamily = UI.mono;
+    comboPopupStack.addControl(this.comboPopupEyebrow);
+    this.comboPopupTitle = makeText("", 34, UI.gold);
+    this.comboPopupTitle.fontFamily = UI.mono;
+    this.comboPopupTitle.fontWeight = "bold";
+    comboPopupStack.addControl(this.comboPopupTitle);
+    this.comboPopupDetail = makeText("", 18, UI.cream);
+    this.comboPopupDetail.paddingTop = "4px";
+    comboPopupStack.addControl(this.comboPopupDetail);
+
+    // Big center popup for inning / final outcome beats
     this.popupText = makeText("", 64, UI.gold);
     this.popupText.fontWeight = "bold";
     this.popupText.shadowColor = "black";
@@ -282,13 +348,14 @@ export class GameHud {
       this.gearPanel.top = "158px";
     }
 
-    const gearLines = [`STADIUM: ${run.stadium?.name ?? "-"}`, run.stadium ? (STADIUM_HINT[run.stadium.id] ?? run.stadium.description) : "", "", "EQUIPMENT:"];
-    if (run.equipment.length === 0) {
-      gearLines.push("  (none yet)");
-    } else {
-      for (const e of run.equipment) gearLines.push(`  · ${e.name}`);
-    }
-    this.equipmentText.text = gearLines.join("\n");
+    const stadiumHint = run.stadium ? (STADIUM_HINT[run.stadium.id] ?? run.stadium.description) : "";
+    const gearText =
+      run.equipment.length === 0
+        ? "none yet"
+        : run.equipment
+            .map((e) => truncate(e.name, 18))
+            .join(" · ");
+    this.equipmentText.text = `STADIUM: ${run.stadium?.name ?? "-"}\n${stadiumHint}\n\nGEAR: ${gearText}`;
     const bases = [run.bases.first ? "1B" : "", run.bases.second ? "2B" : "", run.bases.third ? "3B" : ""].filter(Boolean).join("+") || "empty";
     this.statusLine.text = `Outs ${run.outs}/${RULES.outsPerInning} · Bases ${bases} · Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
 
@@ -315,25 +382,36 @@ export class GameHud {
     this.previewTitle.text = `SCORE PREVIEW · ${selectedCount}/5`;
     if (!result || selectedCount === 0) {
       this.leadoffText.text = "";
-      this.previewLabels.width = "316px";
+      this.previewComboTitle.text = "COMBO WATCH";
+      this.previewComboText.color = UI.muted;
+      this.previewComboText.text = "Build stat spikes, team sets, or position groups.";
+      this.previewLabels.width = "336px";
       this.previewLabels.textWrapping = true;
       this.previewLabels.text = "Pick cards to preview.\n\nQ Swing: bases\nW Small Ball: runners\nE Take: walks";
       this.previewValues.text = "";
       this.previewTotal.text = "";
       return;
     }
-    this.previewLabels.width = "224px";
+    this.previewLabels.width = "214px";
     this.previewLabels.textWrapping = false;
     this.leadoffText.text = `Leadoff: ${truncate(leadoffName ?? "", 30)}`;
     const labels: string[] = [];
     const values: string[] = [];
-    for (const line of result.lines) {
-      labels.push(truncate(line.label, 26));
-      values.push(line.value);
-    }
+    this.previewComboTitle.text = result.combos.length > 0 ? `COMBOS · ${result.combos.length}` : "COMBOS · 0";
+    this.previewComboText.color = result.combos.length > 0 ? UI.gold : UI.muted;
     if (result.combos.length === 0) {
-      labels.push("(no combos detected)");
-      values.push("");
+      this.previewComboText.text = "No combo yet. Add a matching team, position chain, or stat spike.";
+    } else {
+      const shown =
+        result.combos.length === 1
+          ? [`${result.combos[0].name}  ${comboReward(result.combos[0])}`, `  ${truncate(result.combos[0].detail, 34)}`]
+          : result.combos.slice(0, 3).map((combo) => `${combo.name}  ${comboReward(combo)}`);
+      if (result.combos.length > 3) shown.push(`+${result.combos.length - 3} more combo${result.combos.length - 3 === 1 ? "" : "s"}`);
+      this.previewComboText.text = shown.join("\n");
+    }
+    for (const line of compactPreviewLines(result)) {
+      labels.push(truncate(line.label, 24));
+      values.push(line.value);
     }
     this.previewLabels.text = labels.join("\n");
     this.previewValues.text = values.join("\n");
@@ -373,6 +451,41 @@ export class GameHud {
         }
         if (elapsed > hold + 260 / Tweens.timeScale) {
           this.popupText.isVisible = false;
+          resolve();
+        } else {
+          requestAnimationFrame(tick);
+        }
+      };
+      tick();
+    });
+  }
+
+  showComboPopup(combo: DetectedCombo, index: number, total: number): Promise<void> {
+    const generation = ++this.comboPopupGeneration;
+    this.comboPopupEyebrow.text = total > 1 ? `COMBO ${index}/${total}` : "COMBO HIT";
+    this.comboPopupTitle.text = `${combo.name.toUpperCase()} · ${comboReward(combo).toUpperCase()}`;
+    this.comboPopupDetail.text = truncate(combo.detail, 56);
+    this.comboPopupPanel.isVisible = true;
+    this.comboPopupPanel.alpha = 1;
+    this.comboPopupPanel.scaleX = 0.92;
+    this.comboPopupPanel.scaleY = 0.92;
+    return new Promise((resolve) => {
+      const start = performance.now();
+      const hold = 640 / Tweens.timeScale;
+      const tick = () => {
+        if (generation !== this.comboPopupGeneration) {
+          resolve();
+          return;
+        }
+        const elapsed = performance.now() - start;
+        const grow = Math.min(1, (elapsed / 150) * Tweens.timeScale);
+        this.comboPopupPanel.scaleX = 0.92 + grow * 0.08;
+        this.comboPopupPanel.scaleY = 0.92 + grow * 0.08;
+        if (elapsed > hold) {
+          this.comboPopupPanel.alpha = Math.max(0, 1 - ((elapsed - hold) / 220) * Tweens.timeScale);
+        }
+        if (elapsed > hold + 230 / Tweens.timeScale) {
+          this.comboPopupPanel.isVisible = false;
           resolve();
         } else {
           requestAnimationFrame(tick);

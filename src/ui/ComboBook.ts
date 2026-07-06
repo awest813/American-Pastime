@@ -1,6 +1,19 @@
-import { Control, Rectangle, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
+import { Control, Rectangle, type AdvancedDynamicTexture, type StackPanel } from "@babylonjs/gui/2D";
 import type { ComboMeta } from "../systems/types";
 import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
+
+const COMBO_HINT: Record<string, string> = {
+  contact_hit: "Contact 7+ on any card",
+  power_swing: "20+ total Power",
+  speed_steal: "Speed 7+ plus Discipline 7+ or Contact 8+",
+  team_chemistry: "3 same-team cards; 5 doubles it",
+  full_outfield: "LF + CF + RF",
+  around_the_horn: "1B + 2B + SS + 3B",
+  battery: "P + C; cancels pitch penalties",
+  lefty_advantage: "Left/switch bats vs RHP",
+  veteran_presence: "2+ Vintage cards",
+  modern_sluggers: "3+ Modern cards with Power 6+",
+};
 
 /**
  * The Combo Book: an in-game reference for the ten scoring combos, the run
@@ -20,7 +33,7 @@ export class ComboBook {
     this.root.isVisible = false;
     adt.addControl(this.root);
 
-    const panel = makePanel("940px", "700px");
+    const panel = makePanel("980px", "700px");
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -36,39 +49,23 @@ export class ComboBook {
     subtitle.paddingTop = "6px";
     subtitle.paddingBottom = "10px";
     stack.addControl(subtitle);
-    const rule = makeRule("680px");
+    const rule = makeRule("700px");
     rule.paddingBottom = "14px";
     stack.addControl(rule);
 
-    // Two synced columns: combo name + requirement on the left, reward right
-    const columns = new Rectangle();
-    columns.width = "880px";
-    columns.height = "420px";
-    columns.thickness = 0;
+    const columns = makeStack(false);
+    columns.width = "920px";
+    columns.height = "400px";
+    columns.paddingTop = "4px";
     stack.addControl(columns);
 
-    const names = combos.map((c) => `${c.name} — ${c.description}`);
-    const rewards = combos.map((c) => c.reward);
-
-    const labels = makeText(names.join("\n\n"), 16);
-    labels.textWrapping = false;
-    labels.resizeToFit = false;
-    labels.width = "730px";
-    labels.height = "420px";
-    labels.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    labels.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    labels.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    columns.addControl(labels);
-
-    const values = makeText(rewards.join("\n\n"), 16, UI.gold);
-    values.textWrapping = false;
-    values.resizeToFit = false;
-    values.width = "140px";
-    values.height = "420px";
-    values.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
-    values.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    values.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
-    columns.addControl(values);
+    const midpoint = Math.ceil(combos.length / 2);
+    this.addComboColumn(columns, combos.slice(0, midpoint));
+    const gap = new Rectangle();
+    gap.width = "32px";
+    gap.thickness = 0;
+    columns.addControl(gap);
+    this.addComboColumn(columns, combos.slice(midpoint));
 
     const footnote = makeText(
       "Click order matters: the pitch and your equipment hit the FIRST card hardest.\nInnings 3, 6 and 9 face a boss pitcher's rule. All-Stars add +2 base, Legends +5.",
@@ -82,6 +79,43 @@ export class ComboBook {
     const close = makeButton("comboBookClose", "CLOSE (H)", UI.cream, "180px", "46px");
     close.onPointerUpObservable.add(() => onClose());
     stack.addControl(close);
+  }
+
+  private addComboColumn(parent: StackPanel, combos: ComboMeta[]): void {
+    const column = makeStack();
+    column.width = "444px";
+    column.height = "400px";
+    parent.addControl(column);
+
+    for (const combo of combos) {
+      const row = new Rectangle();
+      row.width = "444px";
+      row.height = "76px";
+      row.thickness = 0;
+      column.addControl(row);
+
+      const label = makeText(`${combo.name} - ${COMBO_HINT[combo.id] ?? combo.description}`, 15);
+      label.textWrapping = true;
+      label.resizeToFit = false;
+      label.width = "330px";
+      label.height = "68px";
+      label.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      label.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      label.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      label.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      row.addControl(label);
+
+      const reward = makeText(combo.reward, 15, UI.gold);
+      reward.textWrapping = true;
+      reward.resizeToFit = false;
+      reward.width = "104px";
+      reward.height = "68px";
+      reward.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+      reward.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      reward.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+      reward.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      row.addControl(reward);
+    }
   }
 
   get isOpen(): boolean {

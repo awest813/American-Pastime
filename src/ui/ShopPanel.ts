@@ -18,6 +18,19 @@ const STAT_SHORT: Record<string, string> = {
   defense: "DEF",
 };
 
+const EQUIPMENT_HINT: Record<string, string> = {
+  corked_bat: "+2 Power\n-1 Contact",
+  lucky_cleats: "+2 Speed\nto every played card.",
+  pine_tar_rag: "First card gets\nx1.5 Contact.",
+  old_glove: "Half total Defense\nadds to base score.",
+  rally_cap: "+3 base while\nbehind the target.",
+  shin_guards: "Ignore pitch\nstat penalties.",
+  foam_finger: "Team Chemistry\nneeds only 2.",
+  bubblegum: "Rookies get +1\nto every stat.\nSmells like 1987.",
+  weighted_donut: "Power Swing bonus\nis doubled.",
+  scorekeepers_pencil: "+1 run for every\ncombo you land.",
+};
+
 /** Between-innings clubhouse shop: three equipment offers, reroll, continue. */
 export class ShopPanel {
   private root: Rectangle;
@@ -173,31 +186,37 @@ export class ShopPanel {
     card.paddingLeft = "8px";
     card.paddingRight = "8px";
 
-    const stack = makeStack();
-    stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    stack.paddingTop = "14px";
-    card.addControl(stack);
-
     const name = makeText(offer.name, 22, UI.gold);
     name.fontWeight = "bold";
     name.textWrapping = true;
     name.resizeToFit = false;
-    name.width = "230px";
+    name.width = "220px";
     name.height = "58px";
-    stack.addControl(name);
+    name.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    name.top = "22px";
+    name.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
+    name.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    card.addControl(name);
 
-    const desc = makeText(offer.description, 16);
+    const desc = makeText(EQUIPMENT_HINT[offer.id] ?? offer.description, 16);
     desc.textWrapping = true;
     desc.resizeToFit = false;
-    desc.width = "230px";
-    desc.height = "120px";
-    stack.addControl(desc);
+    desc.width = "214px";
+    desc.height = "112px";
+    desc.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    desc.top = "106px";
+    desc.lineSpacing = "2px";
+    desc.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
+    desc.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    card.addControl(desc);
 
     const affordable = run.cash >= offer.price && run.equipment.length < 5;
     const buy = makeButton(`buy-${offer.id}`, `BUY  $${offer.price}`, affordable ? UI.green : UI.muted, "180px", "46px");
     buy.isEnabled = affordable;
+    buy.verticalAlignment = Control.VERTICAL_ALIGNMENT_BOTTOM;
+    buy.top = "-16px";
     buy.onPointerUpObservable.add(() => this.callbacks.onBuy(offer));
-    stack.addControl(buy);
+    card.addControl(buy);
 
     return card;
   }

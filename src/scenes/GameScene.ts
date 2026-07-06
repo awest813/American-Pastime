@@ -583,9 +583,13 @@ export class GameScene {
     });
     await Promise.all(flights);
 
-    for (const [i, combo] of result.combos.slice(0, 3).entries()) {
+    const shownCombos = result.combos.slice(0, 4);
+    for (const [i, combo] of shownCombos.entries()) {
       this.audio.play("combo", i);
-      await this.hud.showPopup(`${combo.name.toUpperCase()}!`, UI.cream, 620);
+      await this.hud.showComboPopup(combo, i + 1, result.combos.length);
+    }
+    if (result.combos.length > shownCombos.length) {
+      await this.hud.showPopup(`+${result.combos.length - shownCombos.length} MORE COMBO${result.combos.length - shownCombos.length === 1 ? "" : "S"}!`, UI.gold, 650);
     }
 
     const bigPlay = result.bases >= 4;
