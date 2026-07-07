@@ -310,7 +310,7 @@ export class ScoreSystem {
    * Mirrors the branch thresholds in buildOutcome/attemptSteal — if those
    * change, these must change with them.
    */
-  private buildTiers(cards: PlayerCard[], discipline: number, ctx: ScoreContext, count: CountState): QualityTier[] {
+  private buildTiers(cards: PlayerCard[], discipline: number, ctx: ScoreContext, count: CountState, quality: number): QualityTier[] {
     const runners = this.runnersFor(ctx);
 
     if (ctx.approach === "steal") {
@@ -346,12 +346,22 @@ export class ScoreSystem {
       ];
     }
 
-    return [
+    const tiers: QualityTier[] = [
       { label: "Single", quality: 3 },
       { label: "Double", quality: 7 },
       { label: "Triple", quality: 12 },
       { label: "Home Run", quality: 18 },
     ];
+    // Once the homer line is passed, show the Moonshot rungs that are in
+    // reach so the meter keeps giving the player something to chase.
+    let rung = 26;
+    let bonus = 1;
+    while (quality + 8 >= rung && bonus <= 4) {
+      tiers.push({ label: `HR+${bonus}`, quality: rung });
+      rung += 8;
+      bonus += 1;
+    }
+    return tiers;
   }
 
   private buildOutcome(cards: PlayerCard[], quality: number, discipline: number, ctx: ScoreContext, count: CountState): Outcome {
@@ -405,8 +415,24 @@ export class ScoreSystem {
     }
 
     if (quality >= 18) {
+      // Overflow quality keeps paying: every 8 past the homer line is a bonus
+      // run — the Moonshot. This is the late-game scaling lever; without it,
+      // runs per inning are hard-capped at one per at-bat.
+      const bonus = Math.floor((quality - 18) / 8);
       const advanced = this.advanceHit(runners, batter, 4);
-      return { label: "Home Run", detail: "cleared the bases", bases: 4, runs: advanced.runs, outs: 0, basesAfter: advanced.bases, runnersAfter: advanced.runners, playByPlay: advanced.playByPlay };
+      if (bonus > 0) {
+        advanced.playByPlay.push(`The moonshot rattles the rival dugout: +${bonus} bonus`);
+      }
+      return {
+        label: bonus > 0 ? "Moonshot" : "Home Run",
+        detail: bonus > 0 ? "it left the stadium entirely" : "cleared the bases",
+        bases: 4,
+        runs: advanced.runs + bonus,
+        outs: 0,
+        basesAfter: advanced.bases,
+        runnersAfter: advanced.runners,
+        playByPlay: advanced.playByPlay,
+      };
     }
     if (quality >= 12) {
       const advanced = this.advanceHit(runners, batter, 3);
@@ -700,7 +726,7 @@ export class ScoreSystem {
         name: eff.card.name,
         value: Math.round(eff.stats.contact + eff.stats.power + eff.stats.speed),
       })),
-      tiers: this.buildTiers(cards, sum("discipline"), ctx, count),
+      tiers: this.buildTiers(cards, sum("discipline"), ctx, count, quality),
     };
   }
 }

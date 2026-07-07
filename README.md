@@ -34,7 +34,7 @@ npm run dev        # opens on http://localhost:8088
 | Hand size | 8 |
 | Cards per play | up to 5 |
 | At-bats / outs / discards per inning | 4 / 3 / 3 |
-| First target, growth | 3 runs, ×1.22 per inning |
+| First target, growth | 3 runs, ×1.20 per inning |
 | Deck | 30 player cards, 6 fictional teams |
 | Starting cash | $4 |
 
@@ -45,9 +45,19 @@ effective stats = card stats + stadium/equipment tweaks, then pitch modifiers
 base            = total Contact + Power + Speed
 quality         = (base + combo/trait/equipment bonuses) × multipliers ÷ pitch difficulty
 outcome         = approach + quality + current bases → runs / outs / new bases
+moonshot        = every 8 quality past the homer line (18) is a bonus run
 ```
 
+The **Moonshot** is the late-game scaling lever: one man per at-bat caps ordinary
+runs at 4 per inning, so the growing targets are paid for by overkill quality —
+stack combos and upgrades until a homer is worth 2, 3, 4+ runs. The meter shows
+the `HR+1 / HR+2 …` rungs once you're over the fence.
+
 The ten MVP combos live in `src/systems/ComboSystem.ts`; their names/descriptions in `src/content/combos.json`. Boss pitcher rules live in `src/content/bosses.json` with their effects in `ScoreSystem` — all deterministic, so the preview stays honest even on boss innings.
+
+Balance is tuned against a headless greedy-bot simulator (`node scripts/simulate.mjs 300`),
+which plays full seeded runs through the real systems and prints clear rates per inning.
+Current tuning: ~25% bot win rate, first losses around inning 5, the pennant a summit push.
 
 ## Dev sugar
 

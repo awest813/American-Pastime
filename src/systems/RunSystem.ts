@@ -83,7 +83,7 @@ export const RULES = {
   startingCash: 4,
   rewardBase: 3,
   firstTarget: 3,
-  targetGrowth: 1.22,
+  targetGrowth: 1.2, // tuned via scripts/simulate.mjs — 1.22's inning-9 target was a wall
   finalInning: 9,
   maxEquipment: 5,
   bossEvery: 3, // innings 3, 6, 9 are boss innings

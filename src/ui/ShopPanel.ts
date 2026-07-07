@@ -29,7 +29,7 @@ const EQUIPMENT_HINT: Record<string, string> = {
   foam_finger: "Team Chemistry\nneeds only 2.",
   bubblegum: "Rookies get +1\nto every stat.\nSmells like 1987.",
   weighted_donut: "Power Swing bonus\nis doubled.",
-  scorekeepers_pencil: "+1 run for every\ncombo you land.",
+  scorekeepers_pencil: "+1 quality for every\ncombo you land.",
 };
 
 /** Between-innings clubhouse shop: three equipment offers, reroll, continue. */

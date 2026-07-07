@@ -8,5 +8,5 @@
   { "id": "foam_finger", "name": "Big Foam Finger", "price": 5, "description": "Team Chemistry triggers with only 2 same-team cards.", "effect": "foam_finger" },
   { "id": "bubblegum", "name": "Rookie Bubblegum", "price": 3, "description": "Rookie cards get +1 to every stat. Smells like 1987.", "effect": "bubblegum" },
   { "id": "weighted_donut", "name": "Weighted Donut", "price": 6, "description": "Power Swing bonus is doubled.", "effect": "weighted_donut" },
-  { "id": "scorekeepers_pencil", "name": "Scorekeeper's Pencil", "price": 6, "description": "+1 run for every combo you land in a play.", "effect": "scorekeepers_pencil" }
+  { "id": "scorekeepers_pencil", "name": "Scorekeeper's Pencil", "price": 6, "description": "+1 quality for every combo you land in a play.", "effect": "scorekeepers_pencil" }
 ]
