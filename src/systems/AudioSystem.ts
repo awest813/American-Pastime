@@ -9,6 +9,7 @@ export type Stinger =
   | "tick"
   | "combo"
   | "crack"
+  | "out"
   | "runs"
   | "homer"
   | "win"
@@ -173,6 +174,11 @@ export class AudioSystem {
         // Bat on ball: sharp noise snap + low thump
         this.noise(t, 0.08, { filter: 2500, gain: 0.35 });
         this.tone(160, t, 0.12, { type: "sine", gain: 0.3, slideTo: 60 });
+        break;
+      case "out":
+        // No contact: a dull mitt thud and a short crowd groan
+        this.tone(150, t, 0.18, { type: "sine", gain: 0.28, slideTo: 55 });
+        this.noise(t + 0.03, 0.28, { filter: 550, gain: 0.12, attack: 0.05 });
         break;
       case "runs":
         this.tone(523.25, t, 0.1, { type: "square", gain: 0.14 });

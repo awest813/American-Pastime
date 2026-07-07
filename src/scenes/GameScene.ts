@@ -527,6 +527,16 @@ export class GameScene {
       card3d.setSelected(true);
       this.selection.push(card3d);
     }
+    // Spring the card up (or settle it back) instead of teleporting it.
+    const fromY = card3d.mesh.position.y;
+    const toY = card3d.homePosition.y + (card3d.selected ? 0.55 : 0);
+    void this.tweens.animate(
+      170,
+      (t) => {
+        card3d.mesh.position.y = fromY + (toY - fromY) * t;
+      },
+      easeOutBack,
+    );
     this.audio.play("select");
     this.refreshPreview();
     this.autosave();
@@ -670,9 +680,23 @@ export class GameScene {
       await this.hud.showPopup(`+${result.combos.length - shownCombos.length} MORE COMBO${result.combos.length - shownCombos.length === 1 ? "" : "S"}!`, UI.gold, 650);
     }
 
+    // Sound and spectacle follow what actually happened at the plate: only
+    // contact cracks the bat and launches a ball; a whiff gets a mitt thud
+    // and a red sting instead of fireworks.
     const bigPlay = result.bases >= 4;
-    this.audio.play(bigPlay ? "homer" : "crack");
-    BaseballToken.launch(this.scene, bigPlay, this.effects);
+    const walkish = result.outcome === "Walk" || result.outcome === "Ball Four";
+    const stealish = result.outcome === "Stolen Base" || result.outcome === "Steal Home";
+    const madeContact = (result.bases >= 1 && !walkish) || this.approach === "small_ball";
+    if (madeContact) {
+      this.audio.play(bigPlay ? "homer" : "crack");
+      BaseballToken.launch(this.scene, bigPlay, this.effects);
+    } else if (walkish || stealish) {
+      this.audio.play("buy"); // a tidy little win, not a fireworks moment
+    } else if (result.outs > 0) {
+      this.audio.play("out");
+      this.hud.flashDanger();
+      this.world.shakeCamera(0.05, 200);
+    }
     if (bigPlay) {
       this.world.pulseLights();
       this.world.shakeCamera();

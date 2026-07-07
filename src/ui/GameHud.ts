@@ -128,6 +128,14 @@ export class GameHud {
   private previewTitle: TextBlock;
   private leadoffText: TextBlock;
   private meterPanel: Rectangle;
+  /** Meter animation state: newer rebuilds cancel the running count-up. */
+  private meterGeneration = 0;
+  private lastMeterQuality = 0;
+  private lastMeterFill = 0;
+  /** Runs still needed this inning; lets the preview flag a clinching hand. */
+  private runsToTarget = 1;
+  private previewClinches = false;
+  private dangerFlash: Rectangle;
   private previewComboPanel: Rectangle;
   private previewComboTitle: TextBlock;
   private previewComboText: TextBlock;
@@ -447,6 +455,17 @@ export class GameHud {
     this.comboPopupDetail.paddingTop = "4px";
     comboPopupStack.addControl(this.comboPopupDetail);
 
+    // Full-screen red sting for costly outs (kept under the popup text)
+    this.dangerFlash = new Rectangle("dangerFlash");
+    this.dangerFlash.width = 1;
+    this.dangerFlash.height = 1;
+    this.dangerFlash.background = UI.red;
+    this.dangerFlash.thickness = 0;
+    this.dangerFlash.alpha = 0;
+    this.dangerFlash.isVisible = false;
+    this.dangerFlash.isPointerBlocker = false;
+    this.root.addControl(this.dangerFlash);
+
     // Big center popup for inning / final outcome beats
     this.popupText = makeText("", 64, UI.gold);
     this.popupText.fontWeight = "bold";
@@ -593,8 +612,11 @@ export class GameHud {
    */
   private rebuildMeter(result: ScoreResult | null): void {
     this.meterPanel.clearControls();
+    this.meterGeneration++; // cancel any count-up still running on old controls
     if (!result || result.perCard.length === 0) {
       this.meterPanel.isVisible = false;
+      this.lastMeterQuality = 0;
+      this.lastMeterFill = 0;
       return;
     }
     this.meterPanel.isVisible = true;
@@ -613,7 +635,8 @@ export class GameHud {
       formula.addControl(this.formulaChip(` ×${result.multiplier}`, UI.red, 19, true));
     }
     formula.addControl(this.formulaChip(` ÷${result.difficulty}`, UI.muted, 19));
-    formula.addControl(this.formulaChip(` = ${result.quality}`, UI.gold, 24, true));
+    const qualityChip = this.formulaChip(` = ${result.quality}`, UI.gold, 24, true);
+    formula.addControl(qualityChip);
     formula.addControl(this.formulaChip(" QUAL", UI.muted, 13));
     if (result.playCost > 1) {
       // The Ace taxing a big swing — worth a red flag before commit.
@@ -630,6 +653,8 @@ export class GameHud {
       dead.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
       dead.isPointerBlocker = false;
       this.meterPanel.addControl(dead);
+      this.lastMeterQuality = result.quality;
+      this.lastMeterFill = 0;
       return;
     }
 
@@ -654,20 +679,18 @@ export class GameHud {
     this.meterPanel.addControl(track);
 
     const fillWidth = Math.round(barWidth * Math.min(1, result.quality / scale));
-    if (fillWidth > 2) {
-      const fill = new Rectangle("meterFill");
-      fill.width = `${fillWidth}px`;
-      fill.height = "12px";
-      fill.top = "36px";
-      fill.left = `${barLeft}px`;
-      fill.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-      fill.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-      fill.background = reachedIndex < 0 ? UI.red : reachedIndex >= tiers.length - 1 ? UI.gold : UI.green;
-      fill.thickness = 0;
-      fill.cornerRadius = 6;
-      fill.isPointerBlocker = false;
-      this.meterPanel.addControl(fill);
-    }
+    const fill = new Rectangle("meterFill");
+    fill.width = `${Math.max(0, this.lastMeterFill)}px`; // animated up to fillWidth below
+    fill.height = "12px";
+    fill.top = "36px";
+    fill.left = `${barLeft}px`;
+    fill.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    fill.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    fill.background = reachedIndex < 0 ? UI.red : reachedIndex >= tiers.length - 1 ? UI.gold : UI.green;
+    fill.thickness = 0;
+    fill.cornerRadius = 6;
+    fill.isPointerBlocker = false;
+    this.meterPanel.addControl(fill);
 
     for (const [i, tier] of tiers.entries()) {
       const x = barLeft + Math.round(barWidth * Math.min(1, tier.quality / scale));
@@ -712,6 +735,43 @@ export class GameHud {
     hintText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     hintText.isPointerBlocker = false;
     this.meterPanel.addControl(hintText);
+
+    // Roll the bar and total from their previous values so every card
+    // added or removed visibly pushes the number.
+    const generation = this.meterGeneration;
+    const fromQuality = this.lastMeterQuality;
+    const fromFill = this.lastMeterFill;
+    this.lastMeterQuality = result.quality;
+    this.lastMeterFill = fillWidth;
+    if (fromQuality === result.quality && fromFill === fillWidth) {
+      fill.width = `${fillWidth}px`;
+      return;
+    }
+    const start = performance.now();
+    const duration = 200 / Tweens.timeScale;
+    const step = () => {
+      if (generation !== this.meterGeneration) return; // a newer rebuild owns the meter
+      const t = Math.min(1, (performance.now() - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      fill.width = `${Math.max(0, Math.round(fromFill + (fillWidth - fromFill) * eased))}px`;
+      qualityChip.text = ` = ${Math.round(fromQuality + (result.quality - fromQuality) * eased)}`;
+      if (t < 1) requestAnimationFrame(step);
+    };
+    step();
+  }
+
+  /** Red edge sting when an out lands — outs should hurt a little. */
+  flashDanger(): void {
+    this.dangerFlash.isVisible = true;
+    const start = performance.now();
+    const duration = 340 / Tweens.timeScale;
+    const step = () => {
+      const t = Math.min(1, (performance.now() - start) / duration);
+      this.dangerFlash.alpha = 0.26 * (1 - t);
+      if (t >= 1) this.dangerFlash.isVisible = false;
+      else requestAnimationFrame(step);
+    };
+    step();
   }
 
   /** Float a "+N" score pop above a played card as it lands on the diamond. */
@@ -803,6 +863,7 @@ export class GameHud {
     this.statusLine.text = `Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
 
     const inningActive = run.phase === "inning";
+    this.runsToTarget = Math.max(1, run.target - run.runs);
     this.currentBases = { ...run.bases };
     this.currentCount = { ...run.count };
     this.currentRunners = {
@@ -839,8 +900,11 @@ export class GameHud {
       setButtonBackground(button, key === approach ? UI.gold : UI.cream);
       if (button.textBlock) button.textBlock.text = APPROACH_LABEL[key];
     }
+    // A hand that clinches the inning turns the commit button gold.
+    const clinches = this.previewClinches && selectionCount > 0 && inningActive && !run.inningWon;
     const playLabel = this.playButton.textBlock;
-    if (playLabel) playLabel.text = `AT-BAT · ${run.playsLeft}`;
+    if (playLabel) playLabel.text = clinches ? "AT-BAT · WINS IT!" : `AT-BAT · ${run.playsLeft}`;
+    setButtonBackground(this.playButton, clinches ? UI.gold : UI.green);
     const discardLabel = this.discardButton.textBlock;
     if (discardLabel) discardLabel.text = `DISCARD · ${run.discardsLeft}`;
     this.setButtonsEnabled(
@@ -853,6 +917,7 @@ export class GameHud {
     this.previewTitle.text = `SCORE PREVIEW · ${this.countString(result?.count ?? this.currentCount)} · ${selectedCount}/5`;
     this.rebuildMeter(selectedCount > 0 ? result : null);
     if (!result || selectedCount === 0) {
+      this.previewClinches = false;
       this.previewBases = null;
       this.previewRunners = null;
       this.updateBaseIcons();
@@ -912,9 +977,12 @@ export class GameHud {
     }
     this.previewLabels.text = labels.join("\n");
     this.previewValues.text = values.join("\n");
+    this.previewClinches = result.runs > 0 && result.runs >= this.runsToTarget;
     const runText = result.runs > 0 ? `+${result.runs} RUN${result.runs === 1 ? "" : "S"}` : result.outs > 0 ? `${result.outs} OUT` : "SAFE";
     this.previewTotal.color = result.runs > 0 ? UI.gold : result.outs > 0 ? UI.red : UI.green;
-    this.previewTotal.text = `${result.outcome.toUpperCase()} · ${runText}`;
+    const totalText = this.previewClinches ? `${result.outcome.toUpperCase()} · WINS THE INNING!` : `${result.outcome.toUpperCase()} · ${runText}`;
+    this.previewTotal.fontSize = totalText.length > 30 ? 18 : totalText.length > 22 ? 22 : 30;
+    this.previewTotal.text = totalText;
   }
 
   setButtonsEnabled(play: boolean, discard: boolean): void {
@@ -968,7 +1036,7 @@ export class GameHud {
     this.comboPopupPanel.scaleY = 0.92;
     return new Promise((resolve) => {
       const start = performance.now();
-      const hold = 640 / Tweens.timeScale;
+      const hold = 520 / Tweens.timeScale;
       const tick = () => {
         if (generation !== this.comboPopupGeneration) {
           resolve();
