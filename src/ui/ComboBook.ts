@@ -44,7 +44,7 @@ export class ComboBook {
     const title = makeTitle("THE COMBO BOOK", 34);
     stack.addControl(title);
 
-    const subtitle = makeText("quality = card math · outcome = bases, runners, and outs", 18, UI.green);
+    const subtitle = makeText("gold +N adds to base · red ×N multiplies quality", 18, UI.green);
     subtitle.fontFamily = UI.mono;
     subtitle.paddingTop = "6px";
     subtitle.paddingBottom = "10px";
@@ -105,7 +105,8 @@ export class ComboBook {
       label.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
       row.addControl(label);
 
-      const reward = makeText(combo.reward, 15, UI.gold);
+      // Same color language as the quality meter: gold adds, red multiplies.
+      const reward = makeText(combo.reward, 15, /^x/i.test(combo.reward.trim()) ? UI.red : UI.gold);
       reward.textWrapping = true;
       reward.resizeToFit = false;
       reward.width = "104px";

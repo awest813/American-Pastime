@@ -4,6 +4,7 @@ import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { RULES, type RunSystem } from "../systems/RunSystem";
 import type { BaseState, BattingApproach, CountState, DetectedCombo, RunnerState, ScoreLine, ScoreResult, ScorecardEntry } from "../systems/types";
 import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeText, setButtonBackground, topLeft, topRight } from "./kit";
+import { equipmentGlyph } from "./icons";
 import { Tweens } from "../utils/Tweens";
 
 export interface HudCallbacks {
@@ -147,6 +148,8 @@ export class GameHud {
   private comboPopupGeneration = 0;
   /** Numbered badges that mark the batting order of the current selection. */
   private orderBadges: Ellipse[] = [];
+  /** Take/Steal stay hidden through inning 1 so the opener is pure swinging. */
+  private advancedUnlocked = true;
 
   constructor(private adt: AdvancedDynamicTexture, callbacks: HudCallbacks) {
     this.root = new Rectangle("hudRoot");
@@ -612,9 +615,23 @@ export class GameHud {
     formula.addControl(this.formulaChip(` ÷${result.difficulty}`, UI.muted, 19));
     formula.addControl(this.formulaChip(` = ${result.quality}`, UI.gold, 24, true));
     formula.addControl(this.formulaChip(" QUAL", UI.muted, 13));
+    if (result.playCost > 1) {
+      // The Ace taxing a big swing — worth a red flag before commit.
+      formula.addControl(this.formulaChip(`  ⚠${result.playCost} AT-BATS`, UI.red, 15, true));
+    }
 
     const tiers = result.tiers;
-    if (tiers.length === 0) return; // no ladder (e.g. steal with nobody on)
+    if (tiers.length === 0) {
+      // No ladder to climb — the only case today is a steal with nobody on.
+      const dead = makeText("NO STEAL ON — NOBODY TO SEND", 14, UI.red);
+      dead.fontFamily = UI.mono;
+      dead.height = "20px";
+      dead.top = "44px";
+      dead.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      dead.isPointerBlocker = false;
+      this.meterPanel.addControl(dead);
+      return;
+    }
 
     // Threshold bar: fill to current quality, ticks at each outcome tier.
     const barLeft = 10;
@@ -763,7 +780,7 @@ export class GameHud {
 
   update(run: RunSystem, deckCount: number, selectionCount: number, approach: BattingApproach): void {
     const hand = run.pitch.hand === "L" ? "LHP" : "RHP";
-    this.pitchText.text = `⚾ ${run.pitch.name.toUpperCase()} (${hand})\nDifficulty ${run.pitch.difficulty}\n\n${PITCH_HINT[run.pitch.id] ?? run.pitch.description}`;
+    this.pitchText.text = `⚾ ${run.pitch.name.toUpperCase()} (${hand}) · DIFF ${run.pitch.difficulty}\n\n${PITCH_HINT[run.pitch.id] ?? run.pitch.description}`;
 
     if (run.boss) {
       const detail = run.boss.id === "umpire" && run.umpireTarget ? ` Today: ${run.umpireTarget}.` : "";
@@ -780,7 +797,7 @@ export class GameHud {
       run.equipment.length === 0
         ? "none yet"
         : run.equipment
-            .map((e) => truncate(e.name, 18))
+            .map((e) => `${equipmentGlyph(e.id)} ${truncate(e.name, 16)}`)
             .join(" · ");
     this.equipmentText.text = `◈ ${run.stadium?.name ?? "-"}\n${stadiumHint}\n\n⚙ GEAR: ${gearText}`;
     this.statusLine.text = `Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
@@ -814,6 +831,9 @@ export class GameHud {
     this.approachStack.isVisible = inningActive;
     this.actionStack.isVisible = inningActive;
     this.updateBaseIcons();
+    this.advancedUnlocked = run.inning >= 2;
+    this.approachButtons.take.isVisible = this.advancedUnlocked;
+    this.approachButtons.steal.isVisible = this.advancedUnlocked;
     for (const key of Object.keys(this.approachButtons) as BattingApproach[]) {
       const button = this.approachButtons[key];
       setButtonBackground(button, key === approach ? UI.gold : UI.cream);
@@ -848,7 +868,9 @@ export class GameHud {
           : "Build stat spikes, team sets, or position groups.";
       this.previewLabels.width = "336px";
       this.previewLabels.textWrapping = true;
-      this.previewLabels.text = "Pick cards to preview.\nQ ▲ Swing — extra bases\nW ▼ Bunt — move runners\nE ◉ Take — draw walks\nA » Steal — send a runner";
+      this.previewLabels.text = this.advancedUnlocked
+        ? "Pick cards to preview.\nQ ▲ Swing — extra bases\nW ▼ Bunt — move runners\nE ◉ Take — draw walks\nA » Steal — send a runner"
+        : "Pick cards to preview.\nQ ▲ Swing — extra bases\nW ▼ Bunt — move runners\nMore approaches unlock\nin inning 2.";
       this.previewValues.text = "";
       this.previewTotal.text = "";
       return;

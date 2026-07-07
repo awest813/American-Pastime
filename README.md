@@ -16,7 +16,7 @@ npm run dev        # opens on http://localhost:8088
 - **Click cards** in your hand to select up to 5. Click order matters — pitch and equipment effects hit the *first* card hardest (the preview names your leadoff).
 - **Enter** on the title screen starts a run with the current seed.
 - **H** opens the Combo Book (all ten combos + the run formula), **ESC** pauses (resume or abandon to the menu), **M** mutes.
-- Choose an **approach** before the at-bat: **Swing** (`Q`) chases extra bases, **Small Ball** (`W`) moves runners safely before two outs, and **Take** (`E`) leans on Discipline for walks.
+- Choose an **approach** before the at-bat: **Swing** (`Q`) chases extra bases, **Small Ball** (`W`) moves runners safely before two outs, **Take** (`E`) leans on Discipline for walks, and **Steal** (`A`) sends the lead runner. Take and Steal unlock in inning 2 — the opener stays swing-and-bunt simple.
 - **AT-BAT** commits the hand; the score preview on the right shows the exact combos, expected outcome, runs, outs, and bases before you commit. Its **quality meter** spells out the run formula in colored chips — base (cream) + bonuses (gold) × multipliers (red) ÷ pitch difficulty — over a threshold bar marking the chosen approach's outcome ladder (1B/2B/3B/HR when swinging; BB, SAC, SB rungs for the other approaches) and how much quality the next rung needs. On commit, each card pops its contribution as it lands, the quality tally counts up, then combos slam in one by one.
 - The **situation panel** under the scoreboard is a broadcast-style score bug: base diamond with runner names, ball-strike count, out pips (●●○), and the inning scorecard.
 - **DISCARD** dumps the selection and redraws (3 per inning).

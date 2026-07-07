@@ -390,6 +390,10 @@ export class GameScene {
 
   private async announceInning(): Promise<void> {
     await this.hud.showPopup(`INNING ${this.run.inning} · TARGET ${this.run.target}`, UI.cream, 900);
+    if (this.run.inning === 2) {
+      this.audio.play("combo", 2);
+      await this.hud.showPopup("NEW: E ◉ TAKE · A » STEAL", UI.green, 1100);
+    }
     if (this.run.boss) {
       this.audio.play("boss");
       this.world.pulseLights();
@@ -528,8 +532,13 @@ export class GameScene {
     this.autosave();
   }
 
+  /** Take/Steal unlock in inning 2 — the opener stays swing-and-bunt simple. */
+  private approachLocked(approach: BattingApproach): boolean {
+    return (approach === "take" || approach === "steal") && this.run.inning < 2;
+  }
+
   private setApproach(approach: BattingApproach): void {
-    if (this.busy || this.run.phase !== "inning") return;
+    if (this.busy || this.run.phase !== "inning" || this.approachLocked(approach)) return;
     this.approach = approach;
     this.audio.play("click");
     this.refreshPreview();
