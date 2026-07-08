@@ -6,8 +6,10 @@ export type Stinger =
   | "click"
   | "deal"
   | "select"
+  | "tick"
   | "combo"
   | "crack"
+  | "out"
   | "runs"
   | "homer"
   | "win"
@@ -154,6 +156,12 @@ export class AudioSystem {
         this.tone(620, t, 0.05, { type: "triangle", gain: 0.15 });
         this.tone(930, t + 0.03, 0.05, { type: "triangle", gain: 0.1 });
         break;
+      case "tick": {
+        // Score tally tick: each card's points land a semitone-ish higher
+        const freq = 660 * Math.pow(1.09, variant);
+        this.tone(freq, t, 0.06, { type: "square", gain: 0.11 });
+        break;
+      }
       case "combo": {
         // Ascending pentatonic ding per combo landed
         const scale = [523.25, 587.33, 659.25, 783.99, 880];
@@ -166,6 +174,11 @@ export class AudioSystem {
         // Bat on ball: sharp noise snap + low thump
         this.noise(t, 0.08, { filter: 2500, gain: 0.35 });
         this.tone(160, t, 0.12, { type: "sine", gain: 0.3, slideTo: 60 });
+        break;
+      case "out":
+        // No contact: a dull mitt thud and a short crowd groan
+        this.tone(150, t, 0.18, { type: "sine", gain: 0.28, slideTo: 55 });
+        this.noise(t + 0.03, 0.28, { filter: 550, gain: 0.12, attack: 0.05 });
         break;
       case "runs":
         this.tone(523.25, t, 0.1, { type: "square", gain: 0.14 });

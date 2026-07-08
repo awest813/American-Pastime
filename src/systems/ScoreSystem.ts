@@ -9,6 +9,7 @@ import type {
   PitchCard,
   PlayerCard,
   Position,
+  QualityTier,
   RunnerState,
   ScoreLine,
   ScoreResult,
@@ -303,6 +304,66 @@ export class ScoreSystem {
     };
   }
 
+  /**
+   * The quality ladder the chosen approach is climbing, in quality units, so
+   * the HUD can show exactly how far the selection is from the next outcome.
+   * Mirrors the branch thresholds in buildOutcome/attemptSteal — if those
+   * change, these must change with them.
+   */
+  private buildTiers(cards: PlayerCard[], discipline: number, ctx: ScoreContext, count: CountState, quality: number): QualityTier[] {
+    const runners = this.runnersFor(ctx);
+
+    if (ctx.approach === "steal") {
+      const candidate = this.stealCandidate(runners);
+      if (!candidate) return [];
+      const cardSpeed = Math.max(...cards.map((c) => c.speed));
+      const avgDiscipline = discipline / Math.max(1, cards.length);
+      const countJump = count.balls >= 3 ? 2 : count.strikes >= 2 ? -1 : 0;
+      const threshold = candidate.to === 4 ? 24 : 17;
+      const needed = Math.max(0, Math.ceil(threshold - candidate.runner.speed - cardSpeed - avgDiscipline * 0.25 - countJump));
+      return [{ label: candidate.to === 4 ? "Steal Home" : "Stolen Base", quality: needed }];
+    }
+
+    if (ctx.approach === "take") {
+      // takeQuality = quality * 0.45 + discipline * 0.55 + balls*3 - strikes*2
+      const fixed = discipline * 0.55 + count.balls * 3 - count.strikes * 2;
+      const qualityFor = (t: number) => Math.max(0, Math.ceil((t - fixed) / 0.45));
+      const walkThreshold = count.balls === 3 ? 8 : 10;
+      return [
+        { label: count.balls === 3 ? "Ball Four" : "Walk", quality: qualityFor(walkThreshold) },
+        { label: "Patient Single", quality: qualityFor(22) },
+      ];
+    }
+
+    if (ctx.approach === "small_ball") {
+      // smallQuality = quality * 0.72 - (two strikes ? 4 : 0)
+      const penalty = count.strikes >= 2 ? 4 : 0;
+      const qualityFor = (t: number) => Math.max(0, Math.ceil((t + penalty) / 0.72));
+      const hasTraffic = Boolean(runners.first || runners.second || runners.third);
+      return [
+        { label: hasTraffic && ctx.outs < 2 ? "Sacrifice Bunt" : "Drag Bunt", quality: qualityFor(5) },
+        { label: hasTraffic ? "Bunt Single" : "Gap Double", quality: qualityFor(12) },
+      ];
+    }
+
+    const tiers: QualityTier[] = [
+      { label: "Single", quality: 3 },
+      { label: "Double", quality: 7 },
+      { label: "Triple", quality: 12 },
+      { label: "Home Run", quality: 18 },
+    ];
+    // Once the homer line is passed, show the Moonshot rungs that are in
+    // reach so the meter keeps giving the player something to chase.
+    let rung = 26;
+    let bonus = 1;
+    while (quality + 8 >= rung && bonus <= 4) {
+      tiers.push({ label: `HR+${bonus}`, quality: rung });
+      rung += 8;
+      bonus += 1;
+    }
+    return tiers;
+  }
+
   private buildOutcome(cards: PlayerCard[], quality: number, discipline: number, ctx: ScoreContext, count: CountState): Outcome {
     const runners = this.runnersFor(ctx);
     const batter = cards[0];
@@ -354,8 +415,24 @@ export class ScoreSystem {
     }
 
     if (quality >= 18) {
+      // Overflow quality keeps paying: every 8 past the homer line is a bonus
+      // run — the Moonshot. This is the late-game scaling lever; without it,
+      // runs per inning are hard-capped at one per at-bat.
+      const bonus = Math.floor((quality - 18) / 8);
       const advanced = this.advanceHit(runners, batter, 4);
-      return { label: "Home Run", detail: "cleared the bases", bases: 4, runs: advanced.runs, outs: 0, basesAfter: advanced.bases, runnersAfter: advanced.runners, playByPlay: advanced.playByPlay };
+      if (bonus > 0) {
+        advanced.playByPlay.push(`The moonshot rattles the rival dugout: +${bonus} bonus`);
+      }
+      return {
+        label: bonus > 0 ? "Moonshot" : "Home Run",
+        detail: bonus > 0 ? "it left the stadium entirely" : "cleared the bases",
+        bases: 4,
+        runs: advanced.runs + bonus,
+        outs: 0,
+        basesAfter: advanced.bases,
+        runnersAfter: advanced.runners,
+        playByPlay: advanced.playByPlay,
+      };
     }
     if (quality >= 12) {
       const advanced = this.advanceHit(runners, batter, 3);
@@ -457,6 +534,8 @@ export class ScoreSystem {
         playCost: 1,
         combos: [],
         lines,
+        perCard: [],
+        tiers: [],
       };
     }
 
@@ -522,7 +601,7 @@ export class ScoreSystem {
 
     // Card traits
     const powerSwing = activeCombos.some((c) => c.id === "power_swing");
-    for (const eff of effCards) {
+    for (const [cardIndex, eff] of effCards.entries()) {
       switch (eff.card.traitId) {
         case "moonshot":
           if (powerSwing) {
@@ -542,6 +621,26 @@ export class ScoreSystem {
           const bonus = eff.stats.defense;
           flat += bonus;
           lines.push({ label: `${eff.card.name}: Iron Glove`, value: `+${Math.round(bonus)}` });
+          break;
+        }
+        case "clutch":
+          if (ctx.outs >= 2) {
+            flat += 5;
+            lines.push({ label: `${eff.card.name}: Clutch`, value: "+5" });
+          }
+          break;
+        case "spark_plug":
+          if (cardIndex === 0) {
+            flat += 3;
+            lines.push({ label: `${eff.card.name}: Spark Plug`, value: "+3" });
+          }
+          break;
+        case "captain": {
+          const teammates = effCards.filter((o) => o.card.team === eff.card.team).length;
+          if (teammates >= 3) {
+            flat += 4;
+            lines.push({ label: `${eff.card.name}: Captain`, value: "+4" });
+          }
           break;
         }
       }
@@ -618,6 +717,16 @@ export class ScoreSystem {
 
     lines.push({ label: `vs ${ctx.pitch.name} (difficulty ${difficulty})`, value: `÷${difficulty}` });
     const outcome = this.buildOutcome(cards, quality, sum("discipline"), ctx, count);
+    // The Pickoff Artist erases anyone left standing on a bag after the play
+    if (ctx.boss?.id === "pickoff_artist") {
+      const stranded = [outcome.runnersAfter.first, outcome.runnersAfter.second, outcome.runnersAfter.third].filter(Boolean).length;
+      if (stranded > 0) {
+        outcome.runnersAfter = { ...EMPTY_RUNNERS };
+        outcome.basesAfter = { first: false, second: false, third: false };
+        outcome.playByPlay.push(`The Pickoff Artist erases ${stranded} runner${stranded === 1 ? "" : "s"}`);
+        lines.push({ label: "Pickoff Artist clears the bases", value: `${stranded} picked off` });
+      }
+    }
     lines.push({ label: outcome.label, value: outcome.runs > 0 ? `+${outcome.runs} run${outcome.runs === 1 ? "" : "s"}` : outcome.outs > 0 ? `${outcome.outs} out` : "safe" });
     if (outcome.playByPlay[0]) {
       lines.push({ label: "Play call", value: outcome.playByPlay[0] });
@@ -643,6 +752,11 @@ export class ScoreSystem {
       playCost,
       combos: activeCombos,
       lines,
+      perCard: effCards.map((eff) => ({
+        name: eff.card.name,
+        value: Math.round(eff.stats.contact + eff.stats.power + eff.stats.speed),
+      })),
+      tiers: this.buildTiers(cards, sum("discipline"), ctx, count, quality),
     };
   }
 }

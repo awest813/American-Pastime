@@ -1,12 +1,14 @@
 import { Control, InputText, Rectangle, StackPanel, type AdvancedDynamicTexture, type Button, type TextBlock } from "@babylonjs/gui/2D";
 import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle, setButtonBackground } from "./kit";
 import { Random } from "../utils/Random";
+import { loadHistory } from "../systems/History";
 import { describeAge, type SaveSummary } from "../systems/Save";
 
 export interface MenuCallbacks {
   onStart: (seed: string) => void;
   onContinue: () => void;
   onCollection: () => void;
+  onHistory: () => void;
   onSettings: () => void;
   /** Current resumable save, or null. Re-read on every home-view show. */
   loadSummary: () => SaveSummary | null;
@@ -32,6 +34,7 @@ export class MenuPanel {
 
   private continueButton!: Button;
   private continueSummary!: TextBlock;
+  private bestsLine!: TextBlock;
   private startButton!: Button;
   private seedLabel!: TextBlock;
   private seedLabelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -131,20 +134,27 @@ export class MenuPanel {
     stack.addControl(menuRow);
     const secondary: Array<[string, string, () => void]> = [
       ["binderButton", "CARD BINDER", () => this.callbacks.onCollection()],
+      ["recordBookButton", "RECORD BOOK", () => this.callbacks.onHistory()],
       ["howToButton", "HOW TO PLAY", () => this.showHowTo()],
       ["settingsButton", "SETTINGS", () => this.callbacks.onSettings()],
     ];
     for (const [i, [name, label, action]] of secondary.entries()) {
-      const button = makeButton(name, label, UI.cream, "196px", "48px");
-      button.fontSize = 18;
-      if (i > 0) button.paddingLeft = "16px";
+      const button = makeButton(name, label, UI.cream, "190px", "48px");
+      button.fontSize = 17;
+      if (i > 0) button.paddingLeft = "14px";
       button.onPointerUpObservable.add(action);
       menuRow.addControl(button);
     }
 
     const hint = makeText("seeded seasons · autosave · card binder", 15, UI.muted);
-    hint.paddingTop = "28px";
+    hint.paddingTop = "22px";
     stack.addControl(hint);
+
+    // All-time bests strapline, refreshed whenever the home view shows
+    this.bestsLine = makeText("", 15, UI.gold);
+    this.bestsLine.fontFamily = UI.mono;
+    this.bestsLine.paddingTop = "8px";
+    stack.addControl(this.bestsLine);
 
     return panel;
   }
@@ -227,6 +237,11 @@ export class MenuPanel {
   /** Re-read the save slot and show/hide CONTINUE accordingly. Also resets the
    *  PLAY BALL confirm, since the save state may have changed underneath it. */
   refreshContinue(): void {
+    const history = loadHistory();
+    this.bestsLine.text =
+      history.seasons === 0
+        ? ""
+        : `★ ${history.pennants} pennant${history.pennants === 1 ? "" : "s"} · furthest inning ${history.bestInning} · best season ${history.mostRunsSeason} runs`;
     const summary = this.callbacks.loadSummary();
     this.hasSave = summary !== null;
     this.continueButton.isVisible = this.hasSave;

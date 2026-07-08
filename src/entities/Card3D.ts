@@ -244,10 +244,11 @@ export class Card3D {
     ctx.fillText(line, x, y);
   }
 
+  /** Flip selection state + outline; the caller animates (or snaps) the lift. */
   setSelected(selected: boolean): void {
     this.selected = selected;
     this.mesh.renderOutline = selected;
-    this.applyRestPose(false);
+    this.mesh.scaling.set(1, 1, 1); // clear any hover pop so the lift tween reads clean
   }
 
   setHovered(hovered: boolean): void {

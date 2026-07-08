@@ -4,6 +4,7 @@ import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { RULES, type RunSystem } from "../systems/RunSystem";
 import type { BaseState, BattingApproach, CountState, DetectedCombo, RunnerState, ScoreLine, ScoreResult, ScorecardEntry } from "../systems/types";
 import { UI, bottomCenter, bottomLeft, makeButton, makePanel, makeStack, makeText, setButtonBackground, topLeft, topRight } from "./kit";
+import { equipmentGlyph } from "./icons";
 import { Tweens } from "../utils/Tweens";
 
 export interface HudCallbacks {
@@ -21,10 +22,26 @@ export interface ComboSuggestion {
 
 const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const APPROACH_LABEL: Record<BattingApproach, string> = {
-  swing: "Q: SWING",
-  small_ball: "W: BUNT",
-  take: "E: TAKE",
-  steal: "A: STEAL",
+  swing: "Q ▲ SWING",
+  small_ball: "W ▼ BUNT",
+  take: "E ◉ TAKE",
+  steal: "A » STEAL",
+};
+/** Scorebook-style abbreviations for the quality-meter tier ticks. */
+const TIER_SHORT: Record<string, string> = {
+  Single: "1B",
+  Double: "2B",
+  Triple: "3B",
+  "Home Run": "HR",
+  Walk: "BB",
+  "Ball Four": "BB",
+  "Patient Single": "1B",
+  "Sacrifice Bunt": "SAC",
+  "Drag Bunt": "1B",
+  "Bunt Single": "1B",
+  "Gap Double": "2B",
+  "Stolen Base": "SB",
+  "Steal Home": "HOME",
 };
 const PITCH_HINT: Record<string, string> = {
   fastball: "Power up. Contact down.",
@@ -51,14 +68,17 @@ const COMBO_SHORT: Record<string, string> = {
   "Lefty Advantage": "Lefty",
   "Veteran Presence": "Veteran",
   "Modern Sluggers": "Modern",
+  Journeymen: "Journey",
+  "Eagle Eyes": "Eyes",
+  "Rookie Rally": "Rookies",
 };
 const comboReward = (combo: DetectedCombo): string => (combo.kind === "flat" ? `+${combo.value} base` : `x${combo.value}`);
 
 const compactPreviewLines = (result: ScoreResult): ScoreLine[] => {
   const comboLines = new Set(result.combos.map((combo) => combo.name));
   const withoutCombos = result.lines.filter((line) => ![...comboLines].some((name) => line.label.startsWith(name)));
-  if (withoutCombos.length <= 8) return withoutCombos;
-  return [...withoutCombos.slice(0, 5), ...withoutCombos.slice(-3)];
+  if (withoutCombos.length <= 7) return withoutCombos;
+  return [...withoutCombos.slice(0, 4), ...withoutCombos.slice(-3)];
 };
 
 const compactCardName = (name: string): string => {
@@ -97,6 +117,8 @@ export class GameHud {
   private baseIcons: Record<keyof BaseState, Rectangle>;
   private baseIconLabels: Record<keyof BaseState, TextBlock>;
   private baseRunnersText: TextBlock;
+  private countText: TextBlock;
+  private outsText: TextBlock;
   private scorecardTitle: TextBlock;
   private scorecardText: TextBlock;
   private currentBases: BaseState = { first: false, second: false, third: false };
@@ -108,6 +130,20 @@ export class GameHud {
   private previewPanel: Rectangle;
   private previewTitle: TextBlock;
   private leadoffText: TextBlock;
+  private meterPanel: Rectangle;
+  /** Meter animation state: newer rebuilds cancel the running count-up. */
+  private meterGeneration = 0;
+  private lastMeterQuality = 0;
+  private lastMeterFill = 0;
+  /** Runs still needed this inning; lets the preview flag a clinching hand. */
+  private runsToTarget = 1;
+  private previewClinches = false;
+  /** Boss inning in progress — the meter dresses for the occasion. */
+  private bossActive = false;
+  /** Cards allowed per play right now (The Crafty Vet squeezes it to 3). */
+  private maxCardsThisPlay: number = RULES.maxCardsPerPlay;
+  private dangerFlash: Rectangle;
+  private tutorialToast: Rectangle;
   private previewComboPanel: Rectangle;
   private previewComboTitle: TextBlock;
   private previewComboText: TextBlock;
@@ -128,8 +164,10 @@ export class GameHud {
   private comboPopupGeneration = 0;
   /** Numbered badges that mark the batting order of the current selection. */
   private orderBadges: Ellipse[] = [];
+  /** Take/Steal stay hidden through inning 1 so the opener is pure swinging. */
+  private advancedUnlocked = true;
 
-  constructor(adt: AdvancedDynamicTexture, callbacks: HudCallbacks) {
+  constructor(private adt: AdvancedDynamicTexture, callbacks: HudCallbacks) {
     this.root = new Rectangle("hudRoot");
     this.root.width = 1;
     this.root.height = 1;
@@ -196,7 +234,9 @@ export class GameHud {
     pinPanelText(this.equipmentText, "270px", "170px");
     gearPanel.addControl(this.equipmentText);
 
-    this.basePanel = makePanel("236px", "220px");
+    // Situation panel — a broadcast-style "score bug": bases, runners, count,
+    // outs, and the inning scorecard, stacked with no overlaps.
+    this.basePanel = makePanel("236px", "258px");
     this.basePanel.background = "rgba(16, 20, 24, 0.74)";
     this.basePanel.thickness = 1;
     this.basePanel.isPointerBlocker = false;
@@ -212,14 +252,14 @@ export class GameHud {
     this.baseTitle.isPointerBlocker = false;
     this.basePanel.addControl(this.baseTitle);
     this.baseIcons = {
-      first: this.makeBaseIcon("baseIconFirst", 34, 18),
-      second: this.makeBaseIcon("baseIconSecond", 0, -10),
-      third: this.makeBaseIcon("baseIconThird", -34, 18),
+      first: this.makeBaseIcon("baseIconFirst", 34, 60),
+      second: this.makeBaseIcon("baseIconSecond", 0, 32),
+      third: this.makeBaseIcon("baseIconThird", -34, 60),
     };
     this.baseIconLabels = {
-      first: this.makeBaseLabel("baseIconFirstLabel", "1B", 34, 18),
-      second: this.makeBaseLabel("baseIconSecondLabel", "2B", 0, -10),
-      third: this.makeBaseLabel("baseIconThirdLabel", "3B", -34, 18),
+      first: this.makeBaseLabel("baseIconFirstLabel", "1B", 34, 63),
+      second: this.makeBaseLabel("baseIconSecondLabel", "2B", 0, 35),
+      third: this.makeBaseLabel("baseIconThirdLabel", "3B", -34, 63),
     };
     for (const key of ["first", "second", "third"] as const) {
       this.basePanel.addControl(this.baseIcons[key]);
@@ -227,27 +267,50 @@ export class GameHud {
     }
     this.baseRunnersText = makeText("", 12, UI.cream);
     this.baseRunnersText.fontFamily = UI.mono;
-    this.baseRunnersText.height = "34px";
-    this.baseRunnersText.top = "78px";
+    this.baseRunnersText.height = "30px";
+    this.baseRunnersText.top = "104px";
     this.baseRunnersText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.baseRunnersText.textWrapping = true;
     this.baseRunnersText.isPointerBlocker = false;
     this.basePanel.addControl(this.baseRunnersText);
 
+    this.countText = makeText("", 13, UI.cream);
+    this.countText.fontFamily = UI.mono;
+    this.countText.fontWeight = "bold";
+    this.countText.height = "20px";
+    this.countText.left = "14px";
+    this.countText.top = "138px";
+    this.countText.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    this.countText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.countText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    this.countText.isPointerBlocker = false;
+    this.basePanel.addControl(this.countText);
+    this.outsText = makeText("", 13, UI.red);
+    this.outsText.fontFamily = UI.mono;
+    this.outsText.fontWeight = "bold";
+    this.outsText.height = "20px";
+    this.outsText.left = "-14px";
+    this.outsText.top = "138px";
+    this.outsText.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+    this.outsText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.outsText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+    this.outsText.isPointerBlocker = false;
+    this.basePanel.addControl(this.outsText);
+
     this.scorecardTitle = makeText("SCORECARD", 12, UI.green);
     this.scorecardTitle.fontFamily = UI.mono;
     this.scorecardTitle.fontWeight = "bold";
     this.scorecardTitle.height = "18px";
-    this.scorecardTitle.top = "120px";
+    this.scorecardTitle.top = "162px";
     this.scorecardTitle.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.scorecardTitle.isPointerBlocker = false;
     this.basePanel.addControl(this.scorecardTitle);
     this.scorecardText = makeText("", 12, UI.cream);
     this.scorecardText.fontFamily = UI.mono;
     this.scorecardText.width = "212px";
-    this.scorecardText.height = "66px";
+    this.scorecardText.height = "64px";
     this.scorecardText.left = "12px";
-    this.scorecardText.top = "144px";
+    this.scorecardText.top = "184px";
     this.scorecardText.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     this.scorecardText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.scorecardText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
@@ -257,7 +320,7 @@ export class GameHud {
     this.basePanel.addControl(this.scorecardText);
 
     // Right-side score preview
-    this.previewPanel = makePanel("380px", "500px");
+    this.previewPanel = makePanel("380px", "552px");
     topRight(this.previewPanel);
     this.previewPanel.left = "-14px";
     this.previewPanel.top = "82px";
@@ -273,7 +336,17 @@ export class GameHud {
     this.leadoffText.paddingTop = "4px";
     previewStack.addControl(this.leadoffText);
 
-    this.previewComboPanel = makePanel("356px", "132px");
+    // Quality meter: the run formula in colored chips plus a threshold bar
+    // showing which outcome tier the selection reaches. Rebuilt per selection.
+    this.meterPanel = new Rectangle("qualityMeter");
+    this.meterPanel.width = "356px";
+    this.meterPanel.height = "100px";
+    this.meterPanel.thickness = 0;
+    this.meterPanel.paddingTop = "4px";
+    this.meterPanel.isPointerBlocker = false;
+    previewStack.addControl(this.meterPanel);
+
+    this.previewComboPanel = makePanel("356px", "120px");
     this.previewComboPanel.background = "rgba(30, 40, 32, 0.78)";
     this.previewComboPanel.thickness = 1;
     this.previewComboPanel.paddingTop = "6px";
@@ -285,20 +358,20 @@ export class GameHud {
     this.previewComboPanel.addControl(this.previewComboTitle);
     this.previewComboText = makeText("", 14, UI.cream);
     this.previewComboText.lineSpacing = "2px";
-    pinTopText(this.previewComboText, "332px", "92px", "12px", "34px");
+    pinTopText(this.previewComboText, "332px", "80px", "12px", "34px");
     this.previewComboPanel.addControl(this.previewComboText);
 
     // Two synced columns: labels clip left, values align right, lines match 1:1.
     const columns = new Rectangle();
     columns.width = "356px";
-    columns.height = "158px";
+    columns.height = "132px";
     columns.thickness = 0;
     previewStack.addControl(columns);
     this.previewLabels = makeText("", 15);
     this.previewLabels.textWrapping = false;
     this.previewLabels.resizeToFit = false;
     this.previewLabels.width = "214px";
-    this.previewLabels.height = "158px";
+    this.previewLabels.height = "132px";
     this.previewLabels.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     this.previewLabels.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.previewLabels.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
@@ -307,7 +380,7 @@ export class GameHud {
     this.previewValues.textWrapping = false;
     this.previewValues.resizeToFit = false;
     this.previewValues.width = "136px";
-    this.previewValues.height = "158px";
+    this.previewValues.height = "132px";
     this.previewValues.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
     this.previewValues.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     this.previewValues.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
@@ -390,6 +463,42 @@ export class GameHud {
     this.comboPopupDetail.paddingTop = "4px";
     comboPopupStack.addControl(this.comboPopupDetail);
 
+    // One-time tutorial toast over the diamond; a first swing dismisses it.
+    this.tutorialToast = makePanel("640px", "112px");
+    this.tutorialToast.color = UI.gold;
+    this.tutorialToast.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.tutorialToast.top = "466px";
+    this.tutorialToast.isVisible = false;
+    this.tutorialToast.isPointerBlocker = false;
+    this.root.addControl(this.tutorialToast);
+    const toastStack = makeStack();
+    toastStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    toastStack.paddingTop = "10px";
+    this.tutorialToast.addControl(toastStack);
+    const toastTitle = makeText("YOUR FIRST AT-BAT", 14, UI.green);
+    toastTitle.fontFamily = UI.mono;
+    toastTitle.fontWeight = "bold";
+    toastStack.addControl(toastTitle);
+    const toastBody = makeText(
+      "① Click cards to build a swing — ② the meter shows the hit it's worth\n③ AT-BAT commits it. Beat the target before 3 outs.  (H = combo book)",
+      16,
+      UI.cream,
+    );
+    toastBody.lineSpacing = "4px";
+    toastBody.paddingTop = "6px";
+    toastStack.addControl(toastBody);
+
+    // Full-screen red sting for costly outs (kept under the popup text)
+    this.dangerFlash = new Rectangle("dangerFlash");
+    this.dangerFlash.width = 1;
+    this.dangerFlash.height = 1;
+    this.dangerFlash.background = UI.red;
+    this.dangerFlash.thickness = 0;
+    this.dangerFlash.alpha = 0;
+    this.dangerFlash.isVisible = false;
+    this.dangerFlash.isPointerBlocker = false;
+    this.root.addControl(this.dangerFlash);
+
     // Big center popup for inning / final outcome beats
     this.popupText = makeText("", 64, UI.gold);
     this.popupText.fontWeight = "bold";
@@ -433,6 +542,7 @@ export class GameHud {
     icon.height = "30px";
     icon.left = `${left}px`;
     icon.top = `${top}px`;
+    icon.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     icon.rotation = Math.PI / 4;
     icon.background = "rgba(244, 236, 216, 0.12)";
     icon.color = UI.muted;
@@ -447,6 +557,7 @@ export class GameHud {
     text.height = "24px";
     text.left = `${left}px`;
     text.top = `${top}px`;
+    text.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     text.color = UI.muted;
     text.fontFamily = UI.mono;
     text.fontSize = 13;
@@ -515,10 +626,269 @@ export class GameHud {
     });
   }
 
+  /** One colored segment of the quality formula row. */
+  private formulaChip(text: string, color: string, size = 17, bold = false): TextBlock {
+    const chip = makeText(text, size, color);
+    chip.fontFamily = UI.mono;
+    if (bold) chip.fontWeight = "bold";
+    chip.width = `${Math.max(20, text.length * size * 0.62)}px`;
+    chip.height = "26px";
+    chip.resizeToFit = true;
+    chip.isPointerBlocker = false;
+    return chip;
+  }
+
+  /**
+   * Rebuild the quality meter for the current selection: the formula in
+   * color-coded chips (base cream, bonus gold, mult red, difficulty muted)
+   * over a threshold bar whose ticks are the approach's outcome ladder.
+   */
+  private rebuildMeter(result: ScoreResult | null): void {
+    this.meterPanel.clearControls();
+    this.meterGeneration++; // cancel any count-up still running on old controls
+    if (!result || result.perCard.length === 0) {
+      this.meterPanel.isVisible = false;
+      this.lastMeterQuality = 0;
+      this.lastMeterFill = 0;
+      return;
+    }
+    this.meterPanel.isVisible = true;
+
+    // Formula row: (base + bonus) × mult ÷ difficulty = quality
+    const formula = makeStack(false);
+    formula.height = "28px";
+    formula.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    formula.isPointerBlocker = false;
+    this.meterPanel.addControl(formula);
+    formula.addControl(this.formulaChip(`${Math.round(result.base)}`, UI.cream, 19, true));
+    if (result.flatBonus !== 0) {
+      formula.addControl(this.formulaChip(` +${Math.round(result.flatBonus)}`, UI.gold, 19, true));
+    }
+    if (result.multiplier !== 1) {
+      formula.addControl(this.formulaChip(` ×${result.multiplier}`, UI.red, 19, true));
+    }
+    formula.addControl(this.formulaChip(` ÷${result.difficulty}`, UI.muted, 19));
+    const qualityChip = this.formulaChip(` = ${result.quality}`, UI.gold, 24, true);
+    formula.addControl(qualityChip);
+    formula.addControl(this.formulaChip(" QUAL", UI.muted, 13));
+    if (this.bossActive) {
+      // The boss's thumb is on the scale — remind the eye at the math itself.
+      formula.addControl(this.formulaChip("  ☠", UI.red, 18, true));
+    }
+    if (result.playCost > 1) {
+      // The Ace taxing a big swing — worth a red flag before commit.
+      formula.addControl(this.formulaChip(`  ⚠${result.playCost} AT-BATS`, UI.red, 15, true));
+    }
+
+    const tiers = result.tiers;
+    if (tiers.length === 0) {
+      // No ladder to climb — the only case today is a steal with nobody on.
+      const dead = makeText("NO STEAL ON — NOBODY TO SEND", 14, UI.red);
+      dead.fontFamily = UI.mono;
+      dead.height = "20px";
+      dead.top = "44px";
+      dead.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      dead.isPointerBlocker = false;
+      this.meterPanel.addControl(dead);
+      this.lastMeterQuality = result.quality;
+      this.lastMeterFill = 0;
+      return;
+    }
+
+    // Threshold bar: fill to current quality, ticks at each outcome tier.
+    const barLeft = 10;
+    const barWidth = 336;
+    const scale = Math.max(tiers[tiers.length - 1].quality * 1.25, result.quality, 1);
+    const reachedIndex = tiers.reduce((idx, tier, i) => (result.quality >= tier.quality ? i : idx), -1);
+
+    const track = new Rectangle("meterTrack");
+    track.width = `${barWidth}px`;
+    track.height = "12px";
+    track.top = "36px";
+    track.left = `${barLeft}px`;
+    track.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    track.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    track.background = this.bossActive ? "rgba(140, 47, 57, 0.30)" : "rgba(244, 236, 216, 0.10)";
+    track.color = this.bossActive ? UI.red : UI.panelBorder;
+    track.thickness = 1;
+    track.cornerRadius = 6;
+    track.isPointerBlocker = false;
+    this.meterPanel.addControl(track);
+
+    const fillWidth = Math.round(barWidth * Math.min(1, result.quality / scale));
+    const fill = new Rectangle("meterFill");
+    fill.width = `${Math.max(0, this.lastMeterFill)}px`; // animated up to fillWidth below
+    fill.height = "12px";
+    fill.top = "36px";
+    fill.left = `${barLeft}px`;
+    fill.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    fill.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    fill.background = reachedIndex < 0 ? UI.red : reachedIndex >= tiers.length - 1 ? UI.gold : UI.green;
+    fill.thickness = 0;
+    fill.cornerRadius = 6;
+    fill.isPointerBlocker = false;
+    this.meterPanel.addControl(fill);
+
+    for (const [i, tier] of tiers.entries()) {
+      const x = barLeft + Math.round(barWidth * Math.min(1, tier.quality / scale));
+      const tick = new Rectangle(`meterTick-${i}`);
+      tick.width = "2px";
+      tick.height = "20px";
+      tick.top = "32px";
+      tick.left = `${x - 1}px`;
+      tick.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      tick.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      tick.background = i <= reachedIndex ? UI.gold : UI.cream;
+      tick.alpha = i <= reachedIndex ? 1 : 0.55;
+      tick.thickness = 0;
+      tick.isPointerBlocker = false;
+      this.meterPanel.addControl(tick);
+
+      const label = makeText(TIER_SHORT[tier.label] ?? truncate(tier.label, 4), 12, i <= reachedIndex ? UI.gold : UI.muted);
+      label.fontFamily = UI.mono;
+      label.fontWeight = "bold";
+      label.resizeToFit = false;
+      label.textWrapping = false;
+      label.width = "44px";
+      label.height = "16px";
+      label.top = "54px";
+      label.left = `${Math.min(x - 12, barLeft + barWidth - 44)}px`;
+      label.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      label.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      label.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      label.isPointerBlocker = false;
+      this.meterPanel.addControl(label);
+    }
+
+    // "How far to the next rung" — the tactical read at a glance.
+    const next = tiers[reachedIndex + 1];
+    const hint = next
+      ? `${next.quality - result.quality} more quality → ${next.label.toUpperCase()}`
+      : `${tiers[tiers.length - 1].label.toUpperCase()} LOCKED IN`;
+    const hintText = makeText(hint, 14, next ? (reachedIndex < 0 ? UI.red : UI.cream) : UI.gold);
+    hintText.fontFamily = UI.mono;
+    hintText.height = "20px";
+    hintText.top = "74px";
+    hintText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    hintText.isPointerBlocker = false;
+    this.meterPanel.addControl(hintText);
+
+    // Roll the bar and total from their previous values so every card
+    // added or removed visibly pushes the number.
+    const generation = this.meterGeneration;
+    const fromQuality = this.lastMeterQuality;
+    const fromFill = this.lastMeterFill;
+    this.lastMeterQuality = result.quality;
+    this.lastMeterFill = fillWidth;
+    if (fromQuality === result.quality && fromFill === fillWidth) {
+      fill.width = `${fillWidth}px`;
+      return;
+    }
+    const start = performance.now();
+    const duration = 200 / Tweens.timeScale;
+    const step = () => {
+      if (generation !== this.meterGeneration) return; // a newer rebuild owns the meter
+      const t = Math.min(1, (performance.now() - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      fill.width = `${Math.max(0, Math.round(fromFill + (fillWidth - fromFill) * eased))}px`;
+      qualityChip.text = ` = ${Math.round(fromQuality + (result.quality - fromQuality) * eased)}`;
+      if (t < 1) requestAnimationFrame(step);
+    };
+    step();
+  }
+
+  showTutorial(): void {
+    this.tutorialToast.isVisible = true;
+  }
+
+  hideTutorial(): void {
+    this.tutorialToast.isVisible = false;
+  }
+
+  /** Red edge sting when an out lands — outs should hurt a little. */
+  flashDanger(): void {
+    this.dangerFlash.isVisible = true;
+    const start = performance.now();
+    const duration = 340 / Tweens.timeScale;
+    const step = () => {
+      const t = Math.min(1, (performance.now() - start) / duration);
+      this.dangerFlash.alpha = 0.26 * (1 - t);
+      if (t >= 1) this.dangerFlash.isVisible = false;
+      else requestAnimationFrame(step);
+    };
+    step();
+  }
+
+  /** Float a "+N" score pop above a played card as it lands on the diamond. */
+  showScorePop(mesh: AbstractMesh, text: string, color: string = UI.gold): void {
+    const pop = new TextBlock(`scorePop-${performance.now()}`, text);
+    pop.color = color;
+    pop.fontFamily = UI.mono;
+    pop.fontWeight = "bold";
+    pop.fontSize = 30;
+    pop.shadowColor = "black";
+    pop.shadowOffsetX = 2;
+    pop.shadowOffsetY = 2;
+    pop.isPointerBlocker = false;
+    this.adt.addControl(pop);
+    pop.linkWithMesh(mesh);
+    const start = performance.now();
+    const life = 620 / Tweens.timeScale;
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - start) / life);
+      pop.linkOffsetY = -40 - t * 70;
+      pop.alpha = t > 0.55 ? Math.max(0, 1 - (t - 0.55) / 0.45) : 1;
+      if (t >= 1 || !pop.isVisible) {
+        pop.linkWithMesh(null);
+        this.adt.removeControl(pop);
+        pop.dispose();
+      } else {
+        requestAnimationFrame(tick);
+      }
+    };
+    requestAnimationFrame(tick);
+  }
+
+  /** Count the committed hand's quality up in the big center popup. */
+  showQualityTally(quality: number): Promise<void> {
+    const generation = ++this.popupGeneration;
+    this.popupText.color = UI.gold;
+    this.popupText.isVisible = true;
+    this.popupText.alpha = 1;
+    this.popupText.scaleX = 1;
+    this.popupText.scaleY = 1;
+    return new Promise((resolve) => {
+      const start = performance.now();
+      const count = 420 / Tweens.timeScale;
+      const hold = 300 / Tweens.timeScale;
+      const tick = () => {
+        if (generation !== this.popupGeneration) {
+          resolve();
+          return;
+        }
+        const elapsed = performance.now() - start;
+        const t = Math.min(1, elapsed / count);
+        this.popupText.text = `QUALITY ${Math.round(quality * t)}`;
+        if (elapsed > count + hold) {
+          this.popupText.alpha = Math.max(0, 1 - ((elapsed - count - hold) / 200) * Tweens.timeScale);
+        }
+        if (elapsed > count + hold + 210 / Tweens.timeScale) {
+          this.popupText.isVisible = false;
+          resolve();
+        } else {
+          requestAnimationFrame(tick);
+        }
+      };
+      tick();
+    });
+  }
+
   update(run: RunSystem, deckCount: number, selectionCount: number, approach: BattingApproach): void {
     const hand = run.pitch.hand === "L" ? "LHP" : "RHP";
-    this.pitchText.text = `PITCH: ${run.pitch.name.toUpperCase()} (${hand})\nDifficulty ${run.pitch.difficulty}\n\n${PITCH_HINT[run.pitch.id] ?? run.pitch.description}`;
+    this.pitchText.text = `⚾ ${run.pitch.name.toUpperCase()} (${hand}) · DIFF ${run.pitch.difficulty}\n${PITCH_HINT[run.pitch.id] ?? run.pitch.description}`;
 
+    this.bossActive = run.boss !== null;
+    this.maxCardsThisPlay = run.maxCardsThisPlay;
     if (run.boss) {
       const detail = run.boss.id === "umpire" && run.umpireTarget ? ` Today: ${run.umpireTarget}.` : "";
       this.bossText.text = `☠ BOSS: ${run.boss.name.toUpperCase()}\n${run.boss.description}${detail}`;
@@ -534,12 +904,13 @@ export class GameHud {
       run.equipment.length === 0
         ? "none yet"
         : run.equipment
-            .map((e) => truncate(e.name, 18))
+            .map((e) => `${equipmentGlyph(e.id)} ${truncate(e.name, 16)}`)
             .join(" · ");
-    this.equipmentText.text = `STADIUM: ${run.stadium?.name ?? "-"}\n${stadiumHint}\n\nGEAR: ${gearText}`;
-    this.statusLine.text = `Outs ${run.outs}/${RULES.outsPerInning} · Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
+    this.equipmentText.text = `◈ ${run.stadium?.name ?? "-"}\n${stadiumHint}\n\n⚙ GEAR: ${gearText}`;
+    this.statusLine.text = `Deck ${deckCount} · $${run.cash} · ${run.rng.seed}`;
 
     const inningActive = run.phase === "inning";
+    this.runsToTarget = Math.max(1, run.target - run.runs);
     this.currentBases = { ...run.bases };
     this.currentCount = { ...run.count };
     this.currentRunners = {
@@ -553,6 +924,9 @@ export class GameHud {
     }
     this.previewPanel.isVisible = inningActive;
     this.basePanel.isVisible = inningActive;
+    this.countText.text = `COUNT ${this.countString(this.currentCount)}`;
+    this.outsText.text = `OUTS ${"●".repeat(run.outs)}${"○".repeat(Math.max(0, RULES.outsPerInning - run.outs))}`;
+    this.outsText.color = run.outs >= RULES.outsPerInning - 1 ? UI.red : UI.muted;
     this.scorecardTitle.text = `SCORECARD · ${run.runs}/${run.target}`;
     this.scorecardTitle.color = run.inningWon ? UI.gold : UI.green;
     this.scorecardText.text =
@@ -565,13 +939,19 @@ export class GameHud {
     this.approachStack.isVisible = inningActive;
     this.actionStack.isVisible = inningActive;
     this.updateBaseIcons();
+    this.advancedUnlocked = run.inning >= 2;
+    this.approachButtons.take.isVisible = this.advancedUnlocked;
+    this.approachButtons.steal.isVisible = this.advancedUnlocked;
     for (const key of Object.keys(this.approachButtons) as BattingApproach[]) {
       const button = this.approachButtons[key];
       setButtonBackground(button, key === approach ? UI.gold : UI.cream);
       if (button.textBlock) button.textBlock.text = APPROACH_LABEL[key];
     }
+    // A hand that clinches the inning turns the commit button gold.
+    const clinches = this.previewClinches && selectionCount > 0 && inningActive && !run.inningWon;
     const playLabel = this.playButton.textBlock;
-    if (playLabel) playLabel.text = `AT-BAT · ${run.playsLeft}`;
+    if (playLabel) playLabel.text = clinches ? "AT-BAT · WINS IT!" : `AT-BAT · ${run.playsLeft}`;
+    setButtonBackground(this.playButton, clinches ? UI.gold : UI.green);
     const discardLabel = this.discardButton.textBlock;
     if (discardLabel) discardLabel.text = `DISCARD · ${run.discardsLeft}`;
     this.setButtonsEnabled(
@@ -581,8 +961,10 @@ export class GameHud {
   }
 
   updatePreview(result: ScoreResult | null, selectedCount: number, leadoffName: string | null, suggestions: ComboSuggestion[]): void {
-    this.previewTitle.text = `SCORE PREVIEW · ${this.countString(result?.count ?? this.currentCount)} · ${selectedCount}/5`;
+    this.previewTitle.text = `SCORE PREVIEW · ${this.countString(result?.count ?? this.currentCount)} · ${selectedCount}/${this.maxCardsThisPlay}`;
+    this.rebuildMeter(selectedCount > 0 ? result : null);
     if (!result || selectedCount === 0) {
+      this.previewClinches = false;
       this.previewBases = null;
       this.previewRunners = null;
       this.updateBaseIcons();
@@ -598,7 +980,9 @@ export class GameHud {
           : "Build stat spikes, team sets, or position groups.";
       this.previewLabels.width = "336px";
       this.previewLabels.textWrapping = true;
-      this.previewLabels.text = "Pick cards to preview.\n\nQ Swing: hit counts\nW Bunt: move runners\nE Take: walks\nA Steal: send runner";
+      this.previewLabels.text = this.advancedUnlocked
+        ? "Pick cards to preview.\nQ ▲ Swing — extra bases\nW ▼ Bunt — move runners\nE ◉ Take — draw walks\nA » Steal — send a runner"
+        : "Pick cards to preview.\nQ ▲ Swing — extra bases\nW ▼ Bunt — move runners\nMore approaches unlock\nin inning 2.";
       this.previewValues.text = "";
       this.previewTotal.text = "";
       return;
@@ -636,13 +1020,16 @@ export class GameHud {
     }
     for (const line of compactPreviewLines(result)) {
       labels.push(truncate(line.label, 24));
-      values.push(line.value);
+      values.push(truncate(line.value, 15));
     }
     this.previewLabels.text = labels.join("\n");
     this.previewValues.text = values.join("\n");
+    this.previewClinches = result.runs > 0 && result.runs >= this.runsToTarget;
     const runText = result.runs > 0 ? `+${result.runs} RUN${result.runs === 1 ? "" : "S"}` : result.outs > 0 ? `${result.outs} OUT` : "SAFE";
     this.previewTotal.color = result.runs > 0 ? UI.gold : result.outs > 0 ? UI.red : UI.green;
-    this.previewTotal.text = `${result.outcome.toUpperCase()} · ${runText}`;
+    const totalText = this.previewClinches ? `${result.outcome.toUpperCase()} · WINS THE INNING!` : `${result.outcome.toUpperCase()} · ${runText}`;
+    this.previewTotal.fontSize = totalText.length > 30 ? 18 : totalText.length > 22 ? 22 : 30;
+    this.previewTotal.text = totalText;
   }
 
   setButtonsEnabled(play: boolean, discard: boolean): void {
@@ -696,7 +1083,7 @@ export class GameHud {
     this.comboPopupPanel.scaleY = 0.92;
     return new Promise((resolve) => {
       const start = performance.now();
-      const hold = 640 / Tweens.timeScale;
+      const hold = 520 / Tweens.timeScale;
       const tick = () => {
         if (generation !== this.comboPopupGeneration) {
           resolve();

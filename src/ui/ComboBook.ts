@@ -13,6 +13,9 @@ const COMBO_HINT: Record<string, string> = {
   lefty_advantage: "Left/switch bats vs RHP",
   veteran_presence: "2+ Vintage cards",
   modern_sluggers: "3+ Modern cards with Power 6+",
+  journeymen: "5 cards, all different teams",
+  eagle_eyes: "30+ total Discipline",
+  rookie_rally: "3+ Rookies, nobody else",
 };
 
 /**
@@ -44,7 +47,7 @@ export class ComboBook {
     const title = makeTitle("THE COMBO BOOK", 34);
     stack.addControl(title);
 
-    const subtitle = makeText("quality = card math · outcome = bases, runners, and outs", 18, UI.green);
+    const subtitle = makeText("gold +N adds to base · red ×N multiplies quality", 18, UI.green);
     subtitle.fontFamily = UI.mono;
     subtitle.paddingTop = "6px";
     subtitle.paddingBottom = "10px";
@@ -55,7 +58,7 @@ export class ComboBook {
 
     const columns = makeStack(false);
     columns.width = "920px";
-    columns.height = "400px";
+    columns.height = "434px";
     columns.paddingTop = "4px";
     stack.addControl(columns);
 
@@ -84,13 +87,13 @@ export class ComboBook {
   private addComboColumn(parent: StackPanel, combos: ComboMeta[]): void {
     const column = makeStack();
     column.width = "444px";
-    column.height = "400px";
+    column.height = "434px";
     parent.addControl(column);
 
     for (const combo of combos) {
       const row = new Rectangle();
       row.width = "444px";
-      row.height = "76px";
+      row.height = "60px";
       row.thickness = 0;
       column.addControl(row);
 
@@ -98,18 +101,19 @@ export class ComboBook {
       label.textWrapping = true;
       label.resizeToFit = false;
       label.width = "330px";
-      label.height = "68px";
+      label.height = "56px";
       label.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
       label.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
       label.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
       label.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
       row.addControl(label);
 
-      const reward = makeText(combo.reward, 15, UI.gold);
+      // Same color language as the quality meter: gold adds, red multiplies.
+      const reward = makeText(combo.reward, 15, /^x/i.test(combo.reward.trim()) ? UI.red : UI.gold);
       reward.textWrapping = true;
       reward.resizeToFit = false;
       reward.width = "104px";
-      reward.height = "68px";
+      reward.height = "56px";
       reward.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
       reward.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
       reward.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;

@@ -2,6 +2,7 @@ import { Control, Rectangle, StackPanel, TextBlock, type AdvancedDynamicTexture,
 import type { RunSystem } from "../systems/RunSystem";
 import { RARITY_DISPLAY, type EquipmentCard, type PlayerCard } from "../systems/types";
 import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
+import { equipmentGlyph } from "./icons";
 
 export interface ShopCallbacks {
   onBuy: (offer: EquipmentCard) => void;
@@ -28,7 +29,7 @@ const EQUIPMENT_HINT: Record<string, string> = {
   foam_finger: "Team Chemistry\nneeds only 2.",
   bubblegum: "Rookies get +1\nto every stat.\nSmells like 1987.",
   weighted_donut: "Power Swing bonus\nis doubled.",
-  scorekeepers_pencil: "+1 run for every\ncombo you land.",
+  scorekeepers_pencil: "+1 quality for every\ncombo you land.",
 };
 
 /** Between-innings clubhouse shop: three equipment offers, reroll, continue. */
@@ -113,7 +114,7 @@ export class ShopPanel {
     this.ownedText.text =
       run.equipment.length === 0
         ? "Owned: nothing yet — your first piece of gear changes everything."
-        : `Owned: ${run.equipment.map((e) => e.name).join(" · ")}`;
+        : `Owned: ${run.equipment.map((e) => `${equipmentGlyph(e.id)} ${e.name}`).join("  ·  ")}`;
     this.offersRow.clearControls();
     if (run.shopOffers.length === 0) {
       const soldOut = makeText("Sold out. The clubhouse kid shrugs.", 22);
@@ -150,7 +151,8 @@ export class ShopPanel {
     stack.paddingTop = "10px";
     panel.addControl(stack);
 
-    const name = makeText(card.name, 18, UI.cream);
+    const shortName = card.name.length > 24 ? `${card.name.slice(0, 23)}…` : card.name;
+    const name = makeText(shortName, 17, UI.cream);
     name.fontWeight = "bold";
     name.textWrapping = false;
     name.resizeToFit = false;
@@ -186,14 +188,20 @@ export class ShopPanel {
     card.paddingLeft = "8px";
     card.paddingRight = "8px";
 
-    const name = makeText(offer.name, 22, UI.gold);
+    const icon = makeText(equipmentGlyph(offer.id), 36);
+    icon.height = "44px";
+    icon.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    icon.top = "12px";
+    card.addControl(icon);
+
+    const name = makeText(offer.name, 18, UI.gold);
     name.fontWeight = "bold";
     name.textWrapping = true;
     name.resizeToFit = false;
     name.width = "220px";
-    name.height = "58px";
+    name.height = "52px";
     name.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    name.top = "22px";
+    name.top = "58px";
     name.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
     name.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     card.addControl(name);
@@ -202,9 +210,9 @@ export class ShopPanel {
     desc.textWrapping = true;
     desc.resizeToFit = false;
     desc.width = "214px";
-    desc.height = "112px";
+    desc.height = "104px";
     desc.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    desc.top = "106px";
+    desc.top = "116px";
     desc.lineSpacing = "2px";
     desc.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
     desc.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;

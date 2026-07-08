@@ -15,13 +15,15 @@ import { ComboSystem } from "../systems/ComboSystem";
 import { DeckSystem } from "../systems/DeckSystem";
 import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
+import { recordRun } from "../systems/History";
 import { clearSave, createSaveData, decodeRunCode, encodeRunCode, isRunCode, loadSave, persistSave, summarize, type SaveData } from "../systems/Save";
-import { SPEED_SCALE, settings } from "../systems/Settings";
+import { SPEED_SCALE, saveSettings, settings } from "../systems/Settings";
 import type { BattingApproach, DetectedCombo, PlayerCard, ScoreResult } from "../systems/types";
 import { ComboBook } from "../ui/ComboBook";
 import { DebugPanel } from "../ui/DebugPanel";
 import { EndPanel } from "../ui/EndPanel";
 import { GameHud, type ComboSuggestion } from "../ui/GameHud";
+import { HistoryPanel } from "../ui/HistoryPanel";
 import { MenuPanel } from "../ui/MenuPanel";
 import { PausePanel } from "../ui/PausePanel";
 import { SettingsPanel } from "../ui/SettingsPanel";
@@ -57,6 +59,7 @@ export class GameScene {
   private end: EndPanel;
   private debug: DebugPanel;
   private collection: CollectionScene;
+  private history: HistoryPanel;
   private comboBook: ComboBook;
   private pause: PausePanel;
   private settingsPanel: SettingsPanel;
@@ -156,6 +159,10 @@ export class GameScene {
         this.menu.setVisible(false);
         this.collection.open();
       },
+      onHistory: () => {
+        this.audio.play("click");
+        this.history.open();
+      },
       onSettings: () => {
         this.audio.play("click");
         this.settingsPanel.setVisible(true);
@@ -167,6 +174,7 @@ export class GameScene {
     });
 
     // Overlays created last so they render above every other panel
+    this.history = new HistoryPanel(adt, () => this.history.setVisible(false));
     this.comboBook = new ComboBook(adt, this.run.comboMeta, () => this.toggleComboBook());
     this.pause = new PausePanel(adt, {
       onResume: () => this.pause.setVisible(false),
@@ -385,11 +393,18 @@ export class GameScene {
     void this.announceInning();
     await this.refillHand();
     this.refreshPreview();
+    // A brand-new player gets one toast over the diamond; the first committed
+    // swing (any run, any session) retires it for good.
+    if (!settings.tutorialSeen && this.run.inning === 1) this.hud.showTutorial();
     this.autosave(); // fresh hand dealt — a clean checkpoint to resume from
   }
 
   private async announceInning(): Promise<void> {
     await this.hud.showPopup(`INNING ${this.run.inning} · TARGET ${this.run.target}`, UI.cream, 900);
+    if (this.run.inning === 2) {
+      this.audio.play("combo", 2);
+      await this.hud.showPopup("NEW: E ◉ TAKE · A » STEAL", UI.green, 1100);
+    }
     if (this.run.boss) {
       this.audio.play("boss");
       this.world.pulseLights();
@@ -440,6 +455,18 @@ export class GameScene {
     this.hud.setVisible(false);
     this.clearHand(false); // leftover cards shouldn't linger behind the end panel
     clearSave(); // the run is over; nothing left to resume
+    // Finished seasons — win or lose — go in the record book. Abandons don't.
+    const { broken } = recordRun({
+      seed: this.lastSeed,
+      victory,
+      inningReached: this.run.inning,
+      totalRuns: this.run.stats.totalRuns,
+      moonshots: this.run.stats.moonshots,
+      bestPlayLabel: this.run.stats.bestPlayLabel,
+      bestPlayRuns: this.run.stats.bestPlayRuns,
+      endedAt: Date.now(),
+    });
+    if (broken.length > 0) this.audio.play("win"); // records earn the organ fanfare
     // Victory: the crowd roars and keeps murmuring under the pennant screen.
     // Loss: fade the stadium to silence — the season's over.
     if (victory) this.audio.swellAmbience(4);
@@ -455,7 +482,24 @@ export class GameScene {
       victory
         ? `Nine innings survived. The cardboard engine hums.\nSeed ${this.lastSeed} · $${this.run.cash} left over`
         : `Retired in inning ${this.run.inning}: ${this.run.runs} of ${this.run.target} runs.\nSeed ${this.lastSeed}`,
+      this.seasonStats(),
+      broken,
     );
+  }
+
+  /** The bragging block for the end screen: best swing, homers, combo peak. */
+  private seasonStats(): string {
+    const stats = this.run.stats;
+    if (stats.playsMade === 0) return "";
+    const best =
+      stats.bestPlayLabel === ""
+        ? "—"
+        : `${stats.bestPlayLabel}${stats.bestPlayRuns > 0 ? ` (+${stats.bestPlayRuns})` : ""} in inning ${stats.bestPlayInning}`;
+    return [
+      `Best swing: ${best}`,
+      `Homers ${stats.homers} · Moonshots ${stats.moonshots} · Deepest combo ${stats.mostCombos}`,
+      `${stats.totalRuns} run${stats.totalRuns === 1 ? "" : "s"} across ${stats.playsMade} at-bat${stats.playsMade === 1 ? "" : "s"}`,
+    ].join("\n");
   }
 
   // ── Hand management ─────────────────────────────────────────────────────
@@ -519,17 +563,32 @@ export class GameScene {
       card3d.setSelected(false);
       this.selection = this.selection.filter((c) => c !== card3d);
     } else {
-      if (this.selection.length >= RULES.maxCardsPerPlay) return;
+      if (this.selection.length >= this.run.maxCardsThisPlay) return;
       card3d.setSelected(true);
       this.selection.push(card3d);
     }
+    // Spring the card up (or settle it back) instead of teleporting it.
+    const fromY = card3d.mesh.position.y;
+    const toY = card3d.homePosition.y + (card3d.selected ? 0.55 : 0);
+    void this.tweens.animate(
+      170,
+      (t) => {
+        card3d.mesh.position.y = fromY + (toY - fromY) * t;
+      },
+      easeOutBack,
+    );
     this.audio.play("select");
     this.refreshPreview();
     this.autosave();
   }
 
+  /** Take/Steal unlock in inning 2 — the opener stays swing-and-bunt simple. */
+  private approachLocked(approach: BattingApproach): boolean {
+    return (approach === "take" || approach === "steal") && this.run.inning < 2;
+  }
+
   private setApproach(approach: BattingApproach): void {
-    if (this.busy || this.run.phase !== "inning") return;
+    if (this.busy || this.run.phase !== "inning" || this.approachLocked(approach)) return;
     this.approach = approach;
     this.audio.play("click");
     this.refreshPreview();
@@ -622,6 +681,11 @@ export class GameScene {
     if (this.busy || this.run.phase !== "inning" || this.run.playsLeft <= 0 || this.selection.length === 0) return;
     this.busy = true;
     this.hud.setButtonsEnabled(false, false);
+    this.hud.hideTutorial();
+    if (!settings.tutorialSeen) {
+      settings.tutorialSeen = true;
+      saveSettings();
+    }
 
     const played = this.selection;
     const playedCards = played.map((c) => c.card);
@@ -640,9 +704,17 @@ export class GameScene {
         });
         await this.tweens.moveTo(card3d.mesh, slot, 340);
         this.effects.dustPuff(slot.add(new Vector3(0, 0.15, 0)));
+        // Each card's base contribution pops off it as it lands, pitch rising.
+        const contribution = result.perCard[i];
+        if (contribution) {
+          this.audio.play("tick", i);
+          this.hud.showScorePop(card3d.mesh, `+${contribution.value}`);
+        }
       });
     });
     await Promise.all(flights);
+    await this.tweens.delay(180); // let the last score pop breathe
+    await this.hud.showQualityTally(result.quality);
 
     const shownCombos = result.combos.slice(0, 4);
     for (const [i, combo] of shownCombos.entries()) {
@@ -653,9 +725,23 @@ export class GameScene {
       await this.hud.showPopup(`+${result.combos.length - shownCombos.length} MORE COMBO${result.combos.length - shownCombos.length === 1 ? "" : "S"}!`, UI.gold, 650);
     }
 
+    // Sound and spectacle follow what actually happened at the plate: only
+    // contact cracks the bat and launches a ball; a whiff gets a mitt thud
+    // and a red sting instead of fireworks.
     const bigPlay = result.bases >= 4;
-    this.audio.play(bigPlay ? "homer" : "crack");
-    BaseballToken.launch(this.scene, bigPlay, this.effects);
+    const walkish = result.outcome === "Walk" || result.outcome === "Ball Four";
+    const stealish = result.outcome === "Stolen Base" || result.outcome === "Steal Home";
+    const madeContact = (result.bases >= 1 && !walkish) || this.approach === "small_ball";
+    if (madeContact) {
+      this.audio.play(bigPlay ? "homer" : "crack");
+      BaseballToken.launch(this.scene, bigPlay, this.effects);
+    } else if (walkish || stealish) {
+      this.audio.play("buy"); // a tidy little win, not a fireworks moment
+    } else if (result.outs > 0) {
+      this.audio.play("out");
+      this.hud.flashDanger();
+      this.world.shakeCamera(0.05, 200);
+    }
     if (bigPlay) {
       this.world.pulseLights();
       this.world.shakeCamera();
@@ -671,6 +757,7 @@ export class GameScene {
     await this.countUpBoard(runsBefore, runsBefore + result.runs);
 
     this.recordScorecard(result);
+    this.run.recordPlayStats(result.outcome, result.runs, result.combos.length);
     this.run.recordPlay(result.runs, result.playCost, result.outs, result.basesAfter, result.runnersAfter);
 
     await this.tweens.delay(350);
@@ -819,6 +906,8 @@ export class GameScene {
         if (key === "Escape") {
           if (this.settingsPanel.isOpen) {
             this.settingsPanel.close();
+          } else if (this.history.isOpen) {
+            this.history.setVisible(false);
           } else if (this.menu.visible && !this.menu.onHome) {
             this.audio.play("click");
             this.menu.showHome();

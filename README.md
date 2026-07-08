@@ -15,15 +15,17 @@ npm run dev        # opens on http://localhost:8088
 
 - **Click cards** in your hand to select up to 5. Click order matters — pitch and equipment effects hit the *first* card hardest (the preview names your leadoff).
 - **Enter** on the title screen starts a run with the current seed.
-- **H** opens the Combo Book (all ten combos + the run formula), **ESC** pauses (resume or abandon to the menu), **M** mutes.
-- Choose an **approach** before the at-bat: **Swing** (`Q`) chases extra bases, **Small Ball** (`W`) moves runners safely before two outs, and **Take** (`E`) leans on Discipline for walks.
-- **AT-BAT** commits the hand; the score preview on the right shows the exact combos, expected outcome, runs, outs, and bases before you commit.
+- **H** opens the Combo Book (all thirteen combos + the run formula), **ESC** pauses (resume or abandon to the menu), **M** mutes.
+- Choose an **approach** before the at-bat: **Swing** (`Q`) chases extra bases, **Small Ball** (`W`) moves runners safely before two outs, **Take** (`E`) leans on Discipline for walks, and **Steal** (`A`) sends the lead runner. Take and Steal unlock in inning 2 — the opener stays swing-and-bunt simple.
+- **AT-BAT** commits the hand; the score preview on the right shows the exact combos, expected outcome, runs, outs, and bases before you commit. Its **quality meter** spells out the run formula in colored chips — base (cream) + bonuses (gold) × multipliers (red) ÷ pitch difficulty — over a threshold bar marking the chosen approach's outcome ladder (1B/2B/3B/HR when swinging; BB, SAC, SB rungs for the other approaches) and how much quality the next rung needs. On commit, each card pops its contribution as it lands, the quality tally counts up, then combos slam in one by one.
+- The **situation panel** under the scoreboard is a broadcast-style score bug: base diamond with runner names, ball-strike count, out pips (●●○), and the inning scorecard.
 - **DISCARD** dumps the selection and redraws (3 per inning).
 - Beat the target before 3 outs or 4 at-bats → collect cash ($3 + $1 per unused at-bat) → shop → next inning. Nine innings wins the run.
 - **Card upgrades**: each shop visit offers 3 deck cards for promotion up the `Rookie → Starter → All-Star → Legend` ladder ($3/$5/$8). Each tier adds +1 to the card's two best upgradeable stats; All-Stars add +2 base when played and Legends +5 ("Star power" in the preview). Upgraded cards get silver/gold frames and ★s. Upgrades are per-run copies — the base collection in the binder never changes.
-- **Innings 3, 6, and 9 are boss innings**: a rival pitcher's rule (The Closer, The Junkballer, The Ace, The Lefty Specialist, The Groundball Goblin, The Umpire) stacks on top of the normal pitch. Boss rules are shown on a red card in the HUD and factored into the score preview; winning pays a +$2 bounty. Each boss appears at most once per run.
+- **Innings 3, 6, and 9 are boss innings**: a rival pitcher's rule (The Closer, The Junkballer, The Ace, The Lefty Specialist, The Groundball Goblin, The Umpire, The Pickoff Artist, The Crafty Vet) stacks on top of the normal pitch. Boss rules are shown on a red card in the HUD and factored into the score preview; winning pays a +$2 bounty. Each boss appears at most once per run.
 - Runs are seeded: the same seed always deals the same season.
 - **CARD BINDER** on the title screen browses every card in 3D with team / position / era / rarity / trait filters (right-click a filter to cycle backward), page flipping (arrow keys), and click-to-inspect. It doubles as the dev card-preview tool.
+- **RECORD BOOK** on the title screen keeps the all-time ledger: seasons, pennants, furthest inning, best season, and the last ten finished runs with their best swing.
 - The 3D scoreboard behind the diamond is the score display — it counts up as runs land and goes green when the target is met.
 
 ## Rules (first prototype tuning)
@@ -33,7 +35,7 @@ npm run dev        # opens on http://localhost:8088
 | Hand size | 8 |
 | Cards per play | up to 5 |
 | At-bats / outs / discards per inning | 4 / 3 / 3 |
-| First target, growth | 3 runs, ×1.22 per inning |
+| First target, growth | 3 runs, ×1.20 per inning |
 | Deck | 30 player cards, 6 fictional teams |
 | Starting cash | $4 |
 
@@ -44,9 +46,19 @@ effective stats = card stats + stadium/equipment tweaks, then pitch modifiers
 base            = total Contact + Power + Speed
 quality         = (base + combo/trait/equipment bonuses) × multipliers ÷ pitch difficulty
 outcome         = approach + quality + current bases → runs / outs / new bases
+moonshot        = every 8 quality past the homer line (18) is a bonus run
 ```
 
-The ten MVP combos live in `src/systems/ComboSystem.ts`; their names/descriptions in `src/content/combos.json`. Boss pitcher rules live in `src/content/bosses.json` with their effects in `ScoreSystem` — all deterministic, so the preview stays honest even on boss innings.
+The **Moonshot** is the late-game scaling lever: one man per at-bat caps ordinary
+runs at 4 per inning, so the growing targets are paid for by overkill quality —
+stack combos and upgrades until a homer is worth 2, 3, 4+ runs. The meter shows
+the `HR+1 / HR+2 …` rungs once you're over the fence.
+
+The thirteen combos live in `src/systems/ComboSystem.ts`; their names/descriptions in `src/content/combos.json`. Boss pitcher rules live in `src/content/bosses.json` with their effects in `ScoreSystem` — all deterministic, so the preview stays honest even on boss innings.
+
+Balance is tuned against a headless greedy-bot simulator (`node scripts/simulate.mjs 300`),
+which plays full seeded runs through the real systems and prints clear rates per inning.
+Current tuning: ~30% bot win rate, first losses around inning 5, the pennant a summit push.
 
 ## Dev sugar
 
@@ -74,7 +86,7 @@ src/
   systems/                 pure, deterministic game logic
     RunSystem.ts           run state, targets, cash, shop
     DeckSystem.ts          draw/discard piles, reshuffle
-    ComboSystem.ts         the ten combo detectors
+    ComboSystem.ts         the thirteen combo detectors
     ScoreSystem.ts         effective stats → runs, with readable breakdown lines
   content/                 cards.players/equipment/stadiums, pitches, combos (JSON)
   entities/                Card3D (painted card meshes), TableWorld, BaseballToken (Havok juice)

@@ -1,12 +1,12 @@
 [
-  { "id": "corked_bat", "name": "Corked Bat", "price": 5, "description": "+2 Power to every played card, but -1 Contact. Slightly illegal.", "effect": "corked_bat" },
-  { "id": "lucky_cleats", "name": "Lucky Cleats", "price": 4, "description": "+2 Speed to every played card.", "effect": "lucky_cleats" },
-  { "id": "pine_tar_rag", "name": "Pine Tar Rag", "price": 4, "description": "The first card of every play gets x1.5 Contact.", "effect": "pine_tar_rag" },
-  { "id": "old_glove", "name": "Old Glove", "price": 3, "description": "Adds half the total Defense of played cards to base score.", "effect": "old_glove" },
-  { "id": "rally_cap", "name": "Rally Cap", "price": 3, "description": "+3 base while you are behind the inning target.", "effect": "rally_cap" },
-  { "id": "shin_guards", "name": "Shin Guards", "price": 4, "description": "Pitch stat penalties are ignored.", "effect": "shin_guards" },
-  { "id": "foam_finger", "name": "Big Foam Finger", "price": 5, "description": "Team Chemistry triggers with only 2 same-team cards.", "effect": "foam_finger" },
-  { "id": "bubblegum", "name": "Rookie Bubblegum", "price": 3, "description": "Rookie cards get +1 to every stat. Smells like 1987.", "effect": "bubblegum" },
-  { "id": "weighted_donut", "name": "Weighted Donut", "price": 6, "description": "Power Swing bonus is doubled.", "effect": "weighted_donut" },
-  { "id": "scorekeepers_pencil", "name": "Scorekeeper's Pencil", "price": 6, "description": "+1 run for every combo you land in a play.", "effect": "scorekeepers_pencil" }
+  {"id": "corked_bat", "name": "Corked Bat", "price": 3, "description": "+2 Power to every played card, but -1 Contact. Slightly illegal.", "effect": "corked_bat"},
+  {"id": "lucky_cleats", "name": "Lucky Cleats", "price": 4, "description": "+2 Speed to every played card.", "effect": "lucky_cleats"},
+  {"id": "pine_tar_rag", "name": "Pine Tar Rag", "price": 4, "description": "The first card of every play gets x1.5 Contact.", "effect": "pine_tar_rag"},
+  {"id": "old_glove", "name": "Old Glove", "price": 5, "description": "Adds half the total Defense of played cards to base score.", "effect": "old_glove"},
+  {"id": "rally_cap", "name": "Rally Cap", "price": 3, "description": "+3 base while you are behind the inning target.", "effect": "rally_cap"},
+  {"id": "shin_guards", "name": "Shin Guards", "price": 4, "description": "Pitch stat penalties are ignored.", "effect": "shin_guards"},
+  {"id": "foam_finger", "name": "Big Foam Finger", "price": 4, "description": "Team Chemistry triggers with only 2 same-team cards.", "effect": "foam_finger"},
+  {"id": "bubblegum", "name": "Rookie Bubblegum", "price": 3, "description": "Rookie cards get +1 to every stat. Smells like 1987.", "effect": "bubblegum"},
+  {"id": "weighted_donut", "name": "Weighted Donut", "price": 4, "description": "Power Swing bonus is doubled.", "effect": "weighted_donut"},
+  {"id": "scorekeepers_pencil", "name": "Scorekeeper's Pencil", "price": 4, "description": "+1 quality for every combo you land in a play.", "effect": "scorekeepers_pencil"}
 ]
