@@ -7,7 +7,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import { RARITY_DISPLAY, type PlayerCard } from "../systems/types";
 
-const TEAM_COLORS: Record<string, string> = {
+export const TEAM_COLORS: Record<string, string> = {
   "Louisville Bats": "#8c2f39",
   "Harbor City Herons": "#1d4e89",
   "Desert Rattlers": "#b3541e",

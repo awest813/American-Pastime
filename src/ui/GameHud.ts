@@ -235,13 +235,15 @@ export class GameHud {
     gearPanel.addControl(this.equipmentText);
 
     // Situation panel — a broadcast-style "score bug": bases, runners, count,
-    // outs, and the inning scorecard, stacked with no overlaps.
+    // outs, and the inning scorecard. Lives in the left column so it never
+    // covers the runner tokens standing on the actual diamond.
     this.basePanel = makePanel("236px", "258px");
     this.basePanel.background = "rgba(16, 20, 24, 0.74)";
     this.basePanel.thickness = 1;
     this.basePanel.isPointerBlocker = false;
-    this.basePanel.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    this.basePanel.top = "190px";
+    topLeft(this.basePanel);
+    this.basePanel.left = "32px";
+    this.basePanel.top = "360px";
     this.root.addControl(this.basePanel);
     this.baseTitle = makeText("ON BASE", 13, UI.green);
     this.baseTitle.fontFamily = UI.mono;
@@ -894,9 +896,11 @@ export class GameHud {
       this.bossText.text = `☠ BOSS: ${run.boss.name.toUpperCase()}\n${run.boss.description}${detail}`;
       this.bossPanel.isVisible = true;
       this.gearPanel.top = "280px";
+      this.basePanel.top = "482px"; // the whole left column slides down under the boss card
     } else {
       this.bossPanel.isVisible = false;
       this.gearPanel.top = "158px";
+      this.basePanel.top = "360px";
     }
 
     const stadiumHint = run.stadium ? (STADIUM_HINT[run.stadium.id] ?? run.stadium.description) : "";

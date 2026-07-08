@@ -6,9 +6,10 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 
 import { BaseballToken } from "../entities/BaseballToken";
-import { Card3D } from "../entities/Card3D";
+import { Card3D, TEAM_COLORS } from "../entities/Card3D";
 import { CollectionScene } from "./CollectionScene";
 import { Effects } from "../entities/Effects";
+import { RunnerTokens } from "../entities/RunnerTokens";
 import { TableWorld } from "../entities/TableWorld";
 import { AudioSystem } from "../systems/AudioSystem";
 import { ComboSystem } from "../systems/ComboSystem";
@@ -47,6 +48,7 @@ export class GameScene {
   private world: TableWorld;
   private tweens: Tweens;
   private effects: Effects;
+  private runnerTokens: RunnerTokens;
   private audio = new AudioSystem();
   private run = new RunSystem();
   private deck: DeckSystem;
@@ -76,6 +78,7 @@ export class GameScene {
     this.world = new TableWorld(scene, canvas);
     this.tweens = new Tweens(scene);
     this.effects = new Effects(scene);
+    this.runnerTokens = new RunnerTokens(scene, this.tweens);
     this.deck = new DeckSystem(this.run.rng);
 
     this.hud = new GameHud(adt, {
@@ -333,6 +336,7 @@ export class GameScene {
     this.hud.setVisible(true);
     this.audio.startAmbience();
     this.updateBoard(this.run.runs);
+    this.runnerTokens.set(this.run.runners, this.runnerCapColor);
 
     if (this.run.phase === "shop") {
       this.shop.refresh(this.run);
@@ -366,6 +370,12 @@ export class GameScene {
     this.refreshPreview();
   }
 
+  /** Cap color for a runner token; runner ids are card ids into the run deck. */
+  private runnerCapColor = (runnerId: string): string => {
+    const card = this.run.deckCards.find((c) => c.id === runnerId);
+    return (card && TEAM_COLORS[card.team]) || "#9a917f";
+  };
+
   /** The 3D scoreboard is the primary score display. */
   private updateBoard(runs: number): void {
     const met = runs >= this.run.target;
@@ -388,6 +398,7 @@ export class GameScene {
 
   private async beginInning(): Promise<void> {
     this.clearHand();
+    this.runnerTokens.set(this.run.runners, this.runnerCapColor);
     this.refreshHud();
     this.updateBoard(0);
     void this.announceInning();
@@ -443,6 +454,7 @@ export class GameScene {
     this.debug.setVisible(false);
     this.hud.setVisible(false);
     this.clearHand(false);
+    this.runnerTokens.clear();
     this.audio.stopAmbience();
     this.run.phase = "menu";
     clearSave(); // abandoning ends the run — no resume point
@@ -454,6 +466,7 @@ export class GameScene {
     this.debug.setVisible(false);
     this.hud.setVisible(false);
     this.clearHand(false); // leftover cards shouldn't linger behind the end panel
+    this.runnerTokens.clear();
     clearSave(); // the run is over; nothing left to resume
     // Finished seasons — win or lose — go in the record book. Abandons don't.
     const { broken } = recordRun({
@@ -750,6 +763,9 @@ export class GameScene {
       this.world.shakeCamera(0.07, 250);
       this.audio.swellAmbience(2.4); // a solid rally gets a rise
     }
+    // The little ballplayers act the play out on the diamond while the
+    // numbers land: batter legs it out, runners advance, scorers cross home.
+    void this.runnerTokens.applyPlay(result.runnersBefore, result.runnersAfter, result.runs > 0, result.bases >= 4, this.runnerCapColor);
     const runsBefore = this.run.runs;
     const popup = result.runs > 0 ? `+${result.runs} RUN${result.runs === 1 ? "" : "S"}!` : result.outs > 0 ? `${result.outcome.toUpperCase()}` : `${result.outcome.toUpperCase()}!`;
     void this.hud.showPopup(popup, result.runs > 0 ? UI.gold : result.outs > 0 ? UI.red : UI.green, 1000);
@@ -769,7 +785,8 @@ export class GameScene {
     this.refreshPreview();
 
     if (this.run.inningWon) {
-      await this.winInning();
+      // Winning on the final available at-bat earns the walk-off call.
+      await this.winInning(this.run.playsLeft <= 0);
     } else if (this.run.inningLost) {
       this.run.phase = "gameOver";
       this.audio.play("lose");
@@ -813,12 +830,13 @@ export class GameScene {
     this.autosave(); // discard resolved — checkpoint the refreshed hand
   }
 
-  private async winInning(): Promise<void> {
+  private async winInning(walkOff = false): Promise<void> {
     this.audio.play("win");
-    this.audio.swellAmbience(3.2); // crowd cheers the inning home
+    this.audio.swellAmbience(walkOff ? 4 : 3.2); // crowd cheers the inning home
     this.effects.confetti(new Vector3(0, 2.5, 1.5));
-    await this.hud.showPopup("INNING WON!", UI.green, 1000);
+    await this.hud.showPopup(walkOff ? "WALK-OFF!" : "INNING WON!", walkOff ? UI.gold : UI.green, walkOff ? 1200 : 1000);
     this.run.finishInning();
+    this.runnerTokens.clear(); // the side is retired; the diamond empties
     if (this.run.phase === "victory") {
       this.endRun(true);
     } else {
@@ -849,6 +867,9 @@ export class GameScene {
     const result = this.previewResult();
     this.hud.updatePreview(result, this.selection.length, this.selection[0]?.card.name ?? null, this.comboSuggestions(result));
     this.hud.setSelectionBadges(this.selection.map((c) => c.mesh));
+    // The leadoff card steps up to the plate on the field itself.
+    const lead = this.selection[0]?.card ?? null;
+    this.runnerTokens.setBatter(lead?.id ?? null, lead ? (TEAM_COLORS[lead.team] ?? "#9a917f") : "#9a917f");
     this.refreshHud();
   }
 
