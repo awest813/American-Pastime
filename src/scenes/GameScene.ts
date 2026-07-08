@@ -16,7 +16,7 @@ import { DeckSystem } from "../systems/DeckSystem";
 import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
 import { clearSave, createSaveData, decodeRunCode, encodeRunCode, isRunCode, loadSave, persistSave, summarize, type SaveData } from "../systems/Save";
-import { SPEED_SCALE, settings } from "../systems/Settings";
+import { SPEED_SCALE, saveSettings, settings } from "../systems/Settings";
 import type { BattingApproach, DetectedCombo, PlayerCard, ScoreResult } from "../systems/types";
 import { ComboBook } from "../ui/ComboBook";
 import { DebugPanel } from "../ui/DebugPanel";
@@ -385,6 +385,9 @@ export class GameScene {
     void this.announceInning();
     await this.refillHand();
     this.refreshPreview();
+    // A brand-new player gets one toast over the diamond; the first committed
+    // swing (any run, any session) retires it for good.
+    if (!settings.tutorialSeen && this.run.inning === 1) this.hud.showTutorial();
     this.autosave(); // fresh hand dealt — a clean checkpoint to resume from
   }
 
@@ -657,6 +660,11 @@ export class GameScene {
     if (this.busy || this.run.phase !== "inning" || this.run.playsLeft <= 0 || this.selection.length === 0) return;
     this.busy = true;
     this.hud.setButtonsEnabled(false, false);
+    this.hud.hideTutorial();
+    if (!settings.tutorialSeen) {
+      settings.tutorialSeen = true;
+      saveSettings();
+    }
 
     const played = this.selection;
     const playedCards = played.map((c) => c.card);

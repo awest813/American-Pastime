@@ -135,7 +135,10 @@ export class GameHud {
   /** Runs still needed this inning; lets the preview flag a clinching hand. */
   private runsToTarget = 1;
   private previewClinches = false;
+  /** Boss inning in progress — the meter dresses for the occasion. */
+  private bossActive = false;
   private dangerFlash: Rectangle;
+  private tutorialToast: Rectangle;
   private previewComboPanel: Rectangle;
   private previewComboTitle: TextBlock;
   private previewComboText: TextBlock;
@@ -455,6 +458,31 @@ export class GameHud {
     this.comboPopupDetail.paddingTop = "4px";
     comboPopupStack.addControl(this.comboPopupDetail);
 
+    // One-time tutorial toast over the diamond; a first swing dismisses it.
+    this.tutorialToast = makePanel("640px", "112px");
+    this.tutorialToast.color = UI.gold;
+    this.tutorialToast.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.tutorialToast.top = "466px";
+    this.tutorialToast.isVisible = false;
+    this.tutorialToast.isPointerBlocker = false;
+    this.root.addControl(this.tutorialToast);
+    const toastStack = makeStack();
+    toastStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    toastStack.paddingTop = "10px";
+    this.tutorialToast.addControl(toastStack);
+    const toastTitle = makeText("YOUR FIRST AT-BAT", 14, UI.green);
+    toastTitle.fontFamily = UI.mono;
+    toastTitle.fontWeight = "bold";
+    toastStack.addControl(toastTitle);
+    const toastBody = makeText(
+      "① Click cards to build a swing — ② the meter shows the hit it's worth\n③ AT-BAT commits it. Beat the target before 3 outs.  (H = combo book)",
+      16,
+      UI.cream,
+    );
+    toastBody.lineSpacing = "4px";
+    toastBody.paddingTop = "6px";
+    toastStack.addControl(toastBody);
+
     // Full-screen red sting for costly outs (kept under the popup text)
     this.dangerFlash = new Rectangle("dangerFlash");
     this.dangerFlash.width = 1;
@@ -638,6 +666,10 @@ export class GameHud {
     const qualityChip = this.formulaChip(` = ${result.quality}`, UI.gold, 24, true);
     formula.addControl(qualityChip);
     formula.addControl(this.formulaChip(" QUAL", UI.muted, 13));
+    if (this.bossActive) {
+      // The boss's thumb is on the scale — remind the eye at the math itself.
+      formula.addControl(this.formulaChip("  ☠", UI.red, 18, true));
+    }
     if (result.playCost > 1) {
       // The Ace taxing a big swing — worth a red flag before commit.
       formula.addControl(this.formulaChip(`  ⚠${result.playCost} AT-BATS`, UI.red, 15, true));
@@ -671,8 +703,8 @@ export class GameHud {
     track.left = `${barLeft}px`;
     track.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     track.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    track.background = "rgba(244, 236, 216, 0.10)";
-    track.color = UI.panelBorder;
+    track.background = this.bossActive ? "rgba(140, 47, 57, 0.30)" : "rgba(244, 236, 216, 0.10)";
+    track.color = this.bossActive ? UI.red : UI.panelBorder;
     track.thickness = 1;
     track.cornerRadius = 6;
     track.isPointerBlocker = false;
@@ -760,6 +792,14 @@ export class GameHud {
     step();
   }
 
+  showTutorial(): void {
+    this.tutorialToast.isVisible = true;
+  }
+
+  hideTutorial(): void {
+    this.tutorialToast.isVisible = false;
+  }
+
   /** Red edge sting when an out lands — outs should hurt a little. */
   flashDanger(): void {
     this.dangerFlash.isVisible = true;
@@ -840,8 +880,9 @@ export class GameHud {
 
   update(run: RunSystem, deckCount: number, selectionCount: number, approach: BattingApproach): void {
     const hand = run.pitch.hand === "L" ? "LHP" : "RHP";
-    this.pitchText.text = `⚾ ${run.pitch.name.toUpperCase()} (${hand}) · DIFF ${run.pitch.difficulty}\n\n${PITCH_HINT[run.pitch.id] ?? run.pitch.description}`;
+    this.pitchText.text = `⚾ ${run.pitch.name.toUpperCase()} (${hand}) · DIFF ${run.pitch.difficulty}\n${PITCH_HINT[run.pitch.id] ?? run.pitch.description}`;
 
+    this.bossActive = run.boss !== null;
     if (run.boss) {
       const detail = run.boss.id === "umpire" && run.umpireTarget ? ` Today: ${run.umpireTarget}.` : "";
       this.bossText.text = `☠ BOSS: ${run.boss.name.toUpperCase()}\n${run.boss.description}${detail}`;

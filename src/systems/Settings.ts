@@ -9,6 +9,8 @@ export interface SettingsData {
   screenShake: boolean;
   /** Animation speed preset; maps to Tweens.timeScale. */
   speed: GameSpeed;
+  /** First-hand tutorial toast has been shown and dismissed by a swing. */
+  tutorialSeen: boolean;
 }
 
 export const SPEED_SCALE: Record<GameSpeed, number> = {
@@ -27,6 +29,7 @@ const DEFAULTS: SettingsData = {
   ambience: true,
   screenShake: true,
   speed: "normal",
+  tutorialSeen: false,
 };
 
 function sanitize(raw: unknown): SettingsData {
@@ -42,6 +45,7 @@ function sanitize(raw: unknown): SettingsData {
   if (record.speed === "normal" || record.speed === "fast" || record.speed === "turbo") {
     data.speed = record.speed;
   }
+  if (typeof record.tutorialSeen === "boolean") data.tutorialSeen = record.tutorialSeen;
   return data;
 }
 
