@@ -29,6 +29,29 @@ import { Random, type RandomSnapshot } from "../utils/Random";
  * which carries upgrades and so cannot be derived from the base roster — is
  * stored in full and is the canonical card list every other reference points at.
  */
+/** Season-long bragging numbers for the end screen. */
+export interface RunStats {
+  totalRuns: number;
+  playsMade: number;
+  homers: number;
+  moonshots: number;
+  bestPlayRuns: number;
+  bestPlayLabel: string;
+  bestPlayInning: number;
+  mostCombos: number;
+}
+
+const EMPTY_STATS: RunStats = {
+  totalRuns: 0,
+  playsMade: 0,
+  homers: 0,
+  moonshots: 0,
+  bestPlayRuns: 0,
+  bestPlayLabel: "",
+  bestPlayInning: 0,
+  mostCombos: 0,
+};
+
 export interface RunState {
   rng: RandomSnapshot;
   phase: RunPhase;
@@ -52,6 +75,8 @@ export interface RunState {
   shopOffers: string[];
   upgradeCandidates: string[];
   deckCards: PlayerCard[];
+  /** Absent on saves from before stats existed; restore() defaults it. */
+  stats?: RunStats;
 }
 
 /** Price of promoting a card, keyed by the tier it is promoted TO. */
@@ -133,12 +158,15 @@ export class RunSystem {
   upgradeCandidates: PlayerCard[] = [];
   /** Per-run copies of the player cards, so upgrades never touch the base collection. */
   deckCards: PlayerCard[] = [];
+  /** Season-long numbers for the end screen. */
+  stats: RunStats = { ...EMPTY_STATS };
 
   startRun(seed?: string): void {
     this.rng = new Random(seed);
     this.inning = 1;
     this.cash = RULES.startingCash;
     this.equipment = [];
+    this.stats = { ...EMPTY_STATS };
     this.usedBosses.clear();
     this.deckCards = this.players.map((p) => ({ ...p }));
     this.stadium = this.rng.pick(this.stadiums);
@@ -245,6 +273,20 @@ export class RunSystem {
 
   recordDiscard(): void {
     this.discardsLeft -= 1;
+  }
+
+  /** Fold a resolved play into the season-long stats (called alongside recordPlay). */
+  recordPlayStats(outcome: string, runs: number, combos: number): void {
+    this.stats.playsMade += 1;
+    this.stats.totalRuns += runs;
+    if (outcome === "Home Run" || outcome === "Moonshot") this.stats.homers += 1;
+    if (outcome === "Moonshot") this.stats.moonshots += 1;
+    if (runs > this.stats.bestPlayRuns || this.stats.bestPlayLabel === "") {
+      this.stats.bestPlayRuns = runs;
+      this.stats.bestPlayLabel = outcome;
+      this.stats.bestPlayInning = this.inning;
+    }
+    this.stats.mostCombos = Math.max(this.stats.mostCombos, combos);
   }
 
   get inningWon(): boolean {
@@ -355,6 +397,7 @@ export class RunSystem {
       shopOffers: this.shopOffers.map((o) => o.id),
       upgradeCandidates: this.upgradeCandidates.map((c) => c.id),
       deckCards: this.deckCards.map((c) => ({ ...c })),
+      stats: { ...this.stats },
     };
   }
 
@@ -419,6 +462,17 @@ export class RunSystem {
     this.usedBosses = new Set(state.usedBosses);
     this.shopOffers = shopOffers;
     this.upgradeCandidates = upgradeCandidates;
+    const savedStats = state.stats;
+    this.stats = {
+      totalRuns: Math.max(0, Math.trunc(savedStats?.totalRuns ?? 0)),
+      playsMade: Math.max(0, Math.trunc(savedStats?.playsMade ?? 0)),
+      homers: Math.max(0, Math.trunc(savedStats?.homers ?? 0)),
+      moonshots: Math.max(0, Math.trunc(savedStats?.moonshots ?? 0)),
+      bestPlayRuns: Math.max(0, Math.trunc(savedStats?.bestPlayRuns ?? 0)),
+      bestPlayLabel: typeof savedStats?.bestPlayLabel === "string" ? savedStats.bestPlayLabel : "",
+      bestPlayInning: Math.max(0, Math.trunc(savedStats?.bestPlayInning ?? 0)),
+      mostCombos: Math.max(0, Math.trunc(savedStats?.mostCombos ?? 0)),
+    };
     return this.deckCards;
   }
 }

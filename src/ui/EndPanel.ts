@@ -12,6 +12,7 @@ export class EndPanel {
   private root: Rectangle;
   private title: TextBlock;
   private detail: TextBlock;
+  private stats: TextBlock;
 
   constructor(adt: AdvancedDynamicTexture, callbacks: EndCallbacks) {
     this.root = new Rectangle("endRoot");
@@ -21,7 +22,7 @@ export class EndPanel {
     this.root.thickness = 0;
     adt.addControl(this.root);
 
-    const panel = makePanel("720px", "440px");
+    const panel = makePanel("720px", "500px");
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -41,8 +42,15 @@ export class EndPanel {
     stack.addControl(rule);
 
     this.detail = makeText("", 24);
-    this.detail.paddingBottom = "28px";
+    this.detail.paddingBottom = "14px";
     stack.addControl(this.detail);
+
+    // Season stat block: the "one more run" bait.
+    this.stats = makeText("", 17, UI.gold);
+    this.stats.fontFamily = UI.mono;
+    this.stats.lineSpacing = "4px";
+    this.stats.paddingBottom = "22px";
+    stack.addControl(this.stats);
 
     const row = makeStack(false);
     row.height = "72px";
@@ -64,10 +72,12 @@ export class EndPanel {
     stack.addControl(menu);
   }
 
-  show(victory: boolean, detail: string): void {
+  show(victory: boolean, detail: string, stats = ""): void {
     this.title.text = victory ? "PENNANT WON!" : "SEASON OVER";
     this.title.color = victory ? UI.gold : UI.red;
     this.detail.text = detail;
+    this.stats.text = stats;
+    this.stats.isVisible = stats !== "";
     this.root.isVisible = true;
   }
 

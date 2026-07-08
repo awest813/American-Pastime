@@ -459,7 +459,23 @@ export class GameScene {
       victory
         ? `Nine innings survived. The cardboard engine hums.\nSeed ${this.lastSeed} · $${this.run.cash} left over`
         : `Retired in inning ${this.run.inning}: ${this.run.runs} of ${this.run.target} runs.\nSeed ${this.lastSeed}`,
+      this.seasonStats(),
     );
+  }
+
+  /** The bragging block for the end screen: best swing, homers, combo peak. */
+  private seasonStats(): string {
+    const stats = this.run.stats;
+    if (stats.playsMade === 0) return "";
+    const best =
+      stats.bestPlayLabel === ""
+        ? "—"
+        : `${stats.bestPlayLabel}${stats.bestPlayRuns > 0 ? ` (+${stats.bestPlayRuns})` : ""} in inning ${stats.bestPlayInning}`;
+    return [
+      `Best swing: ${best}`,
+      `Homers ${stats.homers} · Moonshots ${stats.moonshots} · Deepest combo ${stats.mostCombos}`,
+      `${stats.totalRuns} run${stats.totalRuns === 1 ? "" : "s"} across ${stats.playsMade} at-bat${stats.playsMade === 1 ? "" : "s"}`,
+    ].join("\n");
   }
 
   // ── Hand management ─────────────────────────────────────────────────────
@@ -712,6 +728,7 @@ export class GameScene {
     await this.countUpBoard(runsBefore, runsBefore + result.runs);
 
     this.recordScorecard(result);
+    this.run.recordPlayStats(result.outcome, result.runs, result.combos.length);
     this.run.recordPlay(result.runs, result.playCost, result.outs, result.basesAfter, result.runnersAfter);
 
     await this.tweens.delay(350);

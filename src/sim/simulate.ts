@@ -64,18 +64,18 @@ export interface RunLog {
   gear: string[];
 }
 
-/** Gear ranked by rough expected value; the bot buys down this list. */
+/** Gear ranked by measured value (see the ablation mode); the bot buys down this list. */
 const EQUIP_PRIORITY = [
   "old_glove",
+  "bubblegum",
+  "lucky_cleats",
+  "shin_guards",
+  "pine_tar_rag",
   "rally_cap",
   "corked_bat",
-  "lucky_cleats",
-  "pine_tar_rag",
   "scorekeepers_pencil",
   "weighted_donut",
-  "shin_guards",
   "foam_finger",
-  "bubblegum",
 ];
 
 class Bot {
@@ -85,7 +85,7 @@ class Bot {
   private hand: PlayerCard[] = [];
   private upgradesBought = 0;
 
-  constructor(private seed: string) {
+  constructor(private seed: string, private gearPriority: string[] = EQUIP_PRIORITY) {
     this.run.startRun(seed);
     this.deck = new DeckSystem(this.run.rng);
     this.deck.reset(this.run.deckCards);
@@ -221,7 +221,7 @@ class Bot {
       }
     }
     // …then gear, best expected value first.
-    for (const effect of EQUIP_PRIORITY) {
+    for (const effect of this.gearPriority) {
       const offer = this.run.shopOffers.find((o) => o.effect === effect);
       if (offer && this.run.cash >= offer.price) this.run.buyEquipment(offer);
     }
@@ -257,6 +257,49 @@ class Bot {
 }
 
 const pct = (n: number, d: number): string => (d === 0 ? "  —" : `${((n / d) * 100).toFixed(0)}%`.padStart(4));
+
+/** Win rate over a fixed seed set with a given gear-buying policy. Same seeds
+ *  across configs, so deltas are paired comparisons, not noise. */
+function winRateWith(seedCount: number, gearPriority: string[]): { winRate: number; avgLossInning: number } {
+  let wins = 0;
+  let lossSum = 0;
+  let losses = 0;
+  for (let i = 0; i < seedCount; i++) {
+    const log = new Bot(`SIM-${String(i).padStart(4, "0")}`, gearPriority).play();
+    if (log.victory) wins++;
+    else {
+      lossSum += log.lossInning ?? 0;
+      losses++;
+    }
+  }
+  return { winRate: wins / seedCount, avgLossInning: losses > 0 ? lossSum / losses : RULES.finalInning };
+}
+
+/**
+ * Gear ablation: measure each item's marginal value by soloing it (only that
+ * item is ever bought) and banning it (everything else available). Paired
+ * seeds keep the comparison honest despite the modest sample.
+ */
+export function ablation(seedCount = 150): void {
+  console.log(`\n=== Gear ablation · ${seedCount} paired seeds per config ===`);
+  const baseline = winRateWith(seedCount, EQUIP_PRIORITY);
+  const none = winRateWith(seedCount, []);
+  console.log(`baseline (all gear buyable): ${(baseline.winRate * 100).toFixed(1)}%   ·   no gear at all: ${(none.winRate * 100).toFixed(1)}%\n`);
+  console.log("item                  solo win%   ban win%   solo-vs-none   ban-vs-baseline");
+  for (const effect of EQUIP_PRIORITY) {
+    const solo = winRateWith(seedCount, [effect]);
+    const ban = winRateWith(
+      seedCount,
+      EQUIP_PRIORITY.filter((e) => e !== effect),
+    );
+    const soloLift = (solo.winRate - none.winRate) * 100;
+    const banDrop = (ban.winRate - baseline.winRate) * 100;
+    console.log(
+      `${effect.padEnd(22)}${(solo.winRate * 100).toFixed(1).padStart(8)}%${(ban.winRate * 100).toFixed(1).padStart(10)}%` +
+        `${(soloLift >= 0 ? "+" : "") + soloLift.toFixed(1).padStart(6)}%${(banDrop >= 0 ? "+" : "") + banDrop.toFixed(1).padStart(10)}%`,
+    );
+  }
+}
 
 export function main(seedCount = 200): void {
   const logs: RunLog[] = [];
