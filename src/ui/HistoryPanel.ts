@@ -65,10 +65,11 @@ export class HistoryPanel {
   open(): void {
     const data = loadHistory();
     const rate = data.seasons > 0 ? ` (${Math.round((data.pennants / data.seasons) * 100)}%)` : "";
+    const bigSwing = data.bestSwingRuns > 0 ? ` · Biggest swing ${data.bestSwingLabel} +${data.bestSwingRuns}` : "";
     this.headline.text =
       data.seasons === 0
         ? "No seasons on record yet."
-        : `Seasons ${data.seasons} · Pennants ${data.pennants}${rate} · Furthest inning ${data.bestInning} · Best season ${data.mostRunsSeason} runs`;
+        : `Seasons ${data.seasons} · Pennants ${data.pennants}${rate}\nFurthest inning ${data.bestInning} · Best season ${data.mostRunsSeason} runs${bigSwing}`;
 
     this.rows.clearControls();
     if (data.records.length === 0) {

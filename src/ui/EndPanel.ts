@@ -11,6 +11,7 @@ export interface EndCallbacks {
 export class EndPanel {
   private root: Rectangle;
   private title: TextBlock;
+  private recordBanner: TextBlock;
   private detail: TextBlock;
   private stats: TextBlock;
 
@@ -38,8 +39,15 @@ export class EndPanel {
     stack.addControl(this.title);
     const rule = makeRule("420px");
     rule.paddingTop = "8px";
-    rule.paddingBottom = "16px";
+    rule.paddingBottom = "12px";
     stack.addControl(rule);
+
+    // "NEW RECORD" banner — only when this season broke the all-time book.
+    this.recordBanner = makeText("", 19, UI.gold);
+    this.recordBanner.fontFamily = UI.mono;
+    this.recordBanner.fontWeight = "bold";
+    this.recordBanner.paddingBottom = "10px";
+    stack.addControl(this.recordBanner);
 
     this.detail = makeText("", 24);
     this.detail.paddingBottom = "14px";
@@ -72,9 +80,11 @@ export class EndPanel {
     stack.addControl(menu);
   }
 
-  show(victory: boolean, detail: string, stats = ""): void {
+  show(victory: boolean, detail: string, stats = "", records: string[] = []): void {
     this.title.text = victory ? "PENNANT WON!" : "SEASON OVER";
     this.title.color = victory ? UI.gold : UI.red;
+    this.recordBanner.text = records.length > 0 ? `★ NEW RECORD — ${records.join(" · ")} ★` : "";
+    this.recordBanner.isVisible = records.length > 0;
     this.detail.text = detail;
     this.stats.text = stats;
     this.stats.isVisible = stats !== "";

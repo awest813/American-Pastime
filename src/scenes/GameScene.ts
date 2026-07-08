@@ -456,7 +456,7 @@ export class GameScene {
     this.clearHand(false); // leftover cards shouldn't linger behind the end panel
     clearSave(); // the run is over; nothing left to resume
     // Finished seasons — win or lose — go in the record book. Abandons don't.
-    recordRun({
+    const { broken } = recordRun({
       seed: this.lastSeed,
       victory,
       inningReached: this.run.inning,
@@ -466,6 +466,7 @@ export class GameScene {
       bestPlayRuns: this.run.stats.bestPlayRuns,
       endedAt: Date.now(),
     });
+    if (broken.length > 0) this.audio.play("win"); // records earn the organ fanfare
     // Victory: the crowd roars and keeps murmuring under the pennant screen.
     // Loss: fade the stadium to silence — the season's over.
     if (victory) this.audio.swellAmbience(4);
@@ -482,6 +483,7 @@ export class GameScene {
         ? `Nine innings survived. The cardboard engine hums.\nSeed ${this.lastSeed} · $${this.run.cash} left over`
         : `Retired in inning ${this.run.inning}: ${this.run.runs} of ${this.run.target} runs.\nSeed ${this.lastSeed}`,
       this.seasonStats(),
+      broken,
     );
   }
 
