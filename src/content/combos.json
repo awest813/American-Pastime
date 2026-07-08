@@ -1,12 +1,15 @@
 [
-  { "id": "contact_hit", "name": "Contact Hit", "description": "Any card with Contact 7+. Small reliable runs.", "reward": "+4 base" },
-  { "id": "power_swing", "name": "Power Swing", "description": "Total Power 20+ across played cards.", "reward": "+8 base" },
-  { "id": "speed_steal", "name": "Speed Steal", "description": "A Speed 7+ card alongside a Discipline 7+ or Contact 8+ card.", "reward": "+5 base" },
-  { "id": "team_chemistry", "name": "Team Chemistry", "description": "3 same-team cards: x1.5. Five: x2.", "reward": "x1.5 / x2" },
-  { "id": "full_outfield", "name": "Full Outfield", "description": "LF + CF + RF in one play.", "reward": "+6 base" },
-  { "id": "around_the_horn", "name": "Around the Horn", "description": "1B + 2B + SS + 3B in one play.", "reward": "x2" },
-  { "id": "battery", "name": "Battery", "description": "P + C in one play. Also cancels pitch penalties.", "reward": "+4 base, shield" },
-  { "id": "lefty_advantage", "name": "Lefty Advantage", "description": "Left or switch batters vs a right-handed pitch.", "reward": "+2 base each" },
-  { "id": "veteran_presence", "name": "Veteran Presence", "description": "2+ Vintage cards: their total Discipline is added to base.", "reward": "+Discipline" },
-  { "id": "modern_sluggers", "name": "Modern Sluggers", "description": "3+ Modern cards with Power 6+.", "reward": "x1.5" }
+  {"id": "contact_hit", "name": "Contact Hit", "description": "Any card with Contact 7+. Small reliable runs.", "reward": "+4 base"},
+  {"id": "power_swing", "name": "Power Swing", "description": "Total Power 20+ across played cards.", "reward": "+8 base"},
+  {"id": "speed_steal", "name": "Speed Steal", "description": "A Speed 7+ card alongside a Discipline 7+ or Contact 8+ card.", "reward": "+5 base"},
+  {"id": "team_chemistry", "name": "Team Chemistry", "description": "3 same-team cards: x1.5. Five: x2.", "reward": "x1.5 / x2"},
+  {"id": "full_outfield", "name": "Full Outfield", "description": "LF + CF + RF in one play.", "reward": "+6 base"},
+  {"id": "around_the_horn", "name": "Around the Horn", "description": "1B + 2B + SS + 3B in one play.", "reward": "x2"},
+  {"id": "battery", "name": "Battery", "description": "P + C in one play. Also cancels pitch penalties.", "reward": "+4 base, shield"},
+  {"id": "lefty_advantage", "name": "Lefty Advantage", "description": "Left or switch batters vs a right-handed pitch.", "reward": "+2 base each"},
+  {"id": "veteran_presence", "name": "Veteran Presence", "description": "2+ Vintage cards: their total Discipline is added to base.", "reward": "+Discipline"},
+  {"id": "modern_sluggers", "name": "Modern Sluggers", "description": "3+ Modern cards with Power 6+.", "reward": "x1.5"},
+  {"id": "journeymen", "name": "Journeymen", "description": "5 cards, every one from a different team.", "reward": "x1.25"},
+  {"id": "eagle_eyes", "name": "Eagle Eyes", "description": "Total Discipline 30+ across played cards.", "reward": "+6 base"},
+  {"id": "rookie_rally", "name": "Rookie Rally", "description": "3+ Rookies and nobody else. Upgrades outgrow it.", "reward": "x1.5"}
 ]

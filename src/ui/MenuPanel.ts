@@ -7,6 +7,7 @@ export interface MenuCallbacks {
   onStart: (seed: string) => void;
   onContinue: () => void;
   onCollection: () => void;
+  onHistory: () => void;
   onSettings: () => void;
   /** Current resumable save, or null. Re-read on every home-view show. */
   loadSummary: () => SaveSummary | null;
@@ -131,13 +132,14 @@ export class MenuPanel {
     stack.addControl(menuRow);
     const secondary: Array<[string, string, () => void]> = [
       ["binderButton", "CARD BINDER", () => this.callbacks.onCollection()],
+      ["recordBookButton", "RECORD BOOK", () => this.callbacks.onHistory()],
       ["howToButton", "HOW TO PLAY", () => this.showHowTo()],
       ["settingsButton", "SETTINGS", () => this.callbacks.onSettings()],
     ];
     for (const [i, [name, label, action]] of secondary.entries()) {
-      const button = makeButton(name, label, UI.cream, "196px", "48px");
-      button.fontSize = 18;
-      if (i > 0) button.paddingLeft = "16px";
+      const button = makeButton(name, label, UI.cream, "190px", "48px");
+      button.fontSize = 17;
+      if (i > 0) button.paddingLeft = "14px";
       button.onPointerUpObservable.add(action);
       menuRow.addControl(button);
     }

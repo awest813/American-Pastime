@@ -289,6 +289,11 @@ export class RunSystem {
     this.stats.mostCombos = Math.max(this.stats.mostCombos, combos);
   }
 
+  /** Cards allowed in one play; The Crafty Vet squeezes the window to 3. */
+  get maxCardsThisPlay(): number {
+    return this.boss?.id === "crafty_vet" ? 3 : RULES.maxCardsPerPlay;
+  }
+
   get inningWon(): boolean {
     return this.runs >= this.target;
   }

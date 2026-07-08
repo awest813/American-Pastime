@@ -14,13 +14,13 @@ import type { BattingApproach, PlayerCard, ScoreResult } from "../systems/types"
 
 const cps = (c: PlayerCard): number => c.contact + c.power + c.speed;
 
-/** All subsets of the hand with 1..maxCardsPerPlay cards. */
-function subsets(hand: PlayerCard[]): PlayerCard[][] {
+/** All subsets of the hand with 1..maxSize cards. */
+function subsets(hand: PlayerCard[], maxSize: number): PlayerCard[][] {
   const out: PlayerCard[][] = [];
   const n = hand.length;
   for (let mask = 1; mask < 1 << n; mask++) {
     const size = popcount(mask);
-    if (size > RULES.maxCardsPerPlay) continue;
+    if (size > maxSize) continue;
     const cards: PlayerCard[] = [];
     for (let i = 0; i < n; i++) if (mask & (1 << i)) cards.push(hand[i]);
     out.push(cards);
@@ -145,7 +145,7 @@ class Bot {
     const approaches: BattingApproach[] =
       this.run.inning >= 2 ? ["swing", "small_ball", "take", "steal"] : ["swing", "small_ball"];
     let best: Candidate | null = null;
-    for (const subset of subsets(this.hand)) {
+    for (const subset of subsets(this.hand, this.run.maxCardsThisPlay)) {
       const ordered = this.orderFor(subset);
       for (const approach of approaches) {
         const result = this.score.evaluate(ordered, this.ctx(approach));

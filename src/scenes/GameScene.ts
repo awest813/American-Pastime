@@ -15,6 +15,7 @@ import { ComboSystem } from "../systems/ComboSystem";
 import { DeckSystem } from "../systems/DeckSystem";
 import { RULES, RunSystem } from "../systems/RunSystem";
 import { ScoreSystem, type ScoreContext } from "../systems/ScoreSystem";
+import { recordRun } from "../systems/History";
 import { clearSave, createSaveData, decodeRunCode, encodeRunCode, isRunCode, loadSave, persistSave, summarize, type SaveData } from "../systems/Save";
 import { SPEED_SCALE, saveSettings, settings } from "../systems/Settings";
 import type { BattingApproach, DetectedCombo, PlayerCard, ScoreResult } from "../systems/types";
@@ -22,6 +23,7 @@ import { ComboBook } from "../ui/ComboBook";
 import { DebugPanel } from "../ui/DebugPanel";
 import { EndPanel } from "../ui/EndPanel";
 import { GameHud, type ComboSuggestion } from "../ui/GameHud";
+import { HistoryPanel } from "../ui/HistoryPanel";
 import { MenuPanel } from "../ui/MenuPanel";
 import { PausePanel } from "../ui/PausePanel";
 import { SettingsPanel } from "../ui/SettingsPanel";
@@ -57,6 +59,7 @@ export class GameScene {
   private end: EndPanel;
   private debug: DebugPanel;
   private collection: CollectionScene;
+  private history: HistoryPanel;
   private comboBook: ComboBook;
   private pause: PausePanel;
   private settingsPanel: SettingsPanel;
@@ -156,6 +159,10 @@ export class GameScene {
         this.menu.setVisible(false);
         this.collection.open();
       },
+      onHistory: () => {
+        this.audio.play("click");
+        this.history.open();
+      },
       onSettings: () => {
         this.audio.play("click");
         this.settingsPanel.setVisible(true);
@@ -167,6 +174,7 @@ export class GameScene {
     });
 
     // Overlays created last so they render above every other panel
+    this.history = new HistoryPanel(adt, () => this.history.setVisible(false));
     this.comboBook = new ComboBook(adt, this.run.comboMeta, () => this.toggleComboBook());
     this.pause = new PausePanel(adt, {
       onResume: () => this.pause.setVisible(false),
@@ -447,6 +455,17 @@ export class GameScene {
     this.hud.setVisible(false);
     this.clearHand(false); // leftover cards shouldn't linger behind the end panel
     clearSave(); // the run is over; nothing left to resume
+    // Finished seasons — win or lose — go in the record book. Abandons don't.
+    recordRun({
+      seed: this.lastSeed,
+      victory,
+      inningReached: this.run.inning,
+      totalRuns: this.run.stats.totalRuns,
+      moonshots: this.run.stats.moonshots,
+      bestPlayLabel: this.run.stats.bestPlayLabel,
+      bestPlayRuns: this.run.stats.bestPlayRuns,
+      endedAt: Date.now(),
+    });
     // Victory: the crowd roars and keeps murmuring under the pennant screen.
     // Loss: fade the stadium to silence — the season's over.
     if (victory) this.audio.swellAmbience(4);
@@ -542,7 +561,7 @@ export class GameScene {
       card3d.setSelected(false);
       this.selection = this.selection.filter((c) => c !== card3d);
     } else {
-      if (this.selection.length >= RULES.maxCardsPerPlay) return;
+      if (this.selection.length >= this.run.maxCardsThisPlay) return;
       card3d.setSelected(true);
       this.selection.push(card3d);
     }
@@ -885,6 +904,8 @@ export class GameScene {
         if (key === "Escape") {
           if (this.settingsPanel.isOpen) {
             this.settingsPanel.close();
+          } else if (this.history.isOpen) {
+            this.history.setVisible(false);
           } else if (this.menu.visible && !this.menu.onHome) {
             this.audio.play("click");
             this.menu.showHome();

@@ -601,7 +601,7 @@ export class ScoreSystem {
 
     // Card traits
     const powerSwing = activeCombos.some((c) => c.id === "power_swing");
-    for (const eff of effCards) {
+    for (const [cardIndex, eff] of effCards.entries()) {
       switch (eff.card.traitId) {
         case "moonshot":
           if (powerSwing) {
@@ -621,6 +621,26 @@ export class ScoreSystem {
           const bonus = eff.stats.defense;
           flat += bonus;
           lines.push({ label: `${eff.card.name}: Iron Glove`, value: `+${Math.round(bonus)}` });
+          break;
+        }
+        case "clutch":
+          if (ctx.outs >= 2) {
+            flat += 5;
+            lines.push({ label: `${eff.card.name}: Clutch`, value: "+5" });
+          }
+          break;
+        case "spark_plug":
+          if (cardIndex === 0) {
+            flat += 3;
+            lines.push({ label: `${eff.card.name}: Spark Plug`, value: "+3" });
+          }
+          break;
+        case "captain": {
+          const teammates = effCards.filter((o) => o.card.team === eff.card.team).length;
+          if (teammates >= 3) {
+            flat += 4;
+            lines.push({ label: `${eff.card.name}: Captain`, value: "+4" });
+          }
           break;
         }
       }
@@ -697,6 +717,16 @@ export class ScoreSystem {
 
     lines.push({ label: `vs ${ctx.pitch.name} (difficulty ${difficulty})`, value: `÷${difficulty}` });
     const outcome = this.buildOutcome(cards, quality, sum("discipline"), ctx, count);
+    // The Pickoff Artist erases anyone left standing on a bag after the play
+    if (ctx.boss?.id === "pickoff_artist") {
+      const stranded = [outcome.runnersAfter.first, outcome.runnersAfter.second, outcome.runnersAfter.third].filter(Boolean).length;
+      if (stranded > 0) {
+        outcome.runnersAfter = { ...EMPTY_RUNNERS };
+        outcome.basesAfter = { first: false, second: false, third: false };
+        outcome.playByPlay.push(`The Pickoff Artist erases ${stranded} runner${stranded === 1 ? "" : "s"}`);
+        lines.push({ label: "Pickoff Artist clears the bases", value: `${stranded} picked off` });
+      }
+    }
     lines.push({ label: outcome.label, value: outcome.runs > 0 ? `+${outcome.runs} run${outcome.runs === 1 ? "" : "s"}` : outcome.outs > 0 ? `${outcome.outs} out` : "safe" });
     if (outcome.playByPlay[0]) {
       lines.push({ label: "Play call", value: outcome.playByPlay[0] });

@@ -138,6 +138,24 @@ export class ComboSystem {
       combos.push({ id: "modern_sluggers", name: "Modern Sluggers", kind: "mult", value: 1.5, detail: `${sluggers.length} modern mashers` });
     }
 
+    // Journeymen: five clubs, one lineup — the anti-Chemistry build
+    if (cards.length >= 5 && teamCounts.size === cards.length) {
+      combos.push({ id: "journeymen", name: "Journeymen", kind: "mult", value: 1.25, detail: `${cards.length} clubs, one lineup` });
+    }
+
+    // Eagle Eyes: a genuinely disciplined lineup, not just an average one
+    const totalDiscipline = cards.reduce((sum, c) => sum + c.stats.discipline, 0);
+    if (totalDiscipline >= 30) {
+      combos.push({ id: "eagle_eyes", name: "Eagle Eyes", kind: "flat", value: 6, detail: `${Math.round(totalDiscipline)} total Discipline` });
+    }
+
+    // Rookie Rally: the kids take over — every card a Rookie, 3+ of them.
+    // Upgrading a rookie breaks the rally; that's the tension.
+    const rookies = cards.filter((c) => c.card.rarity === "Rookie");
+    if (rookies.length >= 3 && rookies.length === cards.length) {
+      combos.push({ id: "rookie_rally", name: "Rookie Rally", kind: "mult", value: 1.5, detail: `${rookies.length} rookies, nobody else` });
+    }
+
     return combos;
   }
 

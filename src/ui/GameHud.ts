@@ -68,6 +68,9 @@ const COMBO_SHORT: Record<string, string> = {
   "Lefty Advantage": "Lefty",
   "Veteran Presence": "Veteran",
   "Modern Sluggers": "Modern",
+  Journeymen: "Journey",
+  "Eagle Eyes": "Eyes",
+  "Rookie Rally": "Rookies",
 };
 const comboReward = (combo: DetectedCombo): string => (combo.kind === "flat" ? `+${combo.value} base` : `x${combo.value}`);
 
@@ -137,6 +140,8 @@ export class GameHud {
   private previewClinches = false;
   /** Boss inning in progress — the meter dresses for the occasion. */
   private bossActive = false;
+  /** Cards allowed per play right now (The Crafty Vet squeezes it to 3). */
+  private maxCardsThisPlay: number = RULES.maxCardsPerPlay;
   private dangerFlash: Rectangle;
   private tutorialToast: Rectangle;
   private previewComboPanel: Rectangle;
@@ -883,6 +888,7 @@ export class GameHud {
     this.pitchText.text = `⚾ ${run.pitch.name.toUpperCase()} (${hand}) · DIFF ${run.pitch.difficulty}\n${PITCH_HINT[run.pitch.id] ?? run.pitch.description}`;
 
     this.bossActive = run.boss !== null;
+    this.maxCardsThisPlay = run.maxCardsThisPlay;
     if (run.boss) {
       const detail = run.boss.id === "umpire" && run.umpireTarget ? ` Today: ${run.umpireTarget}.` : "";
       this.bossText.text = `☠ BOSS: ${run.boss.name.toUpperCase()}\n${run.boss.description}${detail}`;
@@ -955,7 +961,7 @@ export class GameHud {
   }
 
   updatePreview(result: ScoreResult | null, selectedCount: number, leadoffName: string | null, suggestions: ComboSuggestion[]): void {
-    this.previewTitle.text = `SCORE PREVIEW · ${this.countString(result?.count ?? this.currentCount)} · ${selectedCount}/5`;
+    this.previewTitle.text = `SCORE PREVIEW · ${this.countString(result?.count ?? this.currentCount)} · ${selectedCount}/${this.maxCardsThisPlay}`;
     this.rebuildMeter(selectedCount > 0 ? result : null);
     if (!result || selectedCount === 0) {
       this.previewClinches = false;

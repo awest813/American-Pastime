@@ -6,12 +6,12 @@
   { "id": "bat-lyle", "name": "Patient Pete Lyle", "team": "Louisville Bats", "position": "2B", "side": "S", "era": "Vintage", "rarity": "Rookie", "power": 2, "contact": 6, "speed": 5, "discipline": 9, "defense": 5 },
 
   { "id": "her-finch", "name": "Sadie 'Slap' Finch", "team": "Harbor City Herons", "position": "2B", "side": "L", "era": "Modern", "rarity": "Starter", "power": 2, "contact": 9, "speed": 6, "discipline": 5, "defense": 5 },
-  { "id": "her-brooks", "name": "Deacon Brooks", "team": "Harbor City Herons", "position": "LF", "side": "R", "era": "Vintage", "rarity": "Starter", "power": 7, "contact": 6, "speed": 3, "discipline": 4, "defense": 4 },
+  { "id": "her-brooks", "name": "Deacon Brooks", "team": "Harbor City Herons", "position": "LF", "side": "R", "era": "Vintage", "rarity": "Starter", "power": 7, "contact": 6, "speed": 3, "discipline": 4, "defense": 4, "trait": "+5 base with two outs.", "traitId": "clutch" },
   { "id": "her-osei", "name": "Kwame 'Cannon' Osei", "team": "Harbor City Herons", "position": "P", "side": "R", "era": "Modern", "rarity": "Starter", "power": 3, "contact": 3, "speed": 4, "discipline": 6, "defense": 8, "trait": "Adds Defense to base score.", "traitId": "iron_glove" },
   { "id": "her-vance", "name": "Ginny Vance", "team": "Harbor City Herons", "position": "SS", "side": "R", "era": "Modern", "rarity": "Starter", "power": 4, "contact": 7, "speed": 7, "discipline": 5, "defense": 6 },
   { "id": "her-mudd", "name": "Otis 'Old Mud' Mudd", "team": "Harbor City Herons", "position": "C", "side": "R", "era": "Vintage", "rarity": "Rookie", "power": 5, "contact": 5, "speed": 1, "discipline": 7, "defense": 7 },
 
-  { "id": "rat-calloway", "name": "Buck Calloway", "team": "Desert Rattlers", "position": "3B", "side": "R", "era": "Vintage", "rarity": "Starter", "power": 8, "contact": 5, "speed": 2, "discipline": 3, "defense": 5 },
+  { "id": "rat-calloway", "name": "Buck Calloway", "team": "Desert Rattlers", "position": "3B", "side": "R", "era": "Vintage", "rarity": "Starter", "power": 8, "contact": 5, "speed": 2, "discipline": 3, "defense": 5, "trait": "+4 base when played with 2+ teammates.", "traitId": "captain" },
   { "id": "rat-quick", "name": "Lightning Lou Quick", "team": "Desert Rattlers", "position": "CF", "side": "L", "era": "Vintage", "rarity": "Starter", "power": 2, "contact": 6, "speed": 9, "discipline": 4, "defense": 5, "trait": "+2 base when played with another Speed 7+ card.", "traitId": "table_setter" },
   { "id": "rat-ibarra", "name": "Chuy Ibarra", "team": "Desert Rattlers", "position": "SS", "side": "R", "era": "Modern", "rarity": "Starter", "power": 4, "contact": 7, "speed": 6, "discipline": 4, "defense": 7 },
   { "id": "rat-pryor", "name": "Weezy Pryor", "team": "Desert Rattlers", "position": "LF", "side": "L", "era": "Modern", "rarity": "Rookie", "power": 6, "contact": 7, "speed": 4, "discipline": 3, "defense": 3 },
@@ -21,11 +21,11 @@
   { "id": "for-reyes", "name": "Tino Reyes", "team": "Ironville Forgers", "position": "2B", "side": "S", "era": "Modern", "rarity": "Starter", "power": 3, "contact": 8, "speed": 6, "discipline": 6, "defense": 6 },
   { "id": "for-baptiste", "name": "Remy Baptiste", "team": "Ironville Forgers", "position": "RF", "side": "L", "era": "Modern", "rarity": "Starter", "power": 7, "contact": 6, "speed": 4, "discipline": 4, "defense": 4 },
   { "id": "for-gruber", "name": "Ma Gruber", "team": "Ironville Forgers", "position": "3B", "side": "R", "era": "Vintage", "rarity": "Rookie", "power": 5, "contact": 6, "speed": 3, "discipline": 7, "defense": 6 },
-  { "id": "for-holt", "name": "Ezra 'Pockets' Holt", "team": "Ironville Forgers", "position": "DH", "side": "R", "era": "Vintage", "rarity": "Rookie", "power": 6, "contact": 6, "speed": 6, "discipline": 6, "defense": 2 },
+  { "id": "for-holt", "name": "Ezra 'Pockets' Holt", "team": "Ironville Forgers", "position": "DH", "side": "R", "era": "Vintage", "rarity": "Rookie", "power": 6, "contact": 6, "speed": 6, "discipline": 6, "defense": 2, "trait": "+5 base with two outs.", "traitId": "clutch" },
 
   { "id": "buc-navarro", "name": "Isla 'Cutlass' Navarro", "team": "Bayside Buccaneers", "position": "SS", "side": "R", "era": "Modern", "rarity": "Starter", "power": 4, "contact": 8, "speed": 7, "discipline": 4, "defense": 7 },
   { "id": "buc-drake", "name": "Salty Drake", "team": "Bayside Buccaneers", "position": "RF", "side": "L", "era": "Vintage", "rarity": "Starter", "power": 8, "contact": 5, "speed": 2, "discipline": 4, "defense": 3 },
-  { "id": "buc-kimura", "name": "Aiko Kimura", "team": "Bayside Buccaneers", "position": "CF", "side": "L", "era": "Modern", "rarity": "Starter", "power": 3, "contact": 7, "speed": 8, "discipline": 5, "defense": 6 },
+  { "id": "buc-kimura", "name": "Aiko Kimura", "team": "Bayside Buccaneers", "position": "CF", "side": "L", "era": "Modern", "rarity": "Starter", "power": 3, "contact": 7, "speed": 8, "discipline": 5, "defense": 6, "trait": "+3 base when leading off the play.", "traitId": "spark_plug" },
   { "id": "buc-teller", "name": "Gus 'Grinder' Teller", "team": "Bayside Buccaneers", "position": "C", "side": "R", "era": "Vintage", "rarity": "Rookie", "power": 4, "contact": 5, "speed": 2, "discipline": 8, "defense": 8, "trait": "Adds Defense to base score.", "traitId": "iron_glove" },
   { "id": "buc-flint", "name": "Barnaby Flint", "team": "Bayside Buccaneers", "position": "P", "side": "L", "era": "Vintage", "rarity": "Starter", "power": 2, "contact": 3, "speed": 5, "discipline": 7, "defense": 8 },
 
