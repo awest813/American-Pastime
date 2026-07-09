@@ -30,21 +30,51 @@ class App {
   }
 
   async bootstrap(): Promise<void> {
-    this.engine = await this._createEngine();
-    // adaptToDeviceRatio honors full DPR; past 2 the extra pixels cost fill
-    // rate (2.25x at DPR 3) with no visible gain on a scene this stylized.
-    // hardwareScalingLevel is 1/effectiveDPR, so capping at DPR 2 means 0.5.
-    if ((window.devicePixelRatio || 1) > 2) this.engine.setHardwareScalingLevel(0.5);
-    this.scene = new Scene(this.engine);
+    try {
+      this.engine = await this._createEngine();
+      // adaptToDeviceRatio honors full DPR; past 2 the extra pixels cost fill
+      // rate (2.25x at DPR 3) with no visible gain on a scene this stylized.
+      // hardwareScalingLevel is 1/effectiveDPR, so capping at DPR 2 means 0.5.
+      if ((window.devicePixelRatio || 1) > 2) this.engine.setHardwareScalingLevel(0.5);
+      this.scene = new Scene(this.engine);
 
-    if (templateConfig.features.physics) {
-      await this._setPhysics();
+      if (templateConfig.features.physics) {
+        await this._setPhysics();
+      }
+
+      await GameScene.create(this.scene, this.canvas);
+
+      this._config();
+      this._renderer();
+      this._dismissBoot();
+    } catch (error) {
+      // Never leave a first-time player on a black screen: surface a friendly
+      // message on the boot cover instead (usually an unsupported browser/GPU).
+      console.error("Cardball failed to start.", error);
+      this._showBootError();
     }
+  }
 
-    await GameScene.create(this.scene, this.canvas);
+  /** Fade the loading cover once the first scene is live. */
+  private _dismissBoot(): void {
+    const boot = document.getElementById("boot");
+    if (!boot) return;
+    // Let one frame paint the menu before the cover fades off it.
+    requestAnimationFrame(() => {
+      boot.classList.add("boot-done");
+      setTimeout(() => boot.remove(), 600);
+    });
+  }
 
-    this._config();
-    this._renderer();
+  /** Turn the loading cover into an unsupported-browser message. */
+  private _showBootError(): void {
+    const boot = document.getElementById("boot");
+    if (boot) boot.classList.add("boot-error");
+    const status = document.getElementById("boot-status");
+    if (status) {
+      status.textContent =
+        "Cardball couldn't start — this browser or device may not support WebGL. Try the latest Chrome, Edge, or Firefox on a desktop.";
+    }
   }
 
   async _createEngine(): Promise<Engine | WebGPUEngine> {
@@ -123,10 +153,6 @@ class App {
   private lastFpsUpdate = 0;
 
   _fps(): void {
-    if (!templateConfig.debug.showFps) {
-      return;
-    }
-
     // Writing to the DOM every frame forces layout work 60x/sec; 2 Hz reads the same.
     const now = performance.now();
     if (now - this.lastFpsUpdate < 500) return;
@@ -185,8 +211,11 @@ class App {
   }
 
   _renderer(): void {
+    // The fps read-out is a dev aid; import.meta.env.DEV folds to false in the
+    // shipped build, so this call (and the counter) drop out entirely.
+    const showFps = import.meta.env.DEV && templateConfig.debug.showFps;
     this.engine.runRenderLoop(() => {
-      this._fps();
+      if (showFps) this._fps();
       this.scene.render();
     });
   }
