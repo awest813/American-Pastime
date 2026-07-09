@@ -1,6 +1,4 @@
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { Mesh } from "@babylonjs/core/Meshes/mesh";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -8,6 +6,7 @@ import type { Scene } from "@babylonjs/core/scene";
 
 import type { RunnerState } from "../systems/types";
 import { Tweens } from "../utils/Tweens";
+import { buildPlayer, makeShadowMaterial, type PlayerMaterials } from "./PlayerToken";
 
 type BaseKey = keyof RunnerState;
 
@@ -27,7 +26,6 @@ const BASE_ORDER: BaseKey[] = ["first", "second", "third"];
 
 interface Token {
   root: TransformNode;
-  cap: Mesh;
 }
 
 /**
@@ -43,6 +41,7 @@ export class RunnerTokens {
   private batterId: string | null = null;
   private uniformMat: StandardMaterial;
   private skinMat: StandardMaterial;
+  private shadowMat: StandardMaterial;
   private capMats = new Map<string, StandardMaterial>();
   /** Bumped on every sync so stale animations stop touching reused state. */
   private generation = 0;
@@ -52,10 +51,13 @@ export class RunnerTokens {
     this.uniformMat.diffuseColor = Color3.FromHexString("#f4ecd8");
     this.uniformMat.emissiveColor = new Color3(0.32, 0.3, 0.26); // readable under night lights
     this.uniformMat.specularColor = Color3.Black();
+    this.uniformMat.freeze();
     this.skinMat = new StandardMaterial("runnerSkin", scene);
     this.skinMat.diffuseColor = Color3.FromHexString("#c9996b");
     this.skinMat.emissiveColor = new Color3(0.3, 0.22, 0.15);
     this.skinMat.specularColor = Color3.Black();
+    this.skinMat.freeze();
+    this.shadowMat = makeShadowMaterial(scene);
   }
 
   private capMat(color: string): StandardMaterial {
@@ -72,27 +74,14 @@ export class RunnerTokens {
     return mat;
   }
 
-  /** Build one chunky player: barrel body, ball head, team cap with a brim. */
   private buildToken(id: string, capColor: string): Token {
-    const root = new TransformNode(`runner-${id}`, this.scene);
-    const body = MeshBuilder.CreateCylinder(`runnerBody-${id}`, { height: 0.85, diameterTop: 0.5, diameterBottom: 0.64 }, this.scene);
-    body.position.y = 0.45;
-    body.material = this.uniformMat;
-    const head = MeshBuilder.CreateSphere(`runnerHead-${id}`, { diameter: 0.46, segments: 10 }, this.scene);
-    head.position.y = 1.06;
-    head.material = this.skinMat;
-    const cap = MeshBuilder.CreateCylinder(`runnerCap-${id}`, { height: 0.14, diameter: 0.5 }, this.scene);
-    cap.position.y = 1.28;
-    cap.material = this.capMat(capColor);
-    const brim = MeshBuilder.CreateCylinder(`runnerBrim-${id}`, { height: 0.05, diameter: 0.3 }, this.scene);
-    brim.position.set(0, 1.22, -0.26); // brim faces home (toward the camera)
-    brim.material = this.capMat(capColor);
-    for (const mesh of [body, head, cap, brim]) {
-      mesh.parent = root;
-      mesh.isPickable = false;
-      mesh.doNotSyncBoundingInfo = true;
-    }
-    return { root, cap };
+    const mats: PlayerMaterials = {
+      uniform: this.uniformMat,
+      skin: this.skinMat,
+      cap: this.capMat(capColor),
+      shadow: this.shadowMat,
+    };
+    return { root: buildPlayer(this.scene, `runner-${id}`, mats) };
   }
 
   private disposeToken(token: Token): void {

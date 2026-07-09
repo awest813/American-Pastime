@@ -9,6 +9,7 @@ import { BaseballToken } from "../entities/BaseballToken";
 import { Card3D, TEAM_COLORS } from "../entities/Card3D";
 import { CollectionScene } from "./CollectionScene";
 import { Effects } from "../entities/Effects";
+import { FielderTokens } from "../entities/FielderTokens";
 import { RunnerTokens } from "../entities/RunnerTokens";
 import { TableWorld } from "../entities/TableWorld";
 import { AudioSystem } from "../systems/AudioSystem";
@@ -49,6 +50,7 @@ export class GameScene {
   private tweens: Tweens;
   private effects: Effects;
   private runnerTokens: RunnerTokens;
+  private fielderTokens: FielderTokens;
   private audio = new AudioSystem();
   private run = new RunSystem();
   private deck: DeckSystem;
@@ -81,6 +83,7 @@ export class GameScene {
     this.tweens = new Tweens(scene);
     this.effects = new Effects(scene);
     this.runnerTokens = new RunnerTokens(scene, this.tweens);
+    this.fielderTokens = new FielderTokens(scene, this.tweens);
     this.deck = new DeckSystem(this.run.rng);
 
     this.hud = new GameHud(adt, {
@@ -377,6 +380,7 @@ export class GameScene {
       return;
     }
 
+    this.fielderTokens.spawn(); // mid-inning resume: the defense takes the field
     // Mid-inning: rebuild the hand meshes and the selection highlight, no re-deal.
     const cardById = new Map(deckCards.map((c) => [c.id, c]));
     for (const id of save.hand) {
@@ -431,6 +435,7 @@ export class GameScene {
   private async beginInning(): Promise<void> {
     this.clearHand();
     this.runnerTokens.set(this.run.runners, this.runnerCapColor);
+    this.fielderTokens.spawn(); // the rival defense takes the field
     this.refreshHud();
     this.updateBoard(0);
     void this.announceInning();
@@ -487,6 +492,7 @@ export class GameScene {
     this.hud.setVisible(false);
     this.clearHand(false);
     this.runnerTokens.clear();
+    this.fielderTokens.clear();
     this.audio.stopAmbience();
     this.run.phase = "menu";
     clearSave(); // abandoning ends the run — no resume point
@@ -500,6 +506,7 @@ export class GameScene {
     this.hud.setVisible(false);
     this.clearHand(false); // leftover cards shouldn't linger behind the end panel
     this.runnerTokens.clear();
+    this.fielderTokens.clear();
     clearSave(); // the run is over; nothing left to resume
     // Finished seasons — win or lose — go in the record book. Abandons don't.
     const { broken } = recordRun({
@@ -737,6 +744,8 @@ export class GameScene {
     const playedCards = played.map((c) => c.card);
     const result = this.score.evaluate(playedCards, this.scoreContext());
 
+    this.fielderTokens.pitch(); // the rival pitcher delivers as the hand commits
+
     // Cards stride out to the diamond and slap down flat, kicking up dust.
     this.hand = this.hand.filter((c) => !played.includes(c));
     this.selection = [];
@@ -791,6 +800,7 @@ export class GameScene {
     if (bigPlay) {
       this.world.pulseLights();
       this.world.shakeCamera();
+      this.fielderTokens.bigPlay(); // outfielders turn to watch it fly
       this.audio.swellAmbience(4); // the crowd erupts on a homer
     } else if (result.bases >= 2 || result.runs > 0) {
       this.world.shakeCamera(0.07, 250);
@@ -870,6 +880,7 @@ export class GameScene {
     await this.hud.showPopup(walkOff ? "WALK-OFF!" : "INNING WON!", walkOff ? UI.gold : UI.green, walkOff ? 1200 : 1000);
     this.run.finishInning();
     this.runnerTokens.clear(); // the side is retired; the diamond empties
+    this.fielderTokens.clear();
     if (this.run.phase === "victory") {
       this.endRun(true);
     } else {
