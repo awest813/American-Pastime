@@ -1,4 +1,3 @@
-import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -6,7 +5,7 @@ import type { Observer } from "@babylonjs/core/Misc/observable";
 import type { Scene } from "@babylonjs/core/scene";
 
 import { Tweens } from "../utils/Tweens";
-import { buildPlayer, makeShadowMaterial, type PlayerMaterials } from "./PlayerToken";
+import { buildPlayer, makePlasticMaterial, makeShadowMaterial, makeToyBaseMaterial, type PlayerMaterials } from "./PlayerToken";
 
 interface Spot {
   pos: [number, number];
@@ -53,26 +52,19 @@ export class FielderTokens {
   private capMat: StandardMaterial;
   private gloveMat: StandardMaterial;
   private shadowMat: StandardMaterial;
+  private baseMat: StandardMaterial;
   private idle: Observer<Scene> | null = null;
 
   constructor(private scene: Scene, private tweens: Tweens) {
     // Dim on purpose: the rival defense is ambient background, so the cream
     // base runners and the played cards stay the brightest things on the field.
-    this.uniformMat = this.solid("fielderUniform", "#333b4a", 0.18);
-    this.skinMat = this.solid("fielderSkin", "#c9996b", 0.24);
-    this.capMat = this.solid("fielderCap", "#7a2a33", 0.3);
-    this.gloveMat = this.solid("fielderGlove", "#6b4a2f", 0.22);
+    // Same glossy plastic as the runners, just muted — dark toy figures.
+    this.uniformMat = makePlasticMaterial(scene, "fielderUniform", "#333b4a", 0.18);
+    this.skinMat = makePlasticMaterial(scene, "fielderSkin", "#c9996b", 0.24);
+    this.capMat = makePlasticMaterial(scene, "fielderCap", "#7a2a33", 0.3);
+    this.gloveMat = makePlasticMaterial(scene, "fielderGlove", "#6b4a2f", 0.22);
+    this.baseMat = makeToyBaseMaterial(scene);
     this.shadowMat = makeShadowMaterial(scene);
-  }
-
-  private solid(name: string, hex: string, emissive: number): StandardMaterial {
-    const mat = new StandardMaterial(name, this.scene);
-    const c = Color3.FromHexString(hex);
-    mat.diffuseColor = c;
-    mat.emissiveColor = c.scale(emissive);
-    mat.specularColor = Color3.Black();
-    mat.freeze();
-    return mat;
   }
 
   /** Stand the defense. Idempotent — clears any prior nine first. */
@@ -83,6 +75,7 @@ export class FielderTokens {
       skin: this.skinMat,
       cap: this.capMat,
       shadow: this.shadowMat,
+      base: this.baseMat,
       glove: this.gloveMat,
     };
     let i = 0;

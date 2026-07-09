@@ -1,4 +1,3 @@
-import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -6,7 +5,7 @@ import type { Scene } from "@babylonjs/core/scene";
 
 import type { RunnerState } from "../systems/types";
 import { Tweens } from "../utils/Tweens";
-import { buildPlayer, makeShadowMaterial, type PlayerMaterials } from "./PlayerToken";
+import { buildPlayer, makePlasticMaterial, makeShadowMaterial, makeToyBaseMaterial, type PlayerMaterials } from "./PlayerToken";
 
 type BaseKey = keyof RunnerState;
 
@@ -42,34 +41,24 @@ export class RunnerTokens {
   private uniformMat: StandardMaterial;
   private skinMat: StandardMaterial;
   private shadowMat: StandardMaterial;
+  private baseMat: StandardMaterial;
   private capMats = new Map<string, StandardMaterial>();
   /** Bumped on every sync so stale animations stop touching reused state. */
   private generation = 0;
 
   constructor(private scene: Scene, private tweens: Tweens) {
-    this.uniformMat = new StandardMaterial("runnerUniform", scene);
-    this.uniformMat.diffuseColor = Color3.FromHexString("#f4ecd8");
-    this.uniformMat.emissiveColor = new Color3(0.32, 0.3, 0.26); // readable under night lights
-    this.uniformMat.specularColor = Color3.Black();
-    this.uniformMat.freeze();
-    this.skinMat = new StandardMaterial("runnerSkin", scene);
-    this.skinMat.diffuseColor = Color3.FromHexString("#c9996b");
-    this.skinMat.emissiveColor = new Color3(0.3, 0.22, 0.15);
-    this.skinMat.specularColor = Color3.Black();
-    this.skinMat.freeze();
+    // Glossy molded plastic — cream jersey, tan skin — so runners read as toys.
+    this.uniformMat = makePlasticMaterial(scene, "runnerUniform", "#f4ecd8", 0.3);
+    this.skinMat = makePlasticMaterial(scene, "runnerSkin", "#c9996b", 0.24);
+    this.baseMat = makeToyBaseMaterial(scene);
     this.shadowMat = makeShadowMaterial(scene);
   }
 
   private capMat(color: string): StandardMaterial {
     let mat = this.capMats.get(color);
     if (!mat) {
-      mat = new StandardMaterial(`runnerCap-${color}`, this.scene);
-      const c = Color3.FromHexString(color);
-      mat.diffuseColor = c;
-      mat.emissiveColor = c.scale(0.45);
-      mat.specularColor = Color3.Black();
+      mat = makePlasticMaterial(this.scene, `runnerCap-${color}`, color, 0.42);
       this.capMats.set(color, mat);
-      mat.freeze();
     }
     return mat;
   }
@@ -80,6 +69,7 @@ export class RunnerTokens {
       skin: this.skinMat,
       cap: this.capMat(capColor),
       shadow: this.shadowMat,
+      base: this.baseMat,
     };
     return { root: buildPlayer(this.scene, `runner-${id}`, mats) };
   }

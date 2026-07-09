@@ -11,7 +11,35 @@ export interface PlayerMaterials {
   skin: StandardMaterial;
   cap: StandardMaterial;
   shadow: StandardMaterial;
+  base?: StandardMaterial;
   glove?: StandardMaterial;
+}
+
+/**
+ * A molded-plastic material: saturated diffuse, a little emissive so it stays
+ * readable under the night lights, and a broad cool-white specular sheen — the
+ * glossy highlight that makes the tokens read as toy figurines, not clay.
+ */
+export function makePlasticMaterial(scene: Scene, name: string, hex: string, emissive = 0.25): StandardMaterial {
+  const mat = new StandardMaterial(name, scene);
+  const c = Color3.FromHexString(hex);
+  mat.diffuseColor = c;
+  mat.emissiveColor = c.scale(emissive);
+  mat.specularColor = new Color3(0.85, 0.86, 0.92); // bright plastic highlight
+  mat.specularPower = 44; // broad, soft sheen rather than a sharp mirror dot
+  mat.freeze();
+  return mat;
+}
+
+/** The dark glossy stand every toy figure is molded onto. */
+export function makeToyBaseMaterial(scene: Scene): StandardMaterial {
+  const mat = new StandardMaterial("toyBase", scene);
+  mat.diffuseColor = Color3.FromHexString("#191c24");
+  mat.emissiveColor = new Color3(0.05, 0.05, 0.06);
+  mat.specularColor = new Color3(0.7, 0.7, 0.78);
+  mat.specularPower = 32;
+  mat.freeze();
+  return mat;
 }
 
 /** A flat, unlit, alpha-blended dark disc that grounds every token. */
@@ -37,10 +65,18 @@ export function buildPlayer(scene: Scene, id: string, mats: PlayerMaterials, wit
   const root = new TransformNode(`player-${id}`, scene);
   const parts: Mesh[] = [];
 
-  const shadow = MeshBuilder.CreateCylinder(`pShadow-${id}`, { height: 0.02, diameter: 0.66, tessellation: 16 }, scene);
+  const shadow = MeshBuilder.CreateCylinder(`pShadow-${id}`, { height: 0.02, diameter: 0.7, tessellation: 16 }, scene);
   shadow.position.y = 0.011;
   shadow.material = mats.shadow;
   parts.push(shadow);
+
+  // The molded stand the figure sits on — the strongest "toy" tell.
+  if (mats.base) {
+    const stand = MeshBuilder.CreateCylinder(`pBase-${id}`, { height: 0.1, diameterTop: 0.58, diameterBottom: 0.72, tessellation: 20 }, scene);
+    stand.position.y = 0.05;
+    stand.material = mats.base;
+    parts.push(stand);
+  }
 
   const body = MeshBuilder.CreateCylinder(`pBody-${id}`, { height: 0.8, diameterTop: 0.46, diameterBottom: 0.62, tessellation: 14 }, scene);
   body.position.y = 0.42;
