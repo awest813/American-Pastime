@@ -5,6 +5,7 @@ body {
   height: 100%;
   margin: 0;
   padding: 0;
+  background: #0d0e14;
 }
 
 #renderCanvas {
@@ -23,4 +24,80 @@ body {
   line-height: 35px;
   color: #ca7497;
   font-size: 16px;
+}
+
+/* Boot / loading screen — a branded cover over the blank canvas while the
+   engine, physics WASM, and first scene load. app.ts fades it out on ready,
+   or turns it into a friendly message if the browser can't run the game. */
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 38%, #16233f 0%, #0a0b12 72%);
+  color: #f4ecd8;
+  font-family: Georgia, "Times New Roman", serif;
+  transition: opacity 0.45s ease;
+}
+
+#boot.boot-done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#boot-card {
+  text-align: center;
+  padding: 0 24px;
+}
+
+#boot-title {
+  font-family: "Courier New", monospace;
+  font-weight: bold;
+  font-size: clamp(30px, 6vw, 60px);
+  letter-spacing: 2px;
+  color: #ffd257;
+  text-shadow: 3px 3px 0 rgba(0, 0, 0, 0.4);
+}
+
+#boot-sub {
+  margin-top: 10px;
+  font-style: italic;
+  color: #9a917f;
+  font-size: clamp(14px, 2.5vw, 20px);
+}
+
+#boot-status {
+  margin-top: 30px;
+  font-family: "Courier New", monospace;
+  color: #7fd4a0;
+  font-size: 15px;
+  letter-spacing: 1px;
+  animation: boot-pulse 1.4s ease-in-out infinite;
+}
+
+#boot.boot-error #boot-status {
+  color: #e07a6a;
+  animation: none;
+  max-width: 440px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.55;
+}
+
+@keyframes boot-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #boot-status {
+    animation: none;
+  }
 }

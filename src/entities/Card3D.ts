@@ -7,7 +7,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import { RARITY_DISPLAY, type PlayerCard } from "../systems/types";
 
-const TEAM_COLORS: Record<string, string> = {
+export const TEAM_COLORS: Record<string, string> = {
   "Louisville Bats": "#8c2f39",
   "Harbor City Herons": "#1d4e89",
   "Desert Rattlers": "#b3541e",
@@ -64,31 +64,57 @@ export class Card3D {
     // Upgraded tiers earn a fancier frame: silver for All-Stars, gold for Legends
     const borderColor = c.rarity === "Legend" ? "#d4a017" : c.rarity === "AllStar" ? "#aeb6c4" : teamColor;
 
-    // Card stock + border
+    // Border frame (team / tier colored)
     ctx.fillStyle = borderColor;
     ctx.fillRect(0, 0, 512, 716);
-    ctx.fillStyle = "#f4ecd8";
+
+    // Card stock: an aged-paper vertical gradient instead of a flat fill
+    const stock = ctx.createLinearGradient(0, 18, 0, 698);
+    stock.addColorStop(0, "#f8f1de");
+    stock.addColorStop(1, "#e9dcbd");
+    ctx.fillStyle = stock;
     ctx.fillRect(18, 18, 476, 680);
 
-    // Name banner
-    ctx.fillStyle = teamColor;
+    // Faint baseball watermark behind the stat block
+    this.drawBallWatermark(ctx, 256, 430);
+
+    // Classic vintage inner hairline frame
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(30, 30, 452, 656);
+
+    // Name banner: a subtle gradient with a top highlight and a gold accent
+    // rule underneath — a little printed depth on the nameplate.
+    const banner = ctx.createLinearGradient(0, 18, 0, 106);
+    banner.addColorStop(0, this.shade(teamColor, 0.14));
+    banner.addColorStop(1, this.shade(teamColor, -0.16));
+    ctx.fillStyle = banner;
     ctx.fillRect(18, 18, 476, 88);
-    ctx.fillStyle = "#f4ecd8";
+    ctx.fillStyle = this.shade(teamColor, 0.34);
+    ctx.fillRect(18, 18, 476, 3); // catch-light along the top edge
+    ctx.fillStyle = "#d4a017";
+    ctx.fillRect(18, 104, 476, 3);
+    ctx.fillStyle = "#f8f1de";
     ctx.textAlign = "center";
     const displayName = c.name.length > 24 ? `${c.name.slice(0, 23)}…` : c.name;
     ctx.font = c.name.length > 18 ? "bold 30px Georgia" : "bold 36px Georgia";
     ctx.fillText(displayName, 256, 74);
 
-    // Position / handedness / era chips
+    // Position badge + handedness + era
+    this.roundRect(ctx, 34, 126, 84, 44, 9);
+    ctx.fillStyle = teamColor;
+    ctx.fill();
+    ctx.fillStyle = "#f8f1de";
+    ctx.font = "bold 30px Georgia";
+    ctx.textAlign = "center";
+    ctx.fillText(c.position, 76, 158);
     ctx.fillStyle = "#2b2b2b";
-    ctx.font = "bold 34px Georgia";
-    ctx.textAlign = "left";
-    ctx.fillText(c.position, 40, 156);
     ctx.font = "26px Georgia";
-    ctx.fillText(`Bats ${c.side}`, 130, 154);
+    ctx.textAlign = "left";
+    ctx.fillText(`Bats ${c.side}`, 134, 156);
     ctx.textAlign = "right";
     ctx.fillStyle = c.era === "Vintage" ? "#7a5c2e" : "#2e5c7a";
-    ctx.fillText(c.era.toUpperCase(), 472, 154);
+    ctx.fillText(c.era.toUpperCase(), 472, 156);
 
     // Team line
     ctx.textAlign = "center";
@@ -113,10 +139,12 @@ export class Card3D {
       ctx.fillStyle = comboReady ? "#8c6d1f" : "#3b352b";
       ctx.font = "bold 28px 'Courier New', monospace";
       ctx.fillText(label, 48, y + 24);
-      // Stat pips
+      // Stat pips — rounded, filled to the value; the last filled pip glows
+      // gold when the stat crosses a combo threshold.
       for (let i = 0; i < 9; i++) {
         ctx.fillStyle = i < value ? (comboReady && i >= value - 1 ? "#d4a017" : teamColor) : "#d8cfba";
-        ctx.fillRect(240 + i * 22, y + 4, 16, 22);
+        this.roundRect(ctx, 240 + i * 22, y + 4, 16, 22, 4);
+        ctx.fill();
       }
       ctx.textAlign = "right";
       ctx.fillStyle = comboReady ? "#8c6d1f" : "#3b352b";
@@ -145,6 +173,21 @@ export class Card3D {
     ctx.fillStyle = stars ? "#a8842c" : "#8a8171";
     ctx.font = stars ? "bold 22px Georgia" : "20px Georgia";
     ctx.fillText(`— ${rarityName}${stars} —`, 256, 692);
+
+    // Foil shimmer for upgraded tiers — a soft diagonal light band on top
+    if (c.rarity === "AllStar" || c.rarity === "Legend") {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const tint = c.rarity === "Legend" ? "255,214,110" : "200,214,235";
+      const peak = c.rarity === "Legend" ? "0.30" : "0.20";
+      const foil = ctx.createLinearGradient(40, 40, 472, 676);
+      foil.addColorStop(0.3, `rgba(${tint},0)`);
+      foil.addColorStop(0.5, `rgba(${tint},${peak})`);
+      foil.addColorStop(0.7, `rgba(${tint},0)`);
+      ctx.fillStyle = foil;
+      ctx.fillRect(18, 18, 476, 680);
+      ctx.restore();
+    }
 
     tex.update();
   }
@@ -204,6 +247,40 @@ export class Card3D {
       default:
         return false;
     }
+  }
+
+  /** Lighten (amt > 0) or darken (amt < 0) a #rrggbb color; passthrough otherwise. */
+  private shade(hex: string, amt: number): string {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+    const channel = (offset: number): string => {
+      const value = parseInt(hex.slice(offset, offset + 2), 16);
+      const shaded = amt < 0 ? value * (1 + amt) : value + (255 - value) * amt;
+      return Math.max(0, Math.min(255, Math.round(shaded)))
+        .toString(16)
+        .padStart(2, "0");
+    };
+    return `#${channel(1)}${channel(3)}${channel(5)}`;
+  }
+
+  /** A faint baseball (circle + two curved seams) printed behind the stats. */
+  private drawBallWatermark(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+    ctx.save();
+    ctx.globalAlpha = 0.09;
+    ctx.strokeStyle = "#6b4a2f";
+    ctx.lineWidth = 7;
+    const r = 122;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 0.55, cy - r * 0.82);
+    ctx.quadraticCurveTo(cx - r * 0.12, cy, cx - r * 0.55, cy + r * 0.82);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx + r * 0.55, cy - r * 0.82);
+    ctx.quadraticCurveTo(cx + r * 0.12, cy, cx + r * 0.55, cy + r * 0.82);
+    ctx.stroke();
+    ctx.restore();
   }
 
   private roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {

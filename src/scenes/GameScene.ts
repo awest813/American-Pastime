@@ -1,14 +1,16 @@
 import "@babylonjs/core/Culling/ray"; // side-effect: enables scene.pick for card selection
-import { AdvancedDynamicTexture } from "@babylonjs/gui/2D";
+import { AdvancedDynamicTexture, Rectangle } from "@babylonjs/gui/2D";
 import { KeyboardEventTypes } from "@babylonjs/core/Events/keyboardEvents";
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 
 import { BaseballToken } from "../entities/BaseballToken";
-import { Card3D } from "../entities/Card3D";
+import { Card3D, TEAM_COLORS } from "../entities/Card3D";
 import { CollectionScene } from "./CollectionScene";
 import { Effects } from "../entities/Effects";
+import { FielderTokens } from "../entities/FielderTokens";
+import { RunnerTokens } from "../entities/RunnerTokens";
 import { TableWorld } from "../entities/TableWorld";
 import { AudioSystem } from "../systems/AudioSystem";
 import { ComboSystem } from "../systems/ComboSystem";
@@ -47,6 +49,8 @@ export class GameScene {
   private world: TableWorld;
   private tweens: Tweens;
   private effects: Effects;
+  private runnerTokens: RunnerTokens;
+  private fielderTokens: FielderTokens;
   private audio = new AudioSystem();
   private run = new RunSystem();
   private deck: DeckSystem;
@@ -71,11 +75,15 @@ export class GameScene {
   private approach: BattingApproach = "swing";
   private busy = false;
   private lastSeed = "";
+  /** Full-screen black dip that smooths menu ↔ game scene swaps. */
+  private fader: Rectangle;
 
   private constructor(private scene: Scene, canvas: HTMLCanvasElement, adt: AdvancedDynamicTexture) {
     this.world = new TableWorld(scene, canvas);
     this.tweens = new Tweens(scene);
     this.effects = new Effects(scene);
+    this.runnerTokens = new RunnerTokens(scene, this.tweens);
+    this.fielderTokens = new FielderTokens(scene, this.tweens);
     this.deck = new DeckSystem(this.run.rng);
 
     this.hud = new GameHud(adt, {
@@ -174,7 +182,10 @@ export class GameScene {
     });
 
     // Overlays created last so they render above every other panel
-    this.history = new HistoryPanel(adt, () => this.history.setVisible(false));
+    this.history = new HistoryPanel(adt, () => {
+      this.audio.play("click");
+      this.history.setVisible(false);
+    });
     this.comboBook = new ComboBook(adt, this.run.comboMeta, () => this.toggleComboBook());
     this.pause = new PausePanel(adt, {
       onResume: () => this.pause.setVisible(false),
@@ -194,6 +205,17 @@ export class GameScene {
       onApply: () => this.applySettings(),
     });
     this.applySettings();
+
+    // Transition fader on top of everything; new screens fade up from black.
+    this.fader = new Rectangle("screenFader");
+    this.fader.width = 1;
+    this.fader.height = 1;
+    this.fader.background = "#08080c";
+    this.fader.thickness = 0;
+    this.fader.alpha = 0;
+    this.fader.isVisible = false;
+    this.fader.isPointerBlocker = false;
+    adt.addControl(this.fader);
 
     this.bindPointer();
     this.bindHotkeys();
@@ -246,6 +268,20 @@ export class GameScene {
 
   // ── Run flow ────────────────────────────────────────────────────────────
 
+  /** Fade the freshly swapped screen up from black (call right after the swap). */
+  private fadeIn(): void {
+    this.fader.isVisible = true;
+    const start = performance.now();
+    const duration = 340 / Tweens.timeScale;
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - start) / duration);
+      this.fader.alpha = 0.9 * (1 - t) * (1 - t);
+      if (t >= 1) this.fader.isVisible = false;
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
   private startRun(seed?: string): void {
     this.menu.setVisible(false);
     this.end.setVisible(false);
@@ -258,6 +294,7 @@ export class GameScene {
     this.deck.reset(this.run.deckCards);
     this.hud.setVisible(true);
     this.audio.startAmbience();
+    this.fadeIn();
     void this.beginInning();
   }
 
@@ -332,7 +369,9 @@ export class GameScene {
 
     this.hud.setVisible(true);
     this.audio.startAmbience();
+    this.fadeIn();
     this.updateBoard(this.run.runs);
+    this.runnerTokens.set(this.run.runners, this.runnerCapColor);
 
     if (this.run.phase === "shop") {
       this.shop.refresh(this.run);
@@ -341,6 +380,7 @@ export class GameScene {
       return;
     }
 
+    this.fielderTokens.spawn(); // mid-inning resume: the defense takes the field
     // Mid-inning: rebuild the hand meshes and the selection highlight, no re-deal.
     const cardById = new Map(deckCards.map((c) => [c.id, c]));
     for (const id of save.hand) {
@@ -366,6 +406,12 @@ export class GameScene {
     this.refreshPreview();
   }
 
+  /** Cap color for a runner token; runner ids are card ids into the run deck. */
+  private runnerCapColor = (runnerId: string): string => {
+    const card = this.run.deckCards.find((c) => c.id === runnerId);
+    return (card && TEAM_COLORS[card.team]) || "#9a917f";
+  };
+
   /** The 3D scoreboard is the primary score display. */
   private updateBoard(runs: number): void {
     const met = runs >= this.run.target;
@@ -388,6 +434,8 @@ export class GameScene {
 
   private async beginInning(): Promise<void> {
     this.clearHand();
+    this.runnerTokens.set(this.run.runners, this.runnerCapColor);
+    this.fielderTokens.spawn(); // the rival defense takes the field
     this.refreshHud();
     this.updateBoard(0);
     void this.announceInning();
@@ -443,17 +491,22 @@ export class GameScene {
     this.debug.setVisible(false);
     this.hud.setVisible(false);
     this.clearHand(false);
+    this.runnerTokens.clear();
+    this.fielderTokens.clear();
     this.audio.stopAmbience();
     this.run.phase = "menu";
     clearSave(); // abandoning ends the run — no resume point
     this.world.updateScoreboard("CARDBALL", "CLASSIC", "");
     this.menu.setVisible(true);
+    this.fadeIn();
   }
 
   private endRun(victory: boolean): void {
     this.debug.setVisible(false);
     this.hud.setVisible(false);
     this.clearHand(false); // leftover cards shouldn't linger behind the end panel
+    this.runnerTokens.clear();
+    this.fielderTokens.clear();
     clearSave(); // the run is over; nothing left to resume
     // Finished seasons — win or lose — go in the record book. Abandons don't.
     const { broken } = recordRun({
@@ -531,7 +584,7 @@ export class GameScene {
     // Deal with a stagger; new cards fly in from the deck spot with a spin flourish.
     const deals = newCards.map((card3d, i) =>
       this.tweens.delay(i * 90).then(() => {
-        this.audio.play("deal");
+        this.audio.play("deal", i);
         const fromY = -Math.PI * 2;
         const toY = card3d.homeRotation.y;
         void this.tweens.animate(320, (t) => {
@@ -691,6 +744,8 @@ export class GameScene {
     const playedCards = played.map((c) => c.card);
     const result = this.score.evaluate(playedCards, this.scoreContext());
 
+    this.fielderTokens.pitch(); // the rival pitcher delivers as the hand commits
+
     // Cards stride out to the diamond and slap down flat, kicking up dust.
     this.hand = this.hand.filter((c) => !played.includes(c));
     this.selection = [];
@@ -698,7 +753,7 @@ export class GameScene {
     const flights = played.map((card3d, i) => {
       const slot = new Vector3((i - (played.length - 1) / 2) * 1.7, 0.06 + i * 0.005, 1.6);
       return this.tweens.delay(i * 110).then(async () => {
-        this.audio.play("deal");
+        this.audio.play("deal", i);
         void this.tweens.animate(300, (t) => {
           card3d.mesh.rotation.x = HAND_TILT + (Math.PI / 2 - HAND_TILT) * t;
         });
@@ -745,11 +800,15 @@ export class GameScene {
     if (bigPlay) {
       this.world.pulseLights();
       this.world.shakeCamera();
+      this.fielderTokens.bigPlay(); // outfielders turn to watch it fly
       this.audio.swellAmbience(4); // the crowd erupts on a homer
     } else if (result.bases >= 2 || result.runs > 0) {
       this.world.shakeCamera(0.07, 250);
       this.audio.swellAmbience(2.4); // a solid rally gets a rise
     }
+    // The little ballplayers act the play out on the diamond while the
+    // numbers land: batter legs it out, runners advance, scorers cross home.
+    void this.runnerTokens.applyPlay(result.runnersBefore, result.runnersAfter, result.runs > 0, result.bases >= 4, this.runnerCapColor);
     const runsBefore = this.run.runs;
     const popup = result.runs > 0 ? `+${result.runs} RUN${result.runs === 1 ? "" : "S"}!` : result.outs > 0 ? `${result.outcome.toUpperCase()}` : `${result.outcome.toUpperCase()}!`;
     void this.hud.showPopup(popup, result.runs > 0 ? UI.gold : result.outs > 0 ? UI.red : UI.green, 1000);
@@ -769,7 +828,8 @@ export class GameScene {
     this.refreshPreview();
 
     if (this.run.inningWon) {
-      await this.winInning();
+      // Winning on the final available at-bat earns the walk-off call.
+      await this.winInning(this.run.playsLeft <= 0);
     } else if (this.run.inningLost) {
       this.run.phase = "gameOver";
       this.audio.play("lose");
@@ -792,7 +852,7 @@ export class GameScene {
     await Promise.all(
       discarded.map((card3d, i) =>
         this.tweens.delay(i * 70).then(() => {
-          this.audio.play("deal");
+          this.audio.play("deal", i);
           // Tumble end-over-end into the dugout pile
           void this.tweens.animate(300, (t) => {
             card3d.mesh.rotation.z = t * Math.PI * 1.5;
@@ -813,12 +873,14 @@ export class GameScene {
     this.autosave(); // discard resolved — checkpoint the refreshed hand
   }
 
-  private async winInning(): Promise<void> {
+  private async winInning(walkOff = false): Promise<void> {
     this.audio.play("win");
-    this.audio.swellAmbience(3.2); // crowd cheers the inning home
+    this.audio.swellAmbience(walkOff ? 4 : 3.2); // crowd cheers the inning home
     this.effects.confetti(new Vector3(0, 2.5, 1.5));
-    await this.hud.showPopup("INNING WON!", UI.green, 1000);
+    await this.hud.showPopup(walkOff ? "WALK-OFF!" : "INNING WON!", walkOff ? UI.gold : UI.green, walkOff ? 1200 : 1000);
     this.run.finishInning();
+    this.runnerTokens.clear(); // the side is retired; the diamond empties
+    this.fielderTokens.clear();
     if (this.run.phase === "victory") {
       this.endRun(true);
     } else {
@@ -849,6 +911,9 @@ export class GameScene {
     const result = this.previewResult();
     this.hud.updatePreview(result, this.selection.length, this.selection[0]?.card.name ?? null, this.comboSuggestions(result));
     this.hud.setSelectionBadges(this.selection.map((c) => c.mesh));
+    // The leadoff card steps up to the plate on the field itself.
+    const lead = this.selection[0]?.card ?? null;
+    this.runnerTokens.setBatter(lead?.id ?? null, lead ? (TEAM_COLORS[lead.team] ?? "#9a917f") : "#9a917f");
     this.refreshHud();
   }
 

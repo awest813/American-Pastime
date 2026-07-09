@@ -1,5 +1,5 @@
 import { Control, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
-import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
+import { animatePanelIn, UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
 
 export interface EndCallbacks {
   onNewRun: () => void;
@@ -10,6 +10,7 @@ export interface EndCallbacks {
 /** Shared game-over / championship screen. */
 export class EndPanel {
   private root: Rectangle;
+  private panel: Rectangle;
   private title: TextBlock;
   private recordBanner: TextBlock;
   private detail: TextBlock;
@@ -24,6 +25,7 @@ export class EndPanel {
     adt.addControl(this.root);
 
     const panel = makePanel("720px", "500px");
+    this.panel = panel;
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -89,6 +91,7 @@ export class EndPanel {
     this.stats.text = stats;
     this.stats.isVisible = stats !== "";
     this.root.isVisible = true;
+    animatePanelIn(this.panel);
   }
 
   setVisible(visible: boolean): void {

@@ -150,7 +150,8 @@ export class AudioSystem {
         this.tone(880, t, 0.05, { type: "square", gain: 0.12 });
         break;
       case "deal":
-        this.noise(t, 0.06, { filter: 4000, gain: 0.1 });
+        // Each card in a stagger whispers slightly brighter than the last
+        this.noise(t, 0.06, { filter: 3400 + variant * 350, gain: 0.1 });
         break;
       case "select":
         this.tone(620, t, 0.05, { type: "triangle", gain: 0.15 });

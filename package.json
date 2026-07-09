@@ -1,36 +1,32 @@
 {
-  "name": "vite-babylon-900",
-  "description": "Babylon.js 9 and Babylon Lite Compat starter templates for Vite 8, TypeScript, React, Vue, and Svelte.",
-  "author": {
-    "name": "Andrei Stepanov",
-    "email": "eldinor@gmail.com",
-    "url": "https://babylonpress.org/"
-  },
+  "name": "cardball-classic",
+  "description": "Cardball Classic — a roguelike baseball-card deckbuilder. Balatro, but baseball cards.",
+  "author": "nerdretro",
   "contributors": [
+    "Andrei Stepanov — bp900 template (https://babylonpress.org/)",
     "minibao (https://github.com/minibao/babylon-vite)"
   ],
   "private": true,
-  "version": "0.2.0",
+  "version": "0.1.0",
   "license": "MIT",
-  "homepage": "https://babylonpress.org/",
+  "homepage": "https://github.com/awest813/American-Pastime#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/eldinor/bp900.git"
+    "url": "git+https://github.com/awest813/American-Pastime.git"
   },
   "bugs": {
-    "url": "https://github.com/eldinor/bp900/issues"
+    "url": "https://github.com/awest813/American-Pastime/issues"
   },
   "keywords": [
+    "baseball",
+    "roguelike",
+    "deckbuilder",
+    "card-game",
     "babylonjs",
-    "babylon-lite",
-    "lite-compat",
+    "webgl",
+    "webgpu",
     "vite",
-    "typescript",
-    "react",
-    "vue",
-    "svelte",
-    "template",
-    "starter"
+    "typescript"
   ],
   "type": "module",
   "scripts": {

@@ -1,15 +1,32 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <link rel="icon" type="image/svg+xml" href="/bplogo.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title><%= VITE_APP_TITLE %></title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Cardball Classic — a cursed baseball card engine</title>
+    <meta name="description"
+        content="A roguelike baseball-card deckbuilder. Draw a hand, pick an approach, and let combos turn cardboard stats into runs. Beat nine innings to take the pennant." />
+    <meta name="theme-color" content="#0d0e14" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Cardball Classic" />
+    <meta property="og:description" content="Balatro, but baseball cards — a roguelike baseball-card deckbuilder." />
+    <meta name="twitter:card" content="summary" />
     <link rel="stylesheet" href="/src/css/main.css">
 </head>
 
 <body>
+    <!-- Boot screen: shown until the engine and first scene are ready, so a
+         first-time player never stares at a blank canvas. app.ts removes it. -->
+    <div id="boot">
+        <div id="boot-card">
+            <div id="boot-title">CARDBALL CLASSIC</div>
+            <div id="boot-sub">a cursed baseball card engine</div>
+            <div id="boot-status">warming up the bullpen…</div>
+        </div>
+    </div>
     <script type="module" src="/src/app.ts"></script>
 </body>
 

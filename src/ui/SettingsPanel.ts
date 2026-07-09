@@ -1,7 +1,7 @@
 import { Control, Rectangle, TextBlock, type AdvancedDynamicTexture, type Button, type StackPanel } from "@babylonjs/gui/2D";
 import type { AudioSystem } from "../systems/AudioSystem";
 import { SPEED_ORDER, resetSettings, saveSettings, settings, type GameSpeed } from "../systems/Settings";
-import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle, setButtonBackground } from "./kit";
+import { animatePanelIn, UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle, setButtonBackground } from "./kit";
 
 export interface SettingsCallbacks {
   onClose: () => void;
@@ -23,6 +23,7 @@ const SPEED_LABELS: Record<GameSpeed, string> = {
  */
 export class SettingsPanel {
   private root: Rectangle;
+  private panel: Rectangle;
   private volumeMeter: TextBlock;
   private muteButton: Button;
   private ambienceButton: Button;
@@ -42,6 +43,7 @@ export class SettingsPanel {
     adt.addControl(this.root);
 
     const panel = makePanel("660px", "640px");
+    this.panel = panel;
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -173,7 +175,10 @@ export class SettingsPanel {
   }
 
   setVisible(visible: boolean): void {
-    if (visible) this.refresh();
+    if (visible) {
+      this.refresh();
+      animatePanelIn(this.panel);
+    }
     this.root.isVisible = visible;
   }
 
