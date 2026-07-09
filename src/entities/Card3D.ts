@@ -83,12 +83,15 @@ export class Card3D {
     ctx.lineWidth = 2;
     ctx.strokeRect(30, 30, 452, 656);
 
-    // Name banner: a subtle gradient with a gold accent rule underneath
+    // Name banner: a subtle gradient with a top highlight and a gold accent
+    // rule underneath — a little printed depth on the nameplate.
     const banner = ctx.createLinearGradient(0, 18, 0, 106);
     banner.addColorStop(0, this.shade(teamColor, 0.14));
     banner.addColorStop(1, this.shade(teamColor, -0.16));
     ctx.fillStyle = banner;
     ctx.fillRect(18, 18, 476, 88);
+    ctx.fillStyle = this.shade(teamColor, 0.34);
+    ctx.fillRect(18, 18, 476, 3); // catch-light along the top edge
     ctx.fillStyle = "#d4a017";
     ctx.fillRect(18, 104, 476, 3);
     ctx.fillStyle = "#f8f1de";
@@ -136,10 +139,12 @@ export class Card3D {
       ctx.fillStyle = comboReady ? "#8c6d1f" : "#3b352b";
       ctx.font = "bold 28px 'Courier New', monospace";
       ctx.fillText(label, 48, y + 24);
-      // Stat pips
+      // Stat pips — rounded, filled to the value; the last filled pip glows
+      // gold when the stat crosses a combo threshold.
       for (let i = 0; i < 9; i++) {
         ctx.fillStyle = i < value ? (comboReady && i >= value - 1 ? "#d4a017" : teamColor) : "#d8cfba";
-        ctx.fillRect(240 + i * 22, y + 4, 16, 22);
+        this.roundRect(ctx, 240 + i * 22, y + 4, 16, 22, 4);
+        ctx.fill();
       }
       ctx.textAlign = "right";
       ctx.fillStyle = comboReady ? "#8c6d1f" : "#3b352b";
@@ -260,10 +265,10 @@ export class Card3D {
   /** A faint baseball (circle + two curved seams) printed behind the stats. */
   private drawBallWatermark(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
     ctx.save();
-    ctx.globalAlpha = 0.06;
-    ctx.strokeStyle = "#3b352b";
-    ctx.lineWidth = 6;
-    const r = 118;
+    ctx.globalAlpha = 0.09;
+    ctx.strokeStyle = "#6b4a2f";
+    ctx.lineWidth = 7;
+    const r = 122;
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.stroke();

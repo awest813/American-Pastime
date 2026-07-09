@@ -61,8 +61,16 @@ export function makeShadowMaterial(scene: Scene): StandardMaterial {
  * the returned node (move/scale it), non-pickable, and skip bounding sync.
  * The silhouette lives here so runners and fielders always match.
  */
+/** Overall figure size relative to the modeled geometry. The animation code
+ *  drives the root at scale 1; this inner rig does the actual shrink so the
+ *  figures read as small tabletop minis without touching any of that math. */
+const FIGURE_SCALE = 0.85;
+
 export function buildPlayer(scene: Scene, id: string, mats: PlayerMaterials, withGlove = false): TransformNode {
   const root = new TransformNode(`player-${id}`, scene);
+  const rig = new TransformNode(`playerRig-${id}`, scene);
+  rig.parent = root;
+  rig.scaling.setAll(FIGURE_SCALE);
   const parts: Mesh[] = [];
 
   const shadow = MeshBuilder.CreateCylinder(`pShadow-${id}`, { height: 0.02, diameter: 0.7, tessellation: 16 }, scene);
@@ -111,7 +119,7 @@ export function buildPlayer(scene: Scene, id: string, mats: PlayerMaterials, wit
   }
 
   for (const mesh of parts) {
-    mesh.parent = root;
+    mesh.parent = rig;
     mesh.isPickable = false;
     mesh.doNotSyncBoundingInfo = true;
   }
