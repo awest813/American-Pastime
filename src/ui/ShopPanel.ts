@@ -1,7 +1,7 @@
 import { Control, Rectangle, StackPanel, TextBlock, type AdvancedDynamicTexture, type Button } from "@babylonjs/gui/2D";
 import type { RunSystem } from "../systems/RunSystem";
 import { RARITY_DISPLAY, type EquipmentCard, type PlayerCard } from "../systems/types";
-import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
+import { animatePanelIn, UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
 import { equipmentGlyph } from "./icons";
 
 export interface ShopCallbacks {
@@ -35,6 +35,7 @@ const EQUIPMENT_HINT: Record<string, string> = {
 /** Between-innings clubhouse shop: three equipment offers, reroll, continue. */
 export class ShopPanel {
   private root: Rectangle;
+  private panel: Rectangle;
   private cashText: TextBlock;
   private ownedText: TextBlock;
   private offersRow: StackPanel;
@@ -50,6 +51,7 @@ export class ShopPanel {
     adt.addControl(this.root);
 
     const panel = makePanel("900px", "830px");
+    this.panel = panel;
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -231,5 +233,6 @@ export class ShopPanel {
 
   setVisible(visible: boolean): void {
     this.root.isVisible = visible;
+    if (visible) animatePanelIn(this.panel);
   }
 }

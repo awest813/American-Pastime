@@ -1,6 +1,6 @@
 import { Control, Rectangle, type AdvancedDynamicTexture, type StackPanel } from "@babylonjs/gui/2D";
 import type { ComboMeta } from "../systems/types";
-import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
+import { animatePanelIn, UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
 
 const COMBO_HINT: Record<string, string> = {
   contact_hit: "Contact 7+ on any card",
@@ -25,6 +25,7 @@ const COMBO_HINT: Record<string, string> = {
  */
 export class ComboBook {
   private root: Rectangle;
+  private panel: Rectangle;
 
   constructor(adt: AdvancedDynamicTexture, combos: ComboMeta[], onClose: () => void) {
     this.root = new Rectangle("comboBookRoot");
@@ -37,6 +38,7 @@ export class ComboBook {
     adt.addControl(this.root);
 
     const panel = makePanel("980px", "700px");
+    this.panel = panel;
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -128,5 +130,6 @@ export class ComboBook {
 
   setVisible(visible: boolean): void {
     this.root.isVisible = visible;
+    if (visible) animatePanelIn(this.panel);
   }
 }

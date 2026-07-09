@@ -1,4 +1,5 @@
 import { Button, Control, Rectangle, StackPanel, TextBlock } from "@babylonjs/gui/2D";
+import { Tweens } from "../utils/Tweens";
 
 /** Shared palette so every panel reads like the same vintage scoreboard. */
 export const UI = {
@@ -115,6 +116,30 @@ export function makeStack(vertical = true): StackPanel {
   const stack = new StackPanel();
   stack.isVertical = vertical;
   return stack;
+}
+
+/** Ease a panel in — quick scale + fade so screens arrive instead of snapping.
+ *  Call right after making the panel visible; safe to re-trigger. */
+export function animatePanelIn(control: Control, durationMs = 170): void {
+  const start = performance.now();
+  const duration = durationMs / Tweens.timeScale;
+  control.scaleX = 0.94;
+  control.scaleY = 0.94;
+  control.alpha = 0;
+  const tick = () => {
+    const t = Math.min(1, (performance.now() - start) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    control.scaleX = 0.94 + eased * 0.06;
+    control.scaleY = 0.94 + eased * 0.06;
+    control.alpha = eased;
+    if (t < 1 && control.isVisible) requestAnimationFrame(tick);
+    else {
+      control.scaleX = 1;
+      control.scaleY = 1;
+      control.alpha = 1;
+    }
+  };
+  requestAnimationFrame(tick);
 }
 
 export function topLeft(control: Control): void {

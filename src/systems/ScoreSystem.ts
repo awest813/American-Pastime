@@ -553,7 +553,7 @@ export class ScoreSystem {
 
     const sum = (stat: Stat) => effCards.reduce((total, c) => total + c.stats[stat], 0);
     const base = sum("contact") + sum("power") + sum("speed");
-    lines.push({ label: "Base (Contact + Power + Speed)", value: `${Math.round(base)}` });
+    lines.push({ label: "Base: CON + POW + SPD", value: `${Math.round(base)}` });
     lines.push({ label: "Approach", value: APPROACH_LABEL[ctx.approach] });
     lines.push({ label: "Count", value: this.countString(count) });
     lines.push({ label: "Runners before", value: this.runnerString(runnersBefore) });
@@ -715,7 +715,7 @@ export class ScoreSystem {
       lines.push({ label: "Scorekeeper's Pencil", value: `+${activeCombos.length} quality` });
     }
 
-    lines.push({ label: `vs ${ctx.pitch.name} (difficulty ${difficulty})`, value: `÷${difficulty}` });
+    lines.push({ label: `vs ${ctx.pitch.name} (diff ${difficulty})`, value: `÷${difficulty}` });
     const outcome = this.buildOutcome(cards, quality, sum("discipline"), ctx, count);
     // The Pickoff Artist erases anyone left standing on a bag after the play
     if (ctx.boss?.id === "pickoff_artist") {

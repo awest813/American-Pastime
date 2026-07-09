@@ -1,5 +1,5 @@
 import { Control, InputText, Rectangle, StackPanel, type AdvancedDynamicTexture, type Button, type TextBlock } from "@babylonjs/gui/2D";
-import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle, setButtonBackground } from "./kit";
+import { animatePanelIn, UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle, setButtonBackground } from "./kit";
 import { Random } from "../utils/Random";
 import { loadHistory } from "../systems/History";
 import { describeAge, type SaveSummary } from "../systems/Save";
@@ -227,11 +227,13 @@ export class MenuPanel {
     this.homeStack.isVisible = true;
     this.howToStack.isVisible = false;
     this.refreshContinue();
+    animatePanelIn(this.homeStack);
   }
 
   showHowTo(): void {
     this.homeStack.isVisible = false;
     this.howToStack.isVisible = true;
+    animatePanelIn(this.howToStack);
   }
 
   /** Re-read the save slot and show/hide CONTINUE accordingly. Also resets the

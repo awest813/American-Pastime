@@ -1,6 +1,6 @@
 import { Control, Rectangle, type AdvancedDynamicTexture, type StackPanel, type TextBlock } from "@babylonjs/gui/2D";
 import { loadHistory, type RunRecord } from "../systems/History";
-import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
+import { animatePanelIn, UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
 
 /**
  * The Record Book: all-time counters and the last few seasons, win or lose.
@@ -9,6 +9,7 @@ import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } f
  */
 export class HistoryPanel {
   private root: Rectangle;
+  private panel: Rectangle;
   private headline: TextBlock;
   private rows: StackPanel;
 
@@ -23,6 +24,7 @@ export class HistoryPanel {
     adt.addControl(this.root);
 
     const panel = makePanel("760px", "640px");
+    this.panel = panel;
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -86,6 +88,7 @@ export class HistoryPanel {
       }
     }
     this.root.isVisible = true;
+    animatePanelIn(this.panel);
   }
 
   get isOpen(): boolean {

@@ -1,5 +1,5 @@
 import "@babylonjs/core/Culling/ray"; // side-effect: enables scene.pick for card selection
-import { AdvancedDynamicTexture } from "@babylonjs/gui/2D";
+import { AdvancedDynamicTexture, Rectangle } from "@babylonjs/gui/2D";
 import { KeyboardEventTypes } from "@babylonjs/core/Events/keyboardEvents";
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -73,6 +73,8 @@ export class GameScene {
   private approach: BattingApproach = "swing";
   private busy = false;
   private lastSeed = "";
+  /** Full-screen black dip that smooths menu ↔ game scene swaps. */
+  private fader: Rectangle;
 
   private constructor(private scene: Scene, canvas: HTMLCanvasElement, adt: AdvancedDynamicTexture) {
     this.world = new TableWorld(scene, canvas);
@@ -177,7 +179,10 @@ export class GameScene {
     });
 
     // Overlays created last so they render above every other panel
-    this.history = new HistoryPanel(adt, () => this.history.setVisible(false));
+    this.history = new HistoryPanel(adt, () => {
+      this.audio.play("click");
+      this.history.setVisible(false);
+    });
     this.comboBook = new ComboBook(adt, this.run.comboMeta, () => this.toggleComboBook());
     this.pause = new PausePanel(adt, {
       onResume: () => this.pause.setVisible(false),
@@ -197,6 +202,17 @@ export class GameScene {
       onApply: () => this.applySettings(),
     });
     this.applySettings();
+
+    // Transition fader on top of everything; new screens fade up from black.
+    this.fader = new Rectangle("screenFader");
+    this.fader.width = 1;
+    this.fader.height = 1;
+    this.fader.background = "#08080c";
+    this.fader.thickness = 0;
+    this.fader.alpha = 0;
+    this.fader.isVisible = false;
+    this.fader.isPointerBlocker = false;
+    adt.addControl(this.fader);
 
     this.bindPointer();
     this.bindHotkeys();
@@ -249,6 +265,20 @@ export class GameScene {
 
   // ── Run flow ────────────────────────────────────────────────────────────
 
+  /** Fade the freshly swapped screen up from black (call right after the swap). */
+  private fadeIn(): void {
+    this.fader.isVisible = true;
+    const start = performance.now();
+    const duration = 340 / Tweens.timeScale;
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - start) / duration);
+      this.fader.alpha = 0.9 * (1 - t) * (1 - t);
+      if (t >= 1) this.fader.isVisible = false;
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
   private startRun(seed?: string): void {
     this.menu.setVisible(false);
     this.end.setVisible(false);
@@ -261,6 +291,7 @@ export class GameScene {
     this.deck.reset(this.run.deckCards);
     this.hud.setVisible(true);
     this.audio.startAmbience();
+    this.fadeIn();
     void this.beginInning();
   }
 
@@ -335,6 +366,7 @@ export class GameScene {
 
     this.hud.setVisible(true);
     this.audio.startAmbience();
+    this.fadeIn();
     this.updateBoard(this.run.runs);
     this.runnerTokens.set(this.run.runners, this.runnerCapColor);
 
@@ -460,6 +492,7 @@ export class GameScene {
     clearSave(); // abandoning ends the run — no resume point
     this.world.updateScoreboard("CARDBALL", "CLASSIC", "");
     this.menu.setVisible(true);
+    this.fadeIn();
   }
 
   private endRun(victory: boolean): void {
@@ -544,7 +577,7 @@ export class GameScene {
     // Deal with a stagger; new cards fly in from the deck spot with a spin flourish.
     const deals = newCards.map((card3d, i) =>
       this.tweens.delay(i * 90).then(() => {
-        this.audio.play("deal");
+        this.audio.play("deal", i);
         const fromY = -Math.PI * 2;
         const toY = card3d.homeRotation.y;
         void this.tweens.animate(320, (t) => {
@@ -711,7 +744,7 @@ export class GameScene {
     const flights = played.map((card3d, i) => {
       const slot = new Vector3((i - (played.length - 1) / 2) * 1.7, 0.06 + i * 0.005, 1.6);
       return this.tweens.delay(i * 110).then(async () => {
-        this.audio.play("deal");
+        this.audio.play("deal", i);
         void this.tweens.animate(300, (t) => {
           card3d.mesh.rotation.x = HAND_TILT + (Math.PI / 2 - HAND_TILT) * t;
         });
@@ -809,7 +842,7 @@ export class GameScene {
     await Promise.all(
       discarded.map((card3d, i) =>
         this.tweens.delay(i * 70).then(() => {
-          this.audio.play("deal");
+          this.audio.play("deal", i);
           // Tumble end-over-end into the dugout pile
           void this.tweens.animate(300, (t) => {
             card3d.mesh.rotation.z = t * Math.PI * 1.5;

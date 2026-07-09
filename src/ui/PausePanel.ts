@@ -1,5 +1,5 @@
 import { Control, InputText, Rectangle, TextBlock, type AdvancedDynamicTexture } from "@babylonjs/gui/2D";
-import { UI, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
+import { UI, animatePanelIn, makeButton, makePanel, makeRule, makeStack, makeText, makeTitle } from "./kit";
 
 export interface PauseCallbacks {
   onResume: () => void;
@@ -12,6 +12,7 @@ export interface PauseCallbacks {
 /** ESC pause: resume, tweak settings, export a run code, or abandon the run. */
 export class PausePanel {
   private root: Rectangle;
+  private panel: Rectangle;
   private seedText: TextBlock;
   private codeInput: InputText;
   private codeStatus: TextBlock;
@@ -27,6 +28,7 @@ export class PausePanel {
     adt.addControl(this.root);
 
     const panel = makePanel("760px", "640px");
+    this.panel = panel;
     this.root.addControl(panel);
 
     const stack = makeStack();
@@ -116,6 +118,7 @@ export class PausePanel {
   setVisible(visible: boolean, seed = ""): void {
     if (visible) {
       this.seedText.text = `SEED ${seed}`;
+      animatePanelIn(this.panel);
     } else {
       // Reset the export row so the next pause starts clean
       this.codeInput.isVisible = false;

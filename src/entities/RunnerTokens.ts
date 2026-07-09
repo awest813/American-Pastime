@@ -130,6 +130,19 @@ export class RunnerTokens {
     token.root.position.copyFrom(ON_DECK);
     this.popIn(token);
     this.batter = token;
+    // Idle warm-up sway while he waits — stops the moment he's someone else's
+    // token (sprint animations overwrite position/rotation every frame).
+    const idleToken = token;
+    const born = performance.now();
+    const observer = this.scene.onBeforeRenderObservable.add(() => {
+      if (this.batter !== idleToken || idleToken.root.isDisposed()) {
+        this.scene.onBeforeRenderObservable.remove(observer);
+        return;
+      }
+      const t = (performance.now() - born) / 1000;
+      idleToken.root.rotation.z = Math.sin(t * 2.2) * 0.06; // little practice-swing rock
+      idleToken.root.position.y = Math.abs(Math.sin(t * 2.2)) * 0.03;
+    });
   }
 
   /** Snap tokens to a runner state with no animation (inning start, resume). */
@@ -181,6 +194,7 @@ export class RunnerTokens {
         if (reusingBatter) {
           this.batter = null;
           this.batterId = null;
+          arriving.root.rotation.z = 0; // drop the idle sway before the sprint
         } else {
           arriving.root.position.copyFrom(BASE_POS.home);
         }
