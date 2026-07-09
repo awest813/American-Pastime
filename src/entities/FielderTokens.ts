@@ -23,15 +23,15 @@ interface Spot {
  * Positions in world XZ (home is -Z toward the camera, second base +Z).
  */
 const SPOTS: Record<string, Spot> = {
-  pitcher: { pos: [0, -1.2] },
-  catcher: { pos: [0.5, -6.2], crouch: true },
-  first: { pos: [5.4, 1.9] },
-  second: { pos: [2.9, 3.3] },
-  short: { pos: [-2.9, 3.3] },
-  third: { pos: [-5.4, 1.9] },
-  left: { pos: [-6.4, 7.8], outfield: true },
-  center: { pos: [0, 9.4], outfield: true },
-  right: { pos: [6.4, 7.8], outfield: true },
+  pitcher: { pos: [0, -1.4] },
+  catcher: { pos: [1.6, -5.6], crouch: true },
+  first: { pos: [5.6, 2.0] },
+  second: { pos: [3.0, 3.4] },
+  short: { pos: [-3.0, 3.4] },
+  third: { pos: [-5.6, 2.0] },
+  left: { pos: [-6.0, 6.9], outfield: true },
+  center: { pos: [0, 7.9], outfield: true },
+  right: { pos: [6.0, 6.9], outfield: true },
 };
 
 interface Fielder {
@@ -56,10 +56,12 @@ export class FielderTokens {
   private idle: Observer<Scene> | null = null;
 
   constructor(private scene: Scene, private tweens: Tweens) {
-    this.uniformMat = this.solid("fielderUniform", "#3a4152", 0.28);
-    this.skinMat = this.solid("fielderSkin", "#c9996b", 0.34);
-    this.capMat = this.solid("fielderCap", "#8c2f39", 0.42);
-    this.gloveMat = this.solid("fielderGlove", "#6b4a2f", 0.3);
+    // Dim on purpose: the rival defense is ambient background, so the cream
+    // base runners and the played cards stay the brightest things on the field.
+    this.uniformMat = this.solid("fielderUniform", "#333b4a", 0.18);
+    this.skinMat = this.solid("fielderSkin", "#c9996b", 0.24);
+    this.capMat = this.solid("fielderCap", "#7a2a33", 0.3);
+    this.gloveMat = this.solid("fielderGlove", "#6b4a2f", 0.22);
     this.shadowMat = makeShadowMaterial(scene);
   }
 
@@ -87,7 +89,7 @@ export class FielderTokens {
     for (const [name, spot] of Object.entries(SPOTS)) {
       const root = buildPlayer(this.scene, `fielder-${name}`, mats, true);
       root.position.set(spot.pos[0], 0, spot.pos[1]);
-      const scale = spot.crouch ? 0.78 : 0.92; // catcher hunkers down
+      const scale = spot.crouch ? 0.7 : 0.84; // catcher hunkers down
       root.scaling.setAll(scale);
       root.rotation.y = spot.facing ?? 0;
       this.fielders.push({ root, baseY: 0, phase: i * 0.7, outfield: Boolean(spot.outfield) });

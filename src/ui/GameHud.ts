@@ -236,10 +236,9 @@ export class GameHud {
 
     // Situation panel — a broadcast-style "score bug": bases, runners, count,
     // outs, and the inning scorecard. Lives in the left column so it never
-    // covers the runner tokens standing on the actual diamond.
-    this.basePanel = makePanel("236px", "258px");
-    this.basePanel.background = "rgba(16, 20, 24, 0.74)";
-    this.basePanel.thickness = 1;
+    // covers the runner tokens standing on the actual diamond. Matches the
+    // pitch/gear cards above it in width and styling for a clean column.
+    this.basePanel = makePanel("300px", "258px");
     this.basePanel.isPointerBlocker = false;
     topLeft(this.basePanel);
     this.basePanel.left = "32px";
@@ -309,7 +308,7 @@ export class GameHud {
     this.basePanel.addControl(this.scorecardTitle);
     this.scorecardText = makeText("", 12, UI.cream);
     this.scorecardText.fontFamily = UI.mono;
-    this.scorecardText.width = "212px";
+    this.scorecardText.width = "276px";
     this.scorecardText.height = "64px";
     this.scorecardText.left = "12px";
     this.scorecardText.top = "184px";
